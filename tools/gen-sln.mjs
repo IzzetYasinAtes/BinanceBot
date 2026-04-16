@@ -71,11 +71,11 @@ const skillFiles = (prefix) => {
 const groups = [
   // Root seviye dosyalar → VS konvansiyonu "Solution Items"
   { guid: SOLUTION_ITEMS_F, name: 'Solution Items',
-    files: ['CLAUDE.md', 'README.md', 'LICENSE', '.gitignore', 'BinanceBot.sln'].filter(exists),
+    files: ['CLAUDE.md', 'README.md', 'LICENSE', '.gitignore', 'BinanceBot.sln', '.mcp.json'].filter(exists),
     parent: null },
   // .claude tree
   { guid: CLAUDE_F, name: '.claude',
-    files: ['.claude/mcp.json', '.claude/settings.json'].filter(exists),
+    files: ['.claude/settings.json'].filter(exists),
     parent: null },
   { guid: AGENTS_F, name: 'agents',
     files: listFiles('.claude/agents', p => p.endsWith('.md')),

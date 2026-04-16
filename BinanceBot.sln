@@ -28,11 +28,11 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Solution Items", "Solution 
 		LICENSE = LICENSE
 		.gitignore = .gitignore
 		BinanceBot.sln = BinanceBot.sln
+		.mcp.json = .mcp.json
 	EndProjectSection
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = ".claude", ".claude", "{A0000005-0000-0000-0000-000000000001}"
 	ProjectSection(SolutionItems) = preProject
-		.claude\mcp.json = .claude\mcp.json
 		.claude\settings.json = .claude\settings.json
 	EndProjectSection
 EndProject

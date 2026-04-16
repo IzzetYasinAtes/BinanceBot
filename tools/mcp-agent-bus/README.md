@@ -1,6 +1,6 @@
 # mcp-agent-bus
 
-BinanceBot workspace'inin **agent iletişim omurgası**. .NET 10 console app, stdio transport ile MCP server olarak çalışır. Claude Code session'ı başladığında `.claude/mcp.json` tarafından spawn edilir.
+BinanceBot workspace'inin **agent iletişim omurgası**. .NET 10 console app, stdio transport ile MCP server olarak çalışır. Claude Code session'ı başladığında `.mcp.json` tarafından spawn edilir.
 
 ## Sağladığı Tool'lar
 
@@ -25,7 +25,7 @@ dotnet build -c Release
 dotnet run -c Release
 ```
 
-Claude Code otomatik olarak `.claude/mcp.json`'daki tanımla başlatır; manuel run'a gerek yok.
+Claude Code otomatik olarak `.mcp.json`'daki tanımla başlatır; manuel run'a gerek yok.
 
 ## Mimari
 

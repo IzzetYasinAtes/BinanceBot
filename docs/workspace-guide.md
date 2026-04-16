@@ -15,7 +15,7 @@ BinanceBot AI workspace'inde **nasıl çalışacağın** — PM'le nasıl konuş
    ```
 2. **Claude Code'u aç** — bu repo içinde. Otomatik:
    - `CLAUDE.md` yüklenir.
-   - `.claude/mcp.json`'daki 3 MCP server başlatılır (agent-bus, playwright, memory).
+   - `.mcp.json`'daki 3 MCP server başlatılır (agent-bus, playwright, memory).
    - `.claude/settings.json` hook'ları aktifleşir.
 3. **Konuş:** PM (Proje Yöneticisi) karşılar. Türkçe yaz.
 
