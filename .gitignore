@@ -416,3 +416,9 @@ FodyWeavers.xsd
 *.msix
 *.msm
 *.msp
+
+# Claude Code per-user local settings
+.claude/settings.local.json
+
+# Stray .ai-trace (root .ai-trace is tracked; subdirs are not)
+tools/**/.ai-trace/

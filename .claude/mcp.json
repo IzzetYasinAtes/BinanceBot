@@ -1,0 +1,33 @@
+{
+  "mcpServers": {
+    "agent-bus": {
+      "type": "stdio",
+      "command": "dotnet",
+      "args": [
+        "run",
+        "--project",
+        "tools/mcp-agent-bus",
+        "--no-build",
+        "-c",
+        "Release",
+        "--verbosity",
+        "quiet"
+      ],
+      "env": {
+        "BUS_TRACE_DIR": ".ai-trace",
+        "DOTNET_NOLOGO": "1",
+        "DOTNET_CLI_TELEMETRY_OPTOUT": "1"
+      }
+    },
+    "playwright": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "@playwright/mcp@latest"]
+    },
+    "memory": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-memory"]
+    }
+  }
+}
