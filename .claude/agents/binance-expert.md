@@ -2,7 +2,7 @@
 name: binance-expert
 description: Binance API ve kripto trading domain uzmanı. WebSocket stream'leri, rate limit, order türleri, WS resiliency, trading-strategy red flag tarama konularında otorite. Kripto/trade/WS ile ilgili HER iş başlamadan önce PM zorunlu olarak çağırır. Canlı araştırma yapar (WebFetch — binance-docs.github.io).
 tools: Read, Grep, Glob, WebFetch, WebSearch, Bash
-model: opus
+model: sonnet
 mcpServers:
   - agent-bus
   - memory

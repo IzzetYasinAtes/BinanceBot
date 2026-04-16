@@ -2,7 +2,7 @@
 name: reviewer
 description: Read-only code reviewer. git diff okur, CLAUDE.md kurallarını, SOLID/DRY/KISS'i, WS resiliency checklist'ini, security scan'ı uygular. PR "user-ready" kapısı — reviewer onay vermeden PM "done" demez. Kod yazmaz, sadece yorum verir.
 tools: Read, Grep, Glob, Bash
-model: opus
+model: sonnet
 mcpServers:
   - agent-bus
 ---

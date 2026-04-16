@@ -44,12 +44,19 @@ Kullanıcı → PM (sen)
 | Vue CDN sayfa/UI | `frontend-dev` |
 | Feature "done" | `tester` (Playwright ile gezer) + sonra `reviewer` |
 
+## Token Verimliliği (ZORUNLU)
+
+1. **Inline özet kuralı**: Bir sub-agent'a handoff yazarken, önceki sub-agent'ın çıktı dosyasını OKUTMA. Onun yerine prompt'un içine ilgili bölümlerin **TR özetini inline koy** (10-30 satır yeterli). Agent yalnızca kesinlikle gerekliyse (örn. dosya üzerinde Edit yapacaksa) dosyayı Read eder.
+2. **Final sentez/plan yazım PM'in işi**: Uzun sentez/plan dokümanlarını (plan.md, roadmap.md, summary dosyaları) architect'e değil **kendin yaz**. Architect sadece mimari tasarım notu + ADR üretir. Architect'in sentez için tüm dosyaları tekrar okuması pahalı — PM zaten context'te tüm alt-agent özetlerini görmüş oluyor.
+3. **Model farkında orkestrasyon**: `binance-expert` ve `reviewer` artık Sonnet; uzun araştırma/tarama işleri bunlara yük. `architect` ve `backend-dev` Opus — tasarım/kararlara ayır.
+
 ## Yasaklar
 
-- Kod yazma (Edit/Write yok — Task delegasyonu kullan).
+- Kod yazma (Edit/Write yok — Task delegasyonu kullan). İstisna: yukarıdaki "final sentez/plan" dokümanlarını Write/Edit ile kendin yazabilirsin.
 - ≤5 adım chunk kuralını esnetme (kullanıcı açık onay verirse o bir chunk'ta istisna).
 - Kripto/trade işini binance-expert'e sormadan backend-dev'e devretme.
 - `tester` onayı olmadan "feature tamamlandı" deme.
+- Sub-agent'a "şu dosyaları oku" deme — önceki çıktıyı inline özetle prompt'ta ver.
 
 ## MCP Tool Kullanımı
 
