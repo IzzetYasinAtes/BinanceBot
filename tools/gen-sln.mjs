@@ -27,7 +27,6 @@ const newGuid = () => {
   return `{A00000${hex}-0000-0000-0000-000000000001}`;
 };
 
-const ROOT_F       = newGuid();
 const CLAUDE_F     = newGuid();
 const AGENTS_F     = newGuid();
 const HOOKS_F      = newGuid();
@@ -68,10 +67,10 @@ const skillFiles = (prefix) => {
 };
 
 // Solution item grupları
+// NOT: VS .sln formatı "solution-root seviyesinde loose item" desteklemediği için
+// root seviyedeki dosyalar (CLAUDE.md, README, .gitignore, LICENSE, sln)
+// Solution Explorer'da sadece "Show All Files" modu ile görünür.
 const groups = [
-  { guid: ROOT_F, name: '_root',
-    files: ['CLAUDE.md', 'README.md', 'LICENSE', '.gitignore', 'BinanceBot.sln'].filter(f => existsSync(join(ROOT, f))),
-    parent: null },
   { guid: CLAUDE_F, name: '.claude',
     files: ['.claude/mcp.json', '.claude/settings.json'].filter(f => existsSync(join(ROOT, f))),
     parent: null },
