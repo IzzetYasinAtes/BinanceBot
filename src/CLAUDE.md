@@ -1,11 +1,11 @@
-# src/Backend/ — CLAUDE.md
+# src/ — CLAUDE.md
 
-Bu dosya `src/Backend/**` altındaki herhangi bir dosya okunduğunda otomatik yüklenir. Backend-dev agent'ı buraya tabidir.
+Bu dosya `src/**` altındaki herhangi bir dosya okunduğunda otomatik yüklenir. Backend-dev agent'ı buraya tabidir.
 
 ## Solution Layout
 
 ```
-src/Backend/
+src/
 ├── BinanceBot.sln
 ├── Domain/                       # entity, VO, domain event, aggregate root
 │   └── <Aggregate>/

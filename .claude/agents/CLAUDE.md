@@ -9,7 +9,7 @@ Bir agent iş alırken (PM'den Task tool ile çağrıldığında) zarf formatı:
 ```
 task_id: <PM tarafından atanır, örn. T-2026-04-16-001>
 scope: <TR tek cümle — ne yapılacak>
-in_scope_paths: [list of path globs, örn. src/Backend/**]
+in_scope_paths: [list of path globs, örn. src/**]
 done_definition: <ne olunca "bitti" sayılır>
 forbidden_paths: [<dokunulmayacak yerler>]
 log_path: .ai-trace/   (her karar MCP'ye)
@@ -22,7 +22,7 @@ PM `pm-handoff` skill'i ile bu zarfı üretir ve MCP `append_handoff` çağırı
 Her agent'ın `tools:` frontmatter'ı **minimum erişim** prensibine göre yazılır:
 
 - `architect` — Read + Grep + Glob + Write(docs/adr/**). Kod yazmaz.
-- `backend-dev` — Edit + Write(src/Backend/**, tools/mcp-agent-bus/**) + Bash(dotnet *). Frontend'e yazmaz.
+- `backend-dev` — Edit + Write(src/**, tools/mcp-agent-bus/**) + Bash(dotnet *). Frontend'e yazmaz.
 - `frontend-dev` — Edit + Write(src/Frontend/**). Backend'e yazmaz.
 - `binance-expert` — Read + Grep + Glob + WebFetch. Kod yazmaz, sadece araştırır ve rehberlik eder.
 - `reviewer` — Read + Grep + Glob + Bash(git diff/status). Write yasak.

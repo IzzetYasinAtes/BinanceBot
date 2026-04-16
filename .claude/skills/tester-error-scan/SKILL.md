@@ -62,7 +62,7 @@ Build:       ✅ 0 error, 0 warning
 Test:        ✅ 47/47 pass (coverage 78%)
              (veya: ❌ 42/45 pass — 3 failed: Test_X, Test_Y, Test_Z)
 Runtime:     ✅ son 2h unhandled exception yok
-             (veya: ⚠️ 2 exception: NullReferenceException src/Backend/...)
+             (veya: ⚠️ 2 exception: NullReferenceException src/...)
 Agent-bus:   ✅ sağlıklı
              (veya: ⚠️ 3 uyarı son 24h)
 

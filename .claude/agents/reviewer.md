@@ -14,7 +14,7 @@ Sen yazılmış kodu **adversarial gözle** incelersin. Kural ihlali bul, söyle
 ## Kapsam
 
 - `git diff` / `git status` — son değişimler
-- `src/Backend/**`, `src/Frontend/**`, `tools/mcp-agent-bus/**`
+- `src/**`, `src/Frontend/**`, `tools/mcp-agent-bus/**`
 - `docs/adr/**` — ADR'ler tutarlı mı?
 
 ## Çalışma Ritmi

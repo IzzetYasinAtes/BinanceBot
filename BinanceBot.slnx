@@ -1,0 +1,108 @@
+<Solution>
+  <File Path="CLAUDE.md" />
+  <File Path="README.md" />
+  <File Path="LICENSE" />
+  <File Path=".gitignore" />
+  <Folder Name="/src/">
+    <Project Path="src\Domain\BinanceBot.Domain.csproj" />
+    <Project Path="src\Application\BinanceBot.Application.csproj" />
+    <Project Path="src\Infrastructure\BinanceBot.Infrastructure.csproj" />
+    <Project Path="src\Api\BinanceBot.Api.csproj" />
+    <File Path="src\CLAUDE.md" />
+    <Folder Name="/src/Frontend/">
+      <File Path="src\Frontend\CLAUDE.md" />
+    </Folder>
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests\Tests\BinanceBot.Tests.csproj" />
+  </Folder>
+  <Folder Name="/tools/">
+    <Project Path="tools\mcp-agent-bus\mcp-agent-bus.csproj" />
+    <Folder Name="/tools/mcp-agent-bus/">
+      <File Path="tools\mcp-agent-bus\CLAUDE.md" />
+      <File Path="tools\mcp-agent-bus\README.md" />
+    </Folder>
+    <File Path="tools\gen-sln.mjs" />
+  </Folder>
+  <Folder Name="/.claude/">
+    <File Path=".claude\mcp.json" />
+    <File Path=".claude\settings.json" />
+  </Folder>
+  <Folder Name="/.claude/agents/">
+    <File Path=".claude\agents\CLAUDE.md" />
+    <File Path=".claude\agents\architect.md" />
+    <File Path=".claude\agents\backend-dev.md" />
+    <File Path=".claude\agents\binance-expert.md" />
+    <File Path=".claude\agents\frontend-dev.md" />
+    <File Path=".claude\agents\pm.md" />
+    <File Path=".claude\agents\reviewer.md" />
+    <File Path=".claude\agents\tester.md" />
+  </Folder>
+  <Folder Name="/.claude/hooks/">
+    <File Path=".claude\hooks\trace.sh" />
+  </Folder>
+  <Folder Name="/.claude/skills/" />
+  <Folder Name="/.claude/skills/pm/">
+    <File Path=".claude\skills\pm-decompose\SKILL.md" />
+    <File Path=".claude\skills\pm-handoff\SKILL.md" />
+    <File Path=".claude\skills\pm-read-user-notes\SKILL.md" />
+    <File Path=".claude\skills\pm-status\SKILL.md" />
+  </Folder>
+  <Folder Name="/.claude/skills/architect/">
+    <File Path=".claude\skills\architect-adr\SKILL.md" />
+    <File Path=".claude\skills\architect-cqrs-design\SKILL.md" />
+    <File Path=".claude\skills\architect-ddd-review\SKILL.md" />
+  </Folder>
+  <Folder Name="/.claude/skills/backend/">
+    <File Path=".claude\skills\backend-cqrs-trio\SKILL.md" />
+    <File Path=".claude\skills\backend-ef-migration\SKILL.md" />
+    <File Path=".claude\skills\backend-endpoint\SKILL.md" />
+    <File Path=".claude\skills\backend-polly-resiliency\SKILL.md" />
+    <File Path=".claude\skills\backend-result-type\SKILL.md" />
+  </Folder>
+  <Folder Name="/.claude/skills/frontend/">
+    <File Path=".claude\skills\frontend-api-client\SKILL.md" />
+    <File Path=".claude\skills\frontend-importmap\SKILL.md" />
+    <File Path=".claude\skills\frontend-reactive-state\SKILL.md" />
+    <File Path=".claude\skills\frontend-vue-page\SKILL.md" />
+  </Folder>
+  <Folder Name="/.claude/skills/binance/">
+    <File Path=".claude\skills\binance-order-type-guide\SKILL.md" />
+    <File Path=".claude\skills\binance-rate-limit-analysis\SKILL.md" />
+    <File Path=".claude\skills\binance-research\SKILL.md" />
+    <File Path=".claude\skills\binance-trading-strategy-review\SKILL.md" />
+    <File Path=".claude\skills\binance-ws-stream-design\SKILL.md" />
+  </Folder>
+  <Folder Name="/.claude/skills/reviewer/">
+    <File Path=".claude\skills\reviewer-diff-review\SKILL.md" />
+    <File Path=".claude\skills\reviewer-security-scan\SKILL.md" />
+    <File Path=".claude\skills\reviewer-solid-check\SKILL.md" />
+    <File Path=".claude\skills\reviewer-ws-resiliency\SKILL.md" />
+  </Folder>
+  <Folder Name="/.claude/skills/tester/">
+    <File Path=".claude\skills\tester-api-contract\SKILL.md" />
+    <File Path=".claude\skills\tester-db-sanity\SKILL.md" />
+    <File Path=".claude\skills\tester-error-scan\SKILL.md" />
+    <File Path=".claude\skills\tester-playwright-scenario\SKILL.md" />
+  </Folder>
+  <Folder Name="/.claude/skills/global/">
+    <File Path=".claude\skills\tell-pm\SKILL.md" />
+  </Folder>
+  <Folder Name="/docs/">
+    <File Path="docs\CLAUDE.md" />
+    <File Path="docs\glossary.md" />
+    <File Path="docs\workspace-guide.md" />
+  </Folder>
+  <Folder Name="/docs/sources/">
+    <File Path="docs\sources\REFERENCES.md" />
+  </Folder>
+  <Folder Name="/.ai-trace/">
+    <File Path=".ai-trace\.gitignore" />
+    <File Path=".ai-trace\README.md" />
+    <File Path=".ai-trace\decisions.jsonl" />
+    <File Path=".ai-trace\handoffs.jsonl" />
+    <File Path=".ai-trace\task-state.json" />
+    <File Path=".ai-trace\user-notes.jsonl" />
+  </Folder>
+  <Folder Name="/.github/" />
+</Solution>

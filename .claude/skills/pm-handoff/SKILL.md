@@ -27,7 +27,7 @@ return_format: <kısa TR özet + önemli dosya listeleri>
 
 1. Task id'si oluştur: `T-<UTC-date>-<sıralı>` (aynı günde artan sayı).
 2. Scope'u tek cümle Türkçe yaz. Muğlak olmasın — "X özelliğini şuraya ekle" gibi.
-3. `in_scope_paths` sadece agent'ın kendi tool-scope'una uyanlar (örn. backend-dev için `src/Backend/**`).
+3. `in_scope_paths` sadece agent'ın kendi tool-scope'una uyanlar (örn. backend-dev için `src/**`).
 4. `done_definition` ölçülebilir olsun ("X endpoint çalışıyor ve Z test yeşil").
 5. `forbidden_paths`'i **açıkça** yaz — agent oraya yazmaya kalkmasın.
 6. MCP `agent-bus.append_handoff(from_agent="pm", to_agent=<name>, task_id=..., scope=..., done_definition=..., forbidden_paths=...)` çağır.

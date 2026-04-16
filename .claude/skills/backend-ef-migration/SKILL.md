@@ -10,7 +10,7 @@ Code First migration'ı projeye doğru yerde eklemek için checklist.
 ## Proje Yapısı
 
 ```
-src/Backend/
+src/
   Domain/                 # entity'ler + VO'lar (EF attribute YOK)
   Application/            # handler'lar
   Infrastructure/
@@ -74,7 +74,7 @@ protected override void OnModelCreating(ModelBuilder modelBuilder)
 4. **Migration ekle:**
 
 ```bash
-cd src/Backend
+cd src
 dotnet ef migrations add Add<Action> --project Infrastructure --startup-project Api --context ApplicationDbContext
 ```
 

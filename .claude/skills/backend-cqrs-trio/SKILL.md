@@ -9,7 +9,7 @@ Her yeni command/query için deterministic iskelet. Kural: 3 dosya, tek feature 
 
 ## Command Trio
 
-Dosyalar: `src/Backend/Application/<Feature>/Commands/<Action>Command.cs`, `<Action>CommandHandler.cs`, `<Action>CommandValidator.cs`.
+Dosyalar: `src/Application/<Feature>/Commands/<Action>Command.cs`, `<Action>CommandHandler.cs`, `<Action>CommandValidator.cs`.
 
 ```csharp
 // <Action>Command.cs
@@ -70,7 +70,7 @@ public sealed class <Action>CommandValidator : AbstractValidator<<Action>Command
 
 ## Query Trio
 
-Dosyalar: `src/Backend/Application/<Feature>/Queries/Get<X>Query.cs`, `Get<X>QueryHandler.cs`, `<X>Dto.cs`.
+Dosyalar: `src/Application/<Feature>/Queries/Get<X>Query.cs`, `Get<X>QueryHandler.cs`, `<X>Dto.cs`.
 
 ```csharp
 // <X>Dto.cs

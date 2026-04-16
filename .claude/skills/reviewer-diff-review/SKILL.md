@@ -13,7 +13,7 @@ Her değişen dosyayı aç, satır satır oku, yorum yaz.
 2. `git diff main -- <file>` — dosya bazlı diff.
 3. Her dosya için:
    - Yeni mi / değiştirilmiş mi?
-   - Path doğru yerde mi? (backend → `src/Backend`, frontend → `src/Frontend`)
+   - Path doğru yerde mi? (backend → `src`, frontend → `src/Frontend`)
    - CLAUDE.md kurallarını ihlal ediyor mu? (npm, lazy loading, throw-for-flow, vb.)
    - Pattern uyumu? (Result<T>, CQRS, Polly, reactive())
 4. Satır yorumu:
@@ -51,15 +51,15 @@ Her değişen dosyayı aç, satır satır oku, yorum yaz.
 📋 Review: feat/ingest-klines branch'i
 
 Kural İhlalleri:
-  🚫 [blocker] src/Backend/Application/Klines/IngestKlineCommandHandler.cs:47
+  🚫 [blocker] src/Application/Klines/IngestKlineCommandHandler.cs:47
      — Exception-for-flow yasak. `throw new InvalidOperationException` yerine `Result.Invalid(...)` kullan.
   ⚠️ [minor] src/Frontend/js/pages/klines.js:23
      — `fetch('/api/...')` direkt çağrı. `api.get(...)` wrapper'ından geçir.
-  💡 [sug] src/Backend/Domain/Klines/Kline.cs:12
+  💡 [sug] src/Domain/Klines/Kline.cs:12
      — Constructor'da validation var ama Result<T> dönmüyor; static factory (`Kline.Create(...)`) Result<Kline> dönebilir.
 
 İyi Yanlar:
-  ✅ src/Backend/Infrastructure/MarketData/BinanceWsSupervisor.cs — reconnect+backoff+jitter doğru uygulanmış.
+  ✅ src/Infrastructure/MarketData/BinanceWsSupervisor.cs — reconnect+backoff+jitter doğru uygulanmış.
 
 WS Resiliency:
   ✓ Exponential backoff

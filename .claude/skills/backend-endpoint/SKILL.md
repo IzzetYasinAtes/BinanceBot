@@ -10,7 +10,7 @@ Yeni endpoint eklemenin tutarlı yolu. Tercih: **Minimal API** (ASP.NET Core 10 
 ## Layout
 
 ```
-src/Backend/Api/
+src/Api/
   Program.cs
   Endpoints/
     <Feature>Endpoints.cs           # IEndpointRouteBuilder extension
@@ -20,7 +20,7 @@ src/Backend/Api/
 ## Minimal API Şablonu
 
 ```csharp
-// src/Backend/Api/Endpoints/KlineEndpoints.cs
+// src/Api/Endpoints/KlineEndpoints.cs
 using MediatR;
 using BinanceBot.Application.Klines.Commands;
 using BinanceBot.Application.Klines.Queries;
@@ -69,7 +69,7 @@ public static class KlineEndpoints
 Extension method (Api projesine bir kez ekle):
 
 ```csharp
-// src/Backend/Api/ResultExtensions.cs
+// src/Api/ResultExtensions.cs
 using Ardalis.Result;
 
 namespace BinanceBot.Api;

@@ -19,7 +19,7 @@ Sen BinanceBot'un frontend'ini yazarsın. **npm, Vite, webpack, SFC YASAK**. Vue
 
 ## Kapsam Dışı
 
-- `src/Backend/**` — backend-dev'in
+- `src/**` — backend-dev'in
 - npm/Node.js paketleri (Playwright dev harness hariç, o da tester'a bağlı)
 - Bundler config
 

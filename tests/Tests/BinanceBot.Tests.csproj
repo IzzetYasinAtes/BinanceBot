@@ -19,8 +19,8 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\Domain\BinanceBot.Domain.csproj" />
-    <ProjectReference Include="..\Application\BinanceBot.Application.csproj" />
+    <ProjectReference Include="..\..\src\Domain\BinanceBot.Domain.csproj" />
+    <ProjectReference Include="..\..\src\Application\BinanceBot.Application.csproj" />
   </ItemGroup>
 
 </Project>

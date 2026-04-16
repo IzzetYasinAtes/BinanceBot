@@ -88,7 +88,7 @@ ls docs/adr/
 |---|---|---|---|
 | `pm` | sonnet | agent-bus | Orchestrate + user conversation |
 | `architect` | opus | agent-bus, memory | ADR + DDD/Clean/CQRS sınır |
-| `backend-dev` | sonnet | agent-bus | src/Backend/** + tools/mcp-agent-bus/** |
+| `backend-dev` | sonnet | agent-bus | src/** + tools/mcp-agent-bus/** |
 | `frontend-dev` | sonnet | agent-bus | src/Frontend/** |
 | `binance-expert` | opus | agent-bus, memory | Kripto domain danışmanı (zorunlu) |
 | `reviewer` | sonnet | agent-bus | Read-only diff review |
