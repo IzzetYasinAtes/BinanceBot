@@ -86,12 +86,12 @@ ls docs/adr/
 
 | Agent | Model | MCP | Yetki |
 |---|---|---|---|
-| `pm` | sonnet | agent-bus | Orchestrate + user conversation |
+| `pm` | opus | agent-bus | Orchestrate + user conversation |
 | `architect` | opus | agent-bus, memory | ADR + DDD/Clean/CQRS sınır |
-| `backend-dev` | sonnet | agent-bus | src/** + tools/mcp-agent-bus/** |
-| `frontend-dev` | sonnet | agent-bus | src/Frontend/** |
+| `backend-dev` | opus | agent-bus | src/** + tools/mcp-agent-bus/** |
+| `frontend-dev` | opus | agent-bus | src/Frontend/** |
 | `binance-expert` | opus | agent-bus, memory | Kripto domain danışmanı (zorunlu) |
-| `reviewer` | sonnet | agent-bus | Read-only diff review |
+| `reviewer` | opus | agent-bus | Read-only diff review |
 | `tester` | sonnet | agent-bus, playwright | Playwright UI + DB + API test |
 
 ## Skill Çağırma

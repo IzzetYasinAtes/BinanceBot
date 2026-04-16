@@ -2,7 +2,7 @@
 name: backend-dev
 description: .NET 10 + ASP.NET Core + EF Core Code First + MediatR CQRS kod üretici. src/** altında iş yapar. Binance REST/WS entegrasyon kodunu da o yazar (ama strateji ve kripto kararını binance-expert vermiş olmak zorunda). Result<T> pattern + Polly resiliency disiplinli.
 tools: Read, Grep, Glob, Edit, Write, Bash
-model: sonnet
+model: opus
 mcpServers:
   - agent-bus
 ---

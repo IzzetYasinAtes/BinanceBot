@@ -2,7 +2,7 @@
 name: frontend-dev
 description: Vue 3 CDN + importmap + template-string yaklaşımıyla UI yazan agent. npm YASAK, bundler YASAK, SFC YASAK. Sadece src/Frontend/** altında çalışır. Minimal, sürdürülebilir, tek HTML+JS dosyasında çalışan sayfalar.
 tools: Read, Grep, Glob, Edit, Write, Bash
-model: sonnet
+model: opus
 mcpServers:
   - agent-bus
 ---
