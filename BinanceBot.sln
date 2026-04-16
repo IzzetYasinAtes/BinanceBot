@@ -1,4 +1,4 @@
-﻿
+
 Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 17
 VisualStudioVersion = 17.0.31903.59
@@ -20,6 +20,126 @@ EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tools", "tools", "{07C2787E-EAC7-C090-1BA3-A61EC2A24D84}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "mcp-agent-bus", "tools\mcp-agent-bus\mcp-agent-bus.csproj", "{362587C9-0992-442E-9111-39CDA636CACD}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "_root", "_root", "{A0000001-0000-0000-0000-000000000001}"
+	ProjectSection(SolutionItems) = preProject
+		CLAUDE.md = CLAUDE.md
+		README.md = README.md
+		LICENSE = LICENSE
+		.gitignore = .gitignore
+		BinanceBot.sln = BinanceBot.sln
+	EndProjectSection
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = ".claude", ".claude", "{A0000002-0000-0000-0000-000000000001}"
+	ProjectSection(SolutionItems) = preProject
+		.claude\mcp.json = .claude\mcp.json
+		.claude\settings.json = .claude\settings.json
+	EndProjectSection
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "agents", "agents", "{A0000003-0000-0000-0000-000000000001}"
+	ProjectSection(SolutionItems) = preProject
+		.claude\agents\CLAUDE.md = .claude\agents\CLAUDE.md
+		.claude\agents\architect.md = .claude\agents\architect.md
+		.claude\agents\backend-dev.md = .claude\agents\backend-dev.md
+		.claude\agents\binance-expert.md = .claude\agents\binance-expert.md
+		.claude\agents\frontend-dev.md = .claude\agents\frontend-dev.md
+		.claude\agents\pm.md = .claude\agents\pm.md
+		.claude\agents\reviewer.md = .claude\agents\reviewer.md
+		.claude\agents\tester.md = .claude\agents\tester.md
+	EndProjectSection
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "hooks", "hooks", "{A0000004-0000-0000-0000-000000000001}"
+	ProjectSection(SolutionItems) = preProject
+		.claude\hooks\trace.sh = .claude\hooks\trace.sh
+	EndProjectSection
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "skills", "skills", "{A0000005-0000-0000-0000-000000000001}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "pm", "pm", "{A0000006-0000-0000-0000-000000000001}"
+	ProjectSection(SolutionItems) = preProject
+		.claude\skills\pm-decompose\SKILL.md = .claude\skills\pm-decompose\SKILL.md
+		.claude\skills\pm-handoff\SKILL.md = .claude\skills\pm-handoff\SKILL.md
+		.claude\skills\pm-read-user-notes\SKILL.md = .claude\skills\pm-read-user-notes\SKILL.md
+		.claude\skills\pm-status\SKILL.md = .claude\skills\pm-status\SKILL.md
+	EndProjectSection
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "architect", "architect", "{A0000007-0000-0000-0000-000000000001}"
+	ProjectSection(SolutionItems) = preProject
+		.claude\skills\architect-adr\SKILL.md = .claude\skills\architect-adr\SKILL.md
+		.claude\skills\architect-cqrs-design\SKILL.md = .claude\skills\architect-cqrs-design\SKILL.md
+		.claude\skills\architect-ddd-review\SKILL.md = .claude\skills\architect-ddd-review\SKILL.md
+	EndProjectSection
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "backend", "backend", "{A0000008-0000-0000-0000-000000000001}"
+	ProjectSection(SolutionItems) = preProject
+		.claude\skills\backend-cqrs-trio\SKILL.md = .claude\skills\backend-cqrs-trio\SKILL.md
+		.claude\skills\backend-ef-migration\SKILL.md = .claude\skills\backend-ef-migration\SKILL.md
+		.claude\skills\backend-endpoint\SKILL.md = .claude\skills\backend-endpoint\SKILL.md
+		.claude\skills\backend-polly-resiliency\SKILL.md = .claude\skills\backend-polly-resiliency\SKILL.md
+		.claude\skills\backend-result-type\SKILL.md = .claude\skills\backend-result-type\SKILL.md
+	EndProjectSection
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "frontend", "frontend", "{A0000009-0000-0000-0000-000000000001}"
+	ProjectSection(SolutionItems) = preProject
+		.claude\skills\frontend-api-client\SKILL.md = .claude\skills\frontend-api-client\SKILL.md
+		.claude\skills\frontend-importmap\SKILL.md = .claude\skills\frontend-importmap\SKILL.md
+		.claude\skills\frontend-reactive-state\SKILL.md = .claude\skills\frontend-reactive-state\SKILL.md
+		.claude\skills\frontend-vue-page\SKILL.md = .claude\skills\frontend-vue-page\SKILL.md
+	EndProjectSection
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "binance", "binance", "{A000000A-0000-0000-0000-000000000001}"
+	ProjectSection(SolutionItems) = preProject
+		.claude\skills\binance-order-type-guide\SKILL.md = .claude\skills\binance-order-type-guide\SKILL.md
+		.claude\skills\binance-rate-limit-analysis\SKILL.md = .claude\skills\binance-rate-limit-analysis\SKILL.md
+		.claude\skills\binance-research\SKILL.md = .claude\skills\binance-research\SKILL.md
+		.claude\skills\binance-trading-strategy-review\SKILL.md = .claude\skills\binance-trading-strategy-review\SKILL.md
+		.claude\skills\binance-ws-stream-design\SKILL.md = .claude\skills\binance-ws-stream-design\SKILL.md
+	EndProjectSection
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "reviewer", "reviewer", "{A000000B-0000-0000-0000-000000000001}"
+	ProjectSection(SolutionItems) = preProject
+		.claude\skills\reviewer-diff-review\SKILL.md = .claude\skills\reviewer-diff-review\SKILL.md
+		.claude\skills\reviewer-security-scan\SKILL.md = .claude\skills\reviewer-security-scan\SKILL.md
+		.claude\skills\reviewer-solid-check\SKILL.md = .claude\skills\reviewer-solid-check\SKILL.md
+		.claude\skills\reviewer-ws-resiliency\SKILL.md = .claude\skills\reviewer-ws-resiliency\SKILL.md
+	EndProjectSection
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tester", "tester", "{A000000C-0000-0000-0000-000000000001}"
+	ProjectSection(SolutionItems) = preProject
+		.claude\skills\tester-api-contract\SKILL.md = .claude\skills\tester-api-contract\SKILL.md
+		.claude\skills\tester-db-sanity\SKILL.md = .claude\skills\tester-db-sanity\SKILL.md
+		.claude\skills\tester-error-scan\SKILL.md = .claude\skills\tester-error-scan\SKILL.md
+		.claude\skills\tester-playwright-scenario\SKILL.md = .claude\skills\tester-playwright-scenario\SKILL.md
+	EndProjectSection
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "global", "global", "{A000000D-0000-0000-0000-000000000001}"
+	ProjectSection(SolutionItems) = preProject
+		.claude\skills\tell-pm\SKILL.md = .claude\skills\tell-pm\SKILL.md
+	EndProjectSection
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "docs", "docs", "{A000000E-0000-0000-0000-000000000001}"
+	ProjectSection(SolutionItems) = preProject
+		docs\CLAUDE.md = docs\CLAUDE.md
+		docs\glossary.md = docs\glossary.md
+		docs\workspace-guide.md = docs\workspace-guide.md
+	EndProjectSection
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "sources", "sources", "{A000000F-0000-0000-0000-000000000001}"
+	ProjectSection(SolutionItems) = preProject
+		docs\sources\REFERENCES.md = docs\sources\REFERENCES.md
+	EndProjectSection
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = ".ai-trace", ".ai-trace", "{A0000010-0000-0000-0000-000000000001}"
+	ProjectSection(SolutionItems) = preProject
+		.ai-trace\.gitignore = .ai-trace\.gitignore
+		.ai-trace\README.md = .ai-trace\README.md
+		.ai-trace\decisions.jsonl = .ai-trace\decisions.jsonl
+		.ai-trace\handoffs.jsonl = .ai-trace\handoffs.jsonl
+		.ai-trace\task-state.json = .ai-trace\task-state.json
+		.ai-trace\user-notes.jsonl = .ai-trace\user-notes.jsonl
+	EndProjectSection
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = ".github", ".github", "{A0000011-0000-0000-0000-000000000001}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -115,5 +235,17 @@ Global
 		{C857F05B-DF61-4B70-8417-78DE9E2F72FA} = {FE360695-3F2B-1049-3887-35FBB5135923}
 		{FF82C35E-C4DB-4B69-B745-40F30A10BE81} = {FE360695-3F2B-1049-3887-35FBB5135923}
 		{362587C9-0992-442E-9111-39CDA636CACD} = {07C2787E-EAC7-C090-1BA3-A61EC2A24D84}
+		{A0000003-0000-0000-0000-000000000001} = {A0000002-0000-0000-0000-000000000001}
+		{A0000004-0000-0000-0000-000000000001} = {A0000002-0000-0000-0000-000000000001}
+		{A0000005-0000-0000-0000-000000000001} = {A0000002-0000-0000-0000-000000000001}
+		{A0000006-0000-0000-0000-000000000001} = {A0000005-0000-0000-0000-000000000001}
+		{A0000007-0000-0000-0000-000000000001} = {A0000005-0000-0000-0000-000000000001}
+		{A0000008-0000-0000-0000-000000000001} = {A0000005-0000-0000-0000-000000000001}
+		{A0000009-0000-0000-0000-000000000001} = {A0000005-0000-0000-0000-000000000001}
+		{A000000A-0000-0000-0000-000000000001} = {A0000005-0000-0000-0000-000000000001}
+		{A000000B-0000-0000-0000-000000000001} = {A0000005-0000-0000-0000-000000000001}
+		{A000000C-0000-0000-0000-000000000001} = {A0000005-0000-0000-0000-000000000001}
+		{A000000D-0000-0000-0000-000000000001} = {A0000005-0000-0000-0000-000000000001}
+		{A000000F-0000-0000-0000-000000000001} = {A000000E-0000-0000-0000-000000000001}
 	EndGlobalSection
 EndGlobal
