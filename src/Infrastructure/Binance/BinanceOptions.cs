@@ -44,4 +44,23 @@ public sealed class BinanceOptions
     public string? ApiSecret { get; init; }
 
     public bool AllowMainnet { get; init; }
+
+    /// <summary>
+    /// REST kline backfill toggle (run once on host start). Defaults to true so
+    /// charts are populated even when the WS supplies only live deltas.
+    /// </summary>
+    public bool BackfillEnabled { get; init; } = true;
+
+    /// <summary>
+    /// Bars per symbol/interval to request from /api/v3/klines. Binance hard cap is 1000.
+    /// </summary>
+    [Range(1, 1000)]
+    public int BackfillLimit { get; init; } = 1000;
+
+    /// <summary>
+    /// Intervals to backfill on boot. Independent from <see cref="KlineIntervals"/>
+    /// (the WS subscription set) so we can backfill a coarser/finer set if needed.
+    /// </summary>
+    [MinLength(1)]
+    public string[] BackfillIntervals { get; init; } = ["1m"];
 }

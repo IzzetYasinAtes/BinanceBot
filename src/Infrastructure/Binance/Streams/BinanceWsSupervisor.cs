@@ -1,20 +1,30 @@
 using System.Buffers;
 using System.Net.WebSockets;
 using System.Text;
+using BinanceBot.Application.Abstractions.Binance;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 namespace BinanceBot.Infrastructure.Binance.Streams;
 
-public sealed class BinanceWsSupervisor : BackgroundService
+public sealed class BinanceWsSupervisor : BackgroundService, IWsReadinessProbe
 {
     private readonly IOptionsMonitor<BinanceOptions> _options;
     private readonly BinanceStreamBus _bus;
     private readonly ILogger<BinanceWsSupervisor> _logger;
 
     private volatile WsSupervisorState _state = WsSupervisorState.Disconnected;
+    private volatile bool _everConnected;
+
     public WsSupervisorState State => _state;
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// True after the first successful WS connect; remains true across reconnects so
+    /// the backfill probe is not blocked by transient drops.
+    /// </remarks>
+    public bool IsReady => _everConnected;
 
     public BinanceWsSupervisor(
         IOptionsMonitor<BinanceOptions> options,
@@ -70,6 +80,10 @@ public sealed class BinanceWsSupervisor : BackgroundService
 
     private void SetState(WsSupervisorState next)
     {
+        if (next == WsSupervisorState.Connected)
+        {
+            _everConnected = true;
+        }
         if (_state == next) return;
         _logger.LogInformation("WS state {From} -> {To}", _state, next);
         _state = next;

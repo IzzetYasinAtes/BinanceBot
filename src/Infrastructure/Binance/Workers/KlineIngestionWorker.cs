@@ -1,8 +1,4 @@
-using BinanceBot.Application.Abstractions;
 using BinanceBot.Application.Abstractions.Binance;
-using BinanceBot.Domain.MarketData;
-using BinanceBot.Domain.ValueObjects;
-using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -31,7 +27,9 @@ public sealed class KlineIngestionWorker : BackgroundService
         {
             try
             {
-                await PersistAsync(payload, stoppingToken);
+                await using var scope = _scopeFactory.CreateAsyncScope();
+                var persister = scope.ServiceProvider.GetRequiredService<IKlinePersister>();
+                await persister.PersistAsync(payload, stoppingToken);
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {
@@ -43,36 +41,5 @@ public sealed class KlineIngestionWorker : BackgroundService
                     payload.Symbol, payload.OpenTime);
             }
         }
-    }
-
-    private async Task PersistAsync(WsKlinePayload p, CancellationToken ct)
-    {
-        await using var scope = _scopeFactory.CreateAsyncScope();
-        var db = scope.ServiceProvider.GetRequiredService<IApplicationDbContext>();
-
-        var symbolVo = Symbol.From(p.Symbol);
-        var existing = await ((DbSet<Kline>)db.Klines)
-            .FirstOrDefaultAsync(
-                k => k.Symbol == symbolVo && k.Interval == p.Interval && k.OpenTime == p.OpenTime,
-                ct);
-
-        if (existing is null)
-        {
-            var kline = Kline.Ingest(
-                symbolVo, p.Interval, p.OpenTime, p.CloseTime,
-                p.Open, p.High, p.Low, p.Close,
-                p.Volume, p.QuoteVolume, p.TradeCount,
-                p.TakerBuyBase, p.TakerBuyQuote, p.IsClosed);
-            db.Klines.Add(kline);
-        }
-        else
-        {
-            existing.Upsert(
-                p.Open, p.High, p.Low, p.Close,
-                p.Volume, p.QuoteVolume, p.TradeCount,
-                p.TakerBuyBase, p.TakerBuyQuote, p.IsClosed);
-        }
-
-        await db.SaveChangesAsync(ct);
     }
 }

@@ -123,9 +123,14 @@ public static class DependencyInjection
 
         services.AddSingleton<BinanceWsSupervisor>();
         services.AddHostedService(sp => sp.GetRequiredService<BinanceWsSupervisor>());
+        services.AddSingleton<IWsReadinessProbe>(sp => sp.GetRequiredService<BinanceWsSupervisor>());
         services.AddScoped<ISystemStatusProvider, SystemStatusProvider>();
         services.AddHostedService<ClockSyncWorker>();
         services.AddHostedService<SymbolFiltersRefresher>();
+        services.AddScoped<IKlinePersister, KlinePersister>();
+        // Backfill must register BEFORE KlineIngestionWorker so the hosted-service
+        // start order is REST snapshot first, then WS persist (ADR-0009).
+        services.AddHostedService<KlineBackfillWorker>();
         services.AddHostedService<KlineIngestionWorker>();
         services.AddHostedService<BookTickerIngestionWorker>();
         services.AddHostedService<DepthSnapshotWorker>();
