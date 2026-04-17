@@ -129,6 +129,10 @@ public static class DependencyInjection
         services.AddSingleton<IStrategyEvaluator, TrendFollowingEvaluator>();
         services.AddSingleton<IStrategyEvaluator, MeanReversionEvaluator>();
         services.AddSingleton<StrategyEvaluatorRegistry>();
+
+        services.AddOptions<StrategySeedOptions>()
+            .Bind(configuration.GetSection(StrategySeedOptions.SectionName));
+        services.AddHostedService<StrategySeeder>();
         services.AddTransient<MediatR.INotificationHandler<BinanceBot.Domain.MarketData.Events.KlineClosedEvent>,
             StrategyEvaluationHandler>();
         services.AddTransient<MediatR.INotificationHandler<BinanceBot.Domain.Strategies.Events.StrategySignalEmittedEvent>,
