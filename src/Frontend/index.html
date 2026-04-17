@@ -21,7 +21,8 @@ import { api } from "/js/api.js";
 import { fmt } from "/js/format.js";
 import { Sidebar, ErrorBanner, usePolling } from "/js/ui.js";
 
-const SYMBOLS = ["BTCUSDT", "ETHUSDT", "BNBUSDT"];
+const SYMBOLS = ["BTCUSDT", "BNBUSDT", "XRPUSDT"];
+const INITIAL_BALANCE = 100;
 
 const App = {
     components: { Sidebar, ErrorBanner },
@@ -39,7 +40,7 @@ const App = {
                     <div class="kpi-row">
                         <div class="kpi">
                             <div class="label">Başlangıç Bakiyesi</div>
-                            <div class="value">$1.000,00</div>
+                            <div class="value">$100,00</div>
                         </div>
                         <div class="kpi">
                             <div class="label">Mevcut Bakiye</div>
@@ -180,10 +181,10 @@ const App = {
         const equity = computed(() => {
             const realized = Number(pnlPoll.data.value?.realizedToday ?? 0);
             const unreal   = Number(pnlPoll.data.value?.unrealizedTotal ?? 0);
-            return 1000 + realized + unreal;
+            return INITIAL_BALANCE + realized + unreal;
         });
         const equityClass = computed(() => {
-            const diff = equity.value - 1000;
+            const diff = equity.value - INITIAL_BALANCE;
             return diff > 0 ? "metric-good" : diff < 0 ? "metric-bad" : "metric-neutral";
         });
 

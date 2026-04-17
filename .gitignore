@@ -16,6 +16,22 @@ src/Api/logs/
 .claude/scheduled_tasks.lock
 .claude/scheduled_tasks.json
 
+# Playwright / tester çıktıları
+playwright-report/
+test-results/
+.playwright-mcp/
+playwright-*.log
+tester-*.log
+tester-*.yml
+tester-*.yaml
+
+# Ekran görüntüleri (repo root) — tester screenshot'ları paylaşılmasın
+/*.png
+/*.jpg
+/*.jpeg
+/*.gif
+/*.webp
+
 # User-specific files (MonoDevelop/Xamarin Studio)
 *.userprefs
 

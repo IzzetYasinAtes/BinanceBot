@@ -7,15 +7,40 @@ using BinanceBot.Infrastructure.Persistence;
 using Microsoft.Extensions.FileProviders;
 using Serilog;
 
-var contentRoot = Directory.GetCurrentDirectory();
-var frontendRoot = Path.GetFullPath(Path.Combine(contentRoot, "..", "Frontend"));
+static string? ResolveFrontendRoot()
+{
+    var candidates = new[]
+    {
+        Path.Combine(Directory.GetCurrentDirectory(), "..", "Frontend"),
+        Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "Frontend"),
+        Path.Combine(AppContext.BaseDirectory, "Frontend"),
+        Path.Combine(Directory.GetCurrentDirectory(), "src", "Frontend"),
+        Path.Combine(Directory.GetCurrentDirectory(), "Frontend"),
+    };
+    foreach (var c in candidates)
+    {
+        try
+        {
+            var full = Path.GetFullPath(c);
+            if (Directory.Exists(full) && File.Exists(Path.Combine(full, "index.html")))
+            {
+                return full;
+            }
+        }
+        catch { }
+    }
+    return null;
+}
+
+var frontendRoot = ResolveFrontendRoot();
 
 var builder = WebApplication.CreateBuilder(new WebApplicationOptions
 {
     Args = args,
-    ContentRootPath = contentRoot,
-    WebRootPath = Directory.Exists(frontendRoot) ? frontendRoot : null,
+    WebRootPath = frontendRoot,
 });
+
+Console.WriteLine($"[boot] frontend root: {(frontendRoot ?? "(not found — UI disabled)")}");
 
 builder.Host.UseSerilog((ctx, sp, cfg) =>
 {
