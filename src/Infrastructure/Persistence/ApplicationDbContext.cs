@@ -1,5 +1,6 @@
 using BinanceBot.Application.Abstractions;
 using BinanceBot.Domain.BacktestRuns;
+using BinanceBot.Domain.Balances;
 using BinanceBot.Domain.Common;
 using BinanceBot.Domain.Instruments;
 using BinanceBot.Domain.MarketData;
@@ -36,6 +37,7 @@ public sealed class ApplicationDbContext : DbContext, IApplicationDbContext
     public DbSet<BacktestRun> BacktestRuns => Set<BacktestRun>();
     public DbSet<BacktestTrade> BacktestTrades => Set<BacktestTrade>();
     public DbSet<SystemEvent> SystemEvents => Set<SystemEvent>();
+    public DbSet<VirtualBalance> VirtualBalances => Set<VirtualBalance>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -53,7 +55,8 @@ public sealed class ApplicationDbContext : DbContext, IApplicationDbContext
                      || e.Entity is Position
                      || e.Entity is Strategy
                      || e.Entity is RiskProfile
-                     || e.Entity is BacktestRun)
+                     || e.Entity is BacktestRun
+                     || e.Entity is VirtualBalance)
             .Select(e => e.Entity)
             .ToList();
 
@@ -69,6 +72,7 @@ public sealed class ApplicationDbContext : DbContext, IApplicationDbContext
                 case Strategy s: events.AddRange(s.DomainEvents); s.ClearDomainEvents(); break;
                 case RiskProfile r: events.AddRange(r.DomainEvents); r.ClearDomainEvents(); break;
                 case BacktestRun b: events.AddRange(b.DomainEvents); b.ClearDomainEvents(); break;
+                case VirtualBalance vb: events.AddRange(vb.DomainEvents); vb.ClearDomainEvents(); break;
             }
         }
 

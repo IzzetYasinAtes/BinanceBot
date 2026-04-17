@@ -14,9 +14,14 @@ public sealed class OrderConfiguration : IEntityTypeConfiguration<Order>
         builder.Property(o => o.Id).ValueGeneratedOnAdd();
 
         builder.Property(o => o.ClientOrderId).HasMaxLength(36).IsRequired();
-        builder.HasIndex(o => o.ClientOrderId)
+
+        builder.Property(o => o.Mode)
+            .HasConversion<int>()
+            .IsRequired();
+
+        builder.HasIndex(o => new { o.ClientOrderId, o.Mode })
             .IsUnique()
-            .HasDatabaseName("UX_Orders_ClientOrderId");
+            .HasDatabaseName("UX_Orders_ClientOrderId_Mode");
 
         builder.Property(o => o.ExchangeOrderId);
         builder.HasIndex(o => o.ExchangeOrderId)

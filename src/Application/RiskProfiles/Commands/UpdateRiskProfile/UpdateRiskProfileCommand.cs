@@ -40,7 +40,7 @@ public sealed class UpdateRiskProfileCommandHandler : IRequestHandler<UpdateRisk
 
     public async Task<Result> Handle(UpdateRiskProfileCommand request, CancellationToken ct)
     {
-        var profile = await _db.RiskProfiles.FirstOrDefaultAsync(r => r.Id == RiskProfile.SingletonId, ct);
+        var profile = await _db.RiskProfiles.FirstOrDefaultAsync(r => r.Id == RiskProfile.IdFor(TradingMode.Paper), ct);
         if (profile is null) return Result.NotFound("Risk profile missing.");
 
         try

@@ -1,3 +1,5 @@
+using System.Security.Cryptography;
+using System.Text;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Configuration;
 
@@ -22,7 +24,7 @@ public sealed class AdminAuthFilter : IEndpointFilter
         }
 
         if (!ctx.HttpContext.Request.Headers.TryGetValue(HeaderName, out var provided)
-            || !FixedTimeEquals(provided.ToString(), expected))
+            || !ConstantTimeEquals(provided.ToString(), expected))
         {
             return Results.Unauthorized();
         }
@@ -30,11 +32,10 @@ public sealed class AdminAuthFilter : IEndpointFilter
         return await next(ctx);
     }
 
-    private static bool FixedTimeEquals(string a, string b)
+    private static bool ConstantTimeEquals(string a, string b)
     {
-        if (a.Length != b.Length) return false;
-        var diff = 0;
-        for (var i = 0; i < a.Length; i++) diff |= a[i] ^ b[i];
-        return diff == 0;
+        var aBytes = Encoding.UTF8.GetBytes(a);
+        var bBytes = Encoding.UTF8.GetBytes(b);
+        return CryptographicOperations.FixedTimeEquals(aBytes, bBytes);
     }
 }

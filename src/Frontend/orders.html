@@ -26,12 +26,23 @@ const OrderRows = {
             if (s === "PartiallyFilled") return "warn";
             return "open";
         }
-        return { fmt, statusBadge };
+        function modeBadge(m) {
+            if (m === "Paper") return "open";
+            if (m === "LiveTestnet") return "warn";
+            if (m === "LiveMainnet") return "bad";
+            return "";
+        }
+        function modeLabel(m) {
+            if (m === "LiveTestnet") return "TEST";
+            if (m === "LiveMainnet") return "MAIN";
+            return "PAPER";
+        }
+        return { fmt, statusBadge, modeBadge, modeLabel };
     },
     template: `
         <table class="data">
             <thead><tr>
-                <th>ClientId</th><th>Sembol</th><th>Yön</th><th>Tip</th><th>Durum</th>
+                <th>ClientId</th><th>Sembol</th><th>Mode</th><th>Yön</th><th>Tip</th><th>Durum</th>
                 <th class="align-right">Adet</th>
                 <th class="align-right">Gerçekleşen</th>
                 <th class="align-right">Fiyat</th>
@@ -41,6 +52,7 @@ const OrderRows = {
                 <tr v-for="o in rows" :key="o.clientOrderId">
                     <td style="font-size:10.5px;color:var(--fg-3);">{{ o.clientOrderId }}</td>
                     <td><strong>{{ o.symbol }}</strong></td>
+                    <td><span class="badge" :class="modeBadge(o.mode)">{{ modeLabel(o.mode) }}</span></td>
                     <td><span class="badge" :class="o.side === 'Buy' ? 'up' : 'down'">{{ o.side === 'Buy' ? 'UP' : 'DOWN' }}</span></td>
                     <td>{{ o.type }}</td>
                     <td><span class="badge" :class="statusBadge(o.status)">{{ o.status }}</span></td>
@@ -50,7 +62,7 @@ const OrderRows = {
                     <td style="color:var(--fg-3);">{{ fmt.timeHms(o.createdAt) }}</td>
                 </tr>
                 <tr v-if="rows.length === 0">
-                    <td colspan="9" style="text-align:center;color:var(--fg-3);padding:18px;">Kayıt yok</td>
+                    <td colspan="10" style="text-align:center;color:var(--fg-3);padding:18px;">Kayıt yok</td>
                 </tr>
             </tbody>
         </table>
@@ -66,8 +78,18 @@ const App = {
                 <section class="block">
                     <h2 class="section">Açık İşlemler</h2>
                     <p class="section-sub">Henüz doldurulmamış aktif order'lar.</p>
+                    <div class="toolbar">
+                        <label>Mod
+                            <select v-model="mode">
+                                <option value="">hepsi</option>
+                                <option value="Paper">Paper</option>
+                                <option value="LiveTestnet">LiveTestnet</option>
+                                <option value="LiveMainnet">LiveMainnet</option>
+                            </select>
+                        </label>
+                    </div>
                     <ErrorBanner :error="openPoll.error.value" />
-                    <OrderRows v-if="openPoll.data.value" :rows="openPoll.data.value" />
+                    <OrderRows v-if="filteredOpen" :rows="filteredOpen" />
                     <div v-else class="skeleton" style="height:80px"></div>
                 </section>
 
@@ -78,17 +100,25 @@ const App = {
                         <label>Sembol
                             <input v-model="symbol" placeholder="opsiyonel" style="width:120px;">
                         </label>
+                        <label>Mod
+                            <select v-model="mode">
+                                <option value="">hepsi</option>
+                                <option value="Paper">Paper</option>
+                                <option value="LiveTestnet">LiveTestnet</option>
+                                <option value="LiveMainnet">LiveMainnet</option>
+                            </select>
+                        </label>
                         <label>Limit
                             <select v-model.number="take">
                                 <option>20</option><option>50</option><option>100</option>
                             </select>
                         </label>
                         <span style="color:var(--fg-3);font-size:12px;" v-if="historyPoll.data.value">
-                            toplam: {{ historyPoll.data.value.totalCount }}
+                            toplam: {{ historyPoll.data.value.totalCount }}<span v-if="mode"> · filtre: {{ filteredHistory?.length ?? 0 }}</span>
                         </span>
                     </div>
                     <ErrorBanner :error="historyPoll.error.value" />
-                    <OrderRows v-if="historyPoll.data.value" :rows="historyPoll.data.value.items" />
+                    <OrderRows v-if="filteredHistory" :rows="filteredHistory" />
                     <div v-else class="skeleton" style="height:80px"></div>
                 </section>
             </main>
@@ -97,6 +127,7 @@ const App = {
     setup() {
         const symbol = ref("");
         const take = ref(50);
+        const mode = ref("");
 
         const openPoll = usePolling(() => api.orders.open(symbol.value), 3000);
         const historyPoll = usePolling(
@@ -105,7 +136,22 @@ const App = {
 
         watch([symbol, take], () => { openPoll.refresh(); historyPoll.refresh(); });
 
-        return { symbol, take, openPoll, historyPoll };
+        const filteredOpen = computed(() => {
+            const rows = openPoll.data.value;
+            if (!rows) return null;
+            if (!mode.value) return rows;
+            return rows.filter(o => o.mode === mode.value);
+        });
+
+        const filteredHistory = computed(() => {
+            const payload = historyPoll.data.value;
+            if (!payload) return null;
+            const items = payload.items ?? [];
+            if (!mode.value) return items;
+            return items.filter(o => o.mode === mode.value);
+        });
+
+        return { symbol, take, mode, openPoll, historyPoll, filteredOpen, filteredHistory };
     },
 };
 

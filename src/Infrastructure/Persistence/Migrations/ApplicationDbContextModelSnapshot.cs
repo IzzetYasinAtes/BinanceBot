@@ -124,6 +124,87 @@ namespace BinanceBot.Infrastructure.Persistence.Migrations
                     b.ToTable("BacktestTrades", (string)null);
                 });
 
+            modelBuilder.Entity("BinanceBot.Domain.Balances.VirtualBalance", b =>
+                {
+                    b.Property<int>("Id")
+                        .HasColumnType("int");
+
+                    b.Property<decimal>("CurrentBalance")
+                        .HasPrecision(28, 10)
+                        .HasColumnType("decimal(28,10)");
+
+                    b.Property<decimal>("Equity")
+                        .HasPrecision(28, 10)
+                        .HasColumnType("decimal(28,10)");
+
+                    b.Property<Guid>("IterationId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTimeOffset?>("LastResetAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int>("Mode")
+                        .HasColumnType("int");
+
+                    b.Property<int>("ResetCount")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset>("StartedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<decimal>("StartingBalance")
+                        .HasPrecision(28, 10)
+                        .HasColumnType("decimal(28,10)");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("VirtualBalances", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_VirtualBalances_ModeIdParity", "[Id] = [Mode]");
+                        });
+
+                    b.HasData(
+                        new
+                        {
+                            Id = 1,
+                            CurrentBalance = 100m,
+                            Equity = 100m,
+                            IterationId = new Guid("11111111-1111-1111-1111-111111111111"),
+                            Mode = 1,
+                            ResetCount = 0,
+                            StartedAt = new DateTimeOffset(new DateTime(2026, 4, 17, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0)),
+                            StartingBalance = 100m,
+                            UpdatedAt = new DateTimeOffset(new DateTime(2026, 4, 17, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0))
+                        },
+                        new
+                        {
+                            Id = 2,
+                            CurrentBalance = 0m,
+                            Equity = 0m,
+                            IterationId = new Guid("22222222-2222-2222-2222-222222222222"),
+                            Mode = 2,
+                            ResetCount = 0,
+                            StartedAt = new DateTimeOffset(new DateTime(2026, 4, 17, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0)),
+                            StartingBalance = 0m,
+                            UpdatedAt = new DateTimeOffset(new DateTime(2026, 4, 17, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0))
+                        },
+                        new
+                        {
+                            Id = 3,
+                            CurrentBalance = 0m,
+                            Equity = 0m,
+                            IterationId = new Guid("33333333-3333-3333-3333-333333333333"),
+                            Mode = 3,
+                            ResetCount = 0,
+                            StartedAt = new DateTimeOffset(new DateTime(2026, 4, 17, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0)),
+                            StartingBalance = 0m,
+                            UpdatedAt = new DateTimeOffset(new DateTime(2026, 4, 17, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0))
+                        });
+                });
+
             modelBuilder.Entity("BinanceBot.Domain.Instruments.Instrument", b =>
                 {
                     b.Property<int>("Id")
@@ -361,6 +442,9 @@ namespace BinanceBot.Infrastructure.Persistence.Migrations
                         .HasPrecision(28, 10)
                         .HasColumnType("decimal(28,10)");
 
+                    b.Property<int>("Mode")
+                        .HasColumnType("int");
+
                     b.Property<decimal?>("Price")
                         .HasPrecision(28, 10)
                         .HasColumnType("decimal(28,10)");
@@ -398,16 +482,16 @@ namespace BinanceBot.Infrastructure.Persistence.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("ClientOrderId")
-                        .IsUnique()
-                        .HasDatabaseName("UX_Orders_ClientOrderId");
-
                     b.HasIndex("ExchangeOrderId")
                         .HasDatabaseName("IX_Orders_ExchangeOrderId")
                         .HasFilter("[ExchangeOrderId] IS NOT NULL");
 
                     b.HasIndex("StrategyId")
                         .HasDatabaseName("IX_Orders_StrategyId");
+
+                    b.HasIndex("ClientOrderId", "Mode")
+                        .IsUnique()
+                        .HasDatabaseName("UX_Orders_ClientOrderId_Mode");
 
                     b.HasIndex("Symbol", "Status", "UpdatedAt")
                         .HasDatabaseName("IX_Orders_Symbol_Status_Updated");
@@ -481,6 +565,9 @@ namespace BinanceBot.Infrastructure.Persistence.Migrations
                         .HasPrecision(28, 10)
                         .HasColumnType("decimal(28,10)");
 
+                    b.Property<int>("Mode")
+                        .HasColumnType("int");
+
                     b.Property<DateTimeOffset>("OpenedAt")
                         .HasColumnType("datetimeoffset");
 
@@ -518,13 +605,16 @@ namespace BinanceBot.Infrastructure.Persistence.Migrations
                     b.HasIndex("StrategyId")
                         .HasDatabaseName("IX_Positions_StrategyId");
 
-                    b.HasIndex("Symbol")
-                        .IsUnique()
-                        .HasDatabaseName("UX_Positions_Symbol_Open")
-                        .HasFilter("[Status] = 1");
-
                     b.HasIndex("Status", "UpdatedAt")
                         .HasDatabaseName("IX_Positions_Status_Updated");
+
+                    b.HasIndex("Symbol", "Mode")
+                        .IsUnique()
+                        .HasDatabaseName("UX_Positions_Symbol_Mode_Open")
+                        .HasFilter("[Status] = 1");
+
+                    b.HasIndex("Mode", "Status", "UpdatedAt")
+                        .HasDatabaseName("IX_Positions_Mode_Status");
 
                     b.ToTable("Positions", (string)null);
                 });
@@ -605,6 +695,38 @@ namespace BinanceBot.Infrastructure.Persistence.Migrations
                         new
                         {
                             Id = 1,
+                            CircuitBreakerStatus = 1,
+                            ConsecutiveLosses = 0,
+                            CurrentDrawdownPct = 0m,
+                            MaxConsecutiveLosses = 3,
+                            MaxDrawdown24hPct = 0.05m,
+                            MaxDrawdownAllTimePct = 0.25m,
+                            MaxPositionSizePct = 0.10m,
+                            PeakEquity = 0m,
+                            RealizedPnl24h = 0m,
+                            RealizedPnlAllTime = 0m,
+                            RiskPerTradePct = 0.01m,
+                            UpdatedAt = new DateTimeOffset(new DateTime(2026, 4, 17, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0))
+                        },
+                        new
+                        {
+                            Id = 2,
+                            CircuitBreakerStatus = 1,
+                            ConsecutiveLosses = 0,
+                            CurrentDrawdownPct = 0m,
+                            MaxConsecutiveLosses = 3,
+                            MaxDrawdown24hPct = 0.05m,
+                            MaxDrawdownAllTimePct = 0.25m,
+                            MaxPositionSizePct = 0.10m,
+                            PeakEquity = 0m,
+                            RealizedPnl24h = 0m,
+                            RealizedPnlAllTime = 0m,
+                            RiskPerTradePct = 0.01m,
+                            UpdatedAt = new DateTimeOffset(new DateTime(2026, 4, 17, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0))
+                        },
+                        new
+                        {
+                            Id = 3,
                             CircuitBreakerStatus = 1,
                             ConsecutiveLosses = 0,
                             CurrentDrawdownPct = 0m,

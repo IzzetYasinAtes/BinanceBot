@@ -21,6 +21,7 @@ public sealed class Order : AggregateRoot<long>
     public decimal CumulativeQuoteQty { get; private set; }
     public OrderStatus Status { get; private set; }
     public long? StrategyId { get; private set; }
+    public TradingMode Mode { get; private set; }
     public DateTimeOffset CreatedAt { get; private set; }
     public DateTimeOffset UpdatedAt { get; private set; }
 
@@ -38,6 +39,7 @@ public sealed class Order : AggregateRoot<long>
         decimal? price,
         decimal? stopPrice,
         long? strategyId,
+        TradingMode mode,
         DateTimeOffset now)
     {
         if (string.IsNullOrWhiteSpace(clientOrderId) || clientOrderId.Length > 36)
@@ -72,12 +74,13 @@ public sealed class Order : AggregateRoot<long>
             StopPrice = stopPrice,
             Status = OrderStatus.New,
             StrategyId = strategyId,
+            Mode = mode,
             CreatedAt = now,
             UpdatedAt = now,
         };
 
         order.RaiseDomainEvent(new OrderPlacedEvent(
-            clientOrderId, symbol.Value, side, type, quantity, price));
+            clientOrderId, symbol.Value, side, type, quantity, price, mode));
         return order;
     }
 
@@ -128,7 +131,7 @@ public sealed class Order : AggregateRoot<long>
         {
             Status = OrderStatus.Filled;
             RaiseDomainEvent(new OrderFilledEvent(
-                ClientOrderId, Symbol.Value, ExecutedQuantity, CumulativeQuoteQty));
+                ClientOrderId, Symbol.Value, ExecutedQuantity, CumulativeQuoteQty, Mode));
         }
         else
         {

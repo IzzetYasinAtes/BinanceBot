@@ -1,4 +1,5 @@
 using BinanceBot.Domain.BacktestRuns;
+using BinanceBot.Domain.Balances;
 using BinanceBot.Domain.Instruments;
 using BinanceBot.Domain.MarketData;
 using BinanceBot.Domain.Orders;
@@ -25,6 +26,7 @@ public interface IApplicationDbContext
     DbSet<BacktestRun> BacktestRuns { get; }
     DbSet<BacktestTrade> BacktestTrades { get; }
     DbSet<SystemEvent> SystemEvents { get; }
+    DbSet<VirtualBalance> VirtualBalances { get; }
 
     Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);
 }

@@ -16,6 +16,7 @@ public sealed class Position : AggregateRoot<long>
     public decimal UnrealizedPnl { get; private set; }
     public decimal RealizedPnl { get; private set; }
     public long? StrategyId { get; private set; }
+    public TradingMode Mode { get; private set; }
     public DateTimeOffset OpenedAt { get; private set; }
     public DateTimeOffset? ClosedAt { get; private set; }
     public DateTimeOffset UpdatedAt { get; private set; }
@@ -28,6 +29,7 @@ public sealed class Position : AggregateRoot<long>
         decimal quantity,
         decimal entryPrice,
         long? strategyId,
+        TradingMode mode,
         DateTimeOffset now)
     {
         if (quantity <= 0m)
@@ -48,12 +50,13 @@ public sealed class Position : AggregateRoot<long>
             AverageEntryPrice = entryPrice,
             MarkPrice = entryPrice,
             StrategyId = strategyId,
+            Mode = mode,
             OpenedAt = now,
             UpdatedAt = now,
         };
 
         position.RaiseDomainEvent(new PositionOpenedEvent(
-            position.Id, symbol.Value, side, entryPrice, quantity));
+            position.Id, symbol.Value, side, entryPrice, quantity, mode));
         return position;
     }
 
@@ -107,7 +110,7 @@ public sealed class Position : AggregateRoot<long>
         ClosedAt = now;
         UpdatedAt = now;
 
-        RaiseDomainEvent(new PositionClosedEvent(Id, Symbol.Value, RealizedPnl, reason));
+        RaiseDomainEvent(new PositionClosedEvent(Id, Symbol.Value, RealizedPnl, reason, Mode));
     }
 
     private void EnsureOpen()

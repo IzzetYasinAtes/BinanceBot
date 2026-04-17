@@ -7,7 +7,8 @@ public sealed record PositionOpenedEvent(
     string Symbol,
     PositionSide Side,
     decimal EntryPrice,
-    decimal Quantity) : DomainEventBase;
+    decimal Quantity,
+    TradingMode Mode) : DomainEventBase;
 
 public sealed record PositionUpdatedEvent(
     long PositionId,
@@ -25,4 +26,5 @@ public sealed record PositionClosedEvent(
     long PositionId,
     string Symbol,
     decimal RealizedPnl,
-    string Reason) : DomainEventBase;
+    string Reason,
+    TradingMode Mode) : DomainEventBase;

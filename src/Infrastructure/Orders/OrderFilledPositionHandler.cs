@@ -29,11 +29,13 @@ public sealed class OrderFilledPositionHandler : INotificationHandler<OrderFille
 
         var order = await db.Orders
             .AsNoTracking()
-            .FirstOrDefaultAsync(o => o.ClientOrderId == notification.ClientOrderId, cancellationToken);
+            .FirstOrDefaultAsync(o => o.ClientOrderId == notification.ClientOrderId
+                                   && o.Mode == notification.Mode, cancellationToken);
 
         if (order is null)
         {
-            _logger.LogWarning("OrderFilled handler: order {Cid} not found", notification.ClientOrderId);
+            _logger.LogWarning("OrderFilled handler: order {Cid} {Mode} not found",
+                notification.ClientOrderId, notification.Mode);
             return;
         }
 
@@ -49,7 +51,8 @@ public sealed class OrderFilledPositionHandler : INotificationHandler<OrderFille
             order.Side.ToString(),
             order.ExecutedQuantity,
             avgPrice,
-            order.StrategyId);
+            order.StrategyId,
+            order.Mode);
 
         var result = await mediator.Send(cmd, cancellationToken);
         if (!result.IsSuccess)

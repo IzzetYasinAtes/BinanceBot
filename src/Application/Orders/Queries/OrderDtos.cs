@@ -14,6 +14,7 @@ public sealed record OrderDto(
     decimal CumulativeQuoteQty,
     string Status,
     long? StrategyId,
+    string Mode,
     DateTimeOffset CreatedAt,
     DateTimeOffset UpdatedAt);
 

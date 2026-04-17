@@ -1,4 +1,5 @@
 using BinanceBot.Application.Orders.Commands.PlaceOrder;
+using BinanceBot.Domain.Common;
 using BinanceBot.Domain.Orders;
 using BinanceBot.Domain.Strategies.Events;
 using MediatR;
@@ -7,6 +8,11 @@ using Microsoft.Extensions.Logging;
 
 namespace BinanceBot.Infrastructure.Strategies;
 
+/// <summary>
+/// Fan-out one strategy signal to three PlaceOrderCommand invocations — one per TradingMode
+/// (Paper / LiveTestnet / LiveMainnet). Each gets a distinct ClientOrderId via mode suffix
+/// (ADR-0008 §8.2). Failures in one mode must not block the others.
+/// </summary>
 public sealed class StrategySignalToOrderHandler : INotificationHandler<StrategySignalEmittedEvent>
 {
     private readonly IServiceScopeFactory _scopeFactory;
@@ -31,33 +37,53 @@ public sealed class StrategySignalToOrderHandler : INotificationHandler<Strategy
         await using var scope = _scopeFactory.CreateAsyncScope();
         var mediator = scope.ServiceProvider.GetRequiredService<IMediator>();
 
-        var clientOrderId = $"sig-{notification.StrategyId}-{notification.BarOpenTime.ToUnixTimeSeconds()}";
         var side = notification.Direction == Domain.Strategies.StrategySignalDirection.Long
             ? OrderSide.Buy
             : OrderSide.Sell;
 
-        var cmd = new PlaceOrderCommand(
-            clientOrderId,
-            notification.Symbol,
-            side.ToString(),
-            OrderType.Market.ToString(),
-            TimeInForce.Ioc.ToString(),
-            0.001m,
-            null,
-            null,
-            notification.StrategyId,
-            DryRun: true);
+        var barUnix = notification.BarOpenTime.ToUnixTimeSeconds();
 
-        var result = await mediator.Send(cmd, cancellationToken);
-        if (!result.IsSuccess)
+        foreach (var mode in new[] { TradingMode.Paper, TradingMode.LiveTestnet, TradingMode.LiveMainnet })
         {
-            _logger.LogWarning("Signal dry-run order rejected for strategy {Id} {Symbol}: {Errors}",
-                notification.StrategyId, notification.Symbol, string.Join(";", result.Errors));
-        }
-        else
-        {
-            _logger.LogInformation("Dry-run order placed from signal: strategy {Id} {Symbol} {Cid}",
-                notification.StrategyId, notification.Symbol, clientOrderId);
+            var clientOrderId = $"sig-{notification.StrategyId}-{barUnix}-{mode.ToCidSuffix()}";
+
+            var cmd = new PlaceOrderCommand(
+                clientOrderId,
+                notification.Symbol,
+                side.ToString(),
+                OrderType.Market.ToString(),
+                TimeInForce.Ioc.ToString(),
+                0.001m,
+                null,
+                null,
+                notification.StrategyId,
+                mode);
+
+            try
+            {
+                var result = await mediator.Send(cmd, cancellationToken);
+                if (!result.IsSuccess)
+                {
+                    _logger.LogWarning(
+                        "Fan-out order rejected mode={Mode} strategy={Id} {Symbol}: {Errors}",
+                        mode, notification.StrategyId, notification.Symbol,
+                        string.Join(";", result.Errors));
+                }
+                else
+                {
+                    _logger.LogInformation(
+                        "Fan-out order placed mode={Mode} strategy={Id} {Symbol} {Cid} status={Status}",
+                        mode, notification.StrategyId, notification.Symbol, clientOrderId,
+                        result.Value.Status);
+                }
+            }
+            catch (Exception ex)
+            {
+                // One mode's failure must never cascade to the others.
+                _logger.LogError(ex,
+                    "Fan-out order exception mode={Mode} strategy={Id} {Symbol} {Cid}",
+                    mode, notification.StrategyId, notification.Symbol, clientOrderId);
+            }
         }
     }
 }

@@ -17,12 +17,12 @@
 <div id="app"></div>
 <script type="module">
 import { createApp, computed } from "vue";
-import { api } from "/js/api.js";
+import { api, getAdminKey, clearAdminKey, ApiError } from "/js/api.js";
 import { fmt } from "/js/format.js";
 import { Sidebar, ErrorBanner, usePolling } from "/js/ui.js";
 
 const SYMBOLS = ["BTCUSDT", "BNBUSDT", "XRPUSDT"];
-const INITIAL_BALANCE = 100;
+const EMPTY_MODE = { startingBalance: 0, currentBalance: 0, equity: 0, resetCount: 0, startedAt: null, blockedReason: null };
 
 const App = {
     components: { Sidebar, ErrorBanner },
@@ -40,7 +40,7 @@ const App = {
                     <div class="kpi-row">
                         <div class="kpi">
                             <div class="label">Başlangıç Bakiyesi</div>
-                            <div class="value">$100,00</div>
+                            <div class="value">\${{ fmt.num2(balances.Paper.startingBalance) }}</div>
                         </div>
                         <div class="kpi">
                             <div class="label">Mevcut Bakiye</div>
@@ -67,6 +67,39 @@ const App = {
                             <div class="label">Toplam İşlem</div>
                             <div class="value">{{ totalOrders }}</div>
                             <div class="hint">{{ openCount }} açık</div>
+                        </div>
+                    </div>
+                </section>
+
+                <section class="block">
+                    <h2 class="section">3 Mod Bakiyeleri</h2>
+                    <p class="section-sub">
+                        Her sinyal 3 modda ayrı işlem olarak yürütülür. Paper canlı simülasyon, LiveTestnet gerçek testnet API'si, LiveMainnet kalıcı olarak bloklu (ADR-0006).
+                    </p>
+                    <div class="kpi-row">
+                        <div class="kpi" style="grid-column: span 2;">
+                            <div class="label">PAPER · iter #{{ balances.Paper.resetCount ?? 0 }}</div>
+                            <div class="value" :class="fmt.sign(balances.Paper.equity - balances.Paper.startingBalance)">
+                                \${{ fmt.num2(balances.Paper.equity) }}
+                            </div>
+                            <div class="hint">
+                                başlangıç \${{ fmt.num2(balances.Paper.startingBalance) }} · nakit \${{ fmt.num2(balances.Paper.currentBalance) }}
+                                <span v-if="paperAgeLabel"> · {{ paperAgeLabel }}</span>
+                            </div>
+                            <button @click="resetPaper" style="margin-top:8px;">Reset Iteration</button>
+                        </div>
+
+                        <div class="kpi">
+                            <div class="label">LIVE TESTNET</div>
+                            <div class="value small"><span class="badge warn">OFFLINE</span></div>
+                            <div class="hint">{{ balances.LiveTestnet.blockedReason ?? '—' }}</div>
+                            <div class="hint" style="color:var(--fg-3);">API key girildiğinde aktive olur</div>
+                        </div>
+
+                        <div class="kpi">
+                            <div class="label">LIVE MAINNET</div>
+                            <div class="value small"><span class="badge bad">BLOCKED</span></div>
+                            <div class="hint">ADR-0006 · canlı para koruması</div>
                         </div>
                     </div>
                 </section>
@@ -140,7 +173,7 @@ const App = {
                     <p class="section-sub">En son gerçekleştirilen alım-satım işlemleri. Giriş fiyatı, kar/zarar ve işlem durumu burada takip edilir.</p>
                     <table class="data" v-if="orders">
                         <thead><tr>
-                            <th>Sembol</th><th>Yön</th><th>Tip</th>
+                            <th>Sembol</th><th>Mode</th><th>Yön</th><th>Tip</th>
                             <th class="align-right">Adet</th>
                             <th class="align-right">Fiyat</th>
                             <th class="align-right">Gerçekleşen</th>
@@ -150,6 +183,7 @@ const App = {
                         <tbody>
                             <tr v-for="o in orders.items" :key="o.clientOrderId">
                                 <td><strong>{{ o.symbol }}</strong></td>
+                                <td><span class="badge" :class="modeBadge(o.mode)">{{ modeLabel(o.mode) }}</span></td>
                                 <td><span class="badge" :class="o.side === 'Buy' ? 'up' : 'down'">{{ o.side === 'Buy' ? 'UP' : 'DOWN' }}</span></td>
                                 <td>{{ o.type }}</td>
                                 <td class="align-right">{{ fmt.num4(o.quantity) }}</td>
@@ -159,7 +193,7 @@ const App = {
                                 <td style="color:var(--fg-3);">{{ fmt.timeHms(o.createdAt) }}</td>
                             </tr>
                             <tr v-if="orders.items.length === 0">
-                                <td colspan="8" style="text-align:center;color:var(--fg-3);padding:18px;">Henüz işlem yok</td>
+                                <td colspan="9" style="text-align:center;color:var(--fg-3);padding:18px;">Henüz işlem yok</td>
                             </tr>
                         </tbody>
                     </table>
@@ -173,20 +207,73 @@ const App = {
         const pnlPoll      = usePolling(() => api.positions.pnlToday(), 3000);
         const signalsPoll  = usePolling(() => api.strategies.latestSignals(8), 5000);
         const ordersPoll   = usePolling(() => api.orders.history({ skip: 0, take: 15 }), 5000);
+        const balancesPoll = usePolling(() => api.balances.list(), 3000);
 
         const anyError = computed(() =>
             summaryPoll.error.value ?? pnlPoll.error.value
-            ?? signalsPoll.error.value ?? ordersPoll.error.value);
+            ?? signalsPoll.error.value ?? ordersPoll.error.value
+            ?? balancesPoll.error.value);
 
-        const equity = computed(() => {
-            const realized = Number(pnlPoll.data.value?.realizedToday ?? 0);
-            const unreal   = Number(pnlPoll.data.value?.unrealizedTotal ?? 0);
-            return INITIAL_BALANCE + realized + unreal;
+        const balances = computed(() => {
+            const rows = balancesPoll.data.value ?? [];
+            return {
+                Paper:        rows.find(r => r.mode === "Paper")        ?? { ...EMPTY_MODE },
+                LiveTestnet:  rows.find(r => r.mode === "LiveTestnet")  ?? { ...EMPTY_MODE },
+                LiveMainnet:  rows.find(r => r.mode === "LiveMainnet")  ?? { ...EMPTY_MODE },
+            };
         });
+
+        const equity = computed(() => Number(balances.value.Paper.equity ?? 0));
         const equityClass = computed(() => {
-            const diff = equity.value - INITIAL_BALANCE;
+            const diff = equity.value - Number(balances.value.Paper.startingBalance ?? 0);
             return diff > 0 ? "metric-good" : diff < 0 ? "metric-bad" : "metric-neutral";
         });
+
+        function ageSince(iso) {
+            if (!iso) return "";
+            const mins = (Date.now() - new Date(iso).getTime()) / 60000;
+            if (!isFinite(mins) || mins < 0) return "";
+            if (mins < 60) return `${Math.floor(mins)}dk önce başladı`;
+            return `${(mins / 60).toFixed(1)}s önce başladı`;
+        }
+        const paperAgeLabel = computed(() => ageSince(balances.value.Paper.startedAt));
+
+        async function resetPaper() {
+            const adminKey = getAdminKey({ promptMessage: "Admin key (ilk kez):" });
+            if (!adminKey) return;
+            const starting = window.prompt("Başlangıç bakiyesi (USDT):", "100");
+            if (!starting) return;
+            const startingNum = Number(starting);
+            if (!isFinite(startingNum) || startingNum <= 0) {
+                window.alert("Geçersiz başlangıç bakiyesi.");
+                return;
+            }
+            try {
+                await api.balances.resetPaper(startingNum, adminKey);
+                balancesPoll.refresh();
+                ordersPoll.refresh();
+                pnlPoll.refresh();
+            } catch (e) {
+                if (e instanceof ApiError && e.status === 401) {
+                    clearAdminKey();
+                    window.alert("Admin key reddedildi, tekrar dene.");
+                } else {
+                    window.alert("Reset hata: " + (e?.message ?? String(e)));
+                }
+            }
+        }
+
+        function modeBadge(m) {
+            if (m === "Paper") return "open";
+            if (m === "LiveTestnet") return "warn";
+            if (m === "LiveMainnet") return "bad";
+            return "";
+        }
+        function modeLabel(m) {
+            if (m === "LiveTestnet") return "TEST";
+            if (m === "LiveMainnet") return "MAIN";
+            return "PAPER";
+        }
 
         const totalOrders = computed(() => ordersPoll.data.value?.totalCount ?? 0);
         const openCount   = computed(() => pnlPoll.data.value?.openPositionCount ?? 0);
@@ -236,9 +323,12 @@ const App = {
             signals: signalsPoll.data,
             orders: ordersPoll.data,
             anyError,
+            balances, paperAgeLabel,
             equity, equityClass, totalOrders, openCount,
             winRateLabel, winRateHint,
             baseAsset, signalLabel, signalBadge, statusBadge, statusLabel,
+            modeBadge, modeLabel,
+            resetPaper,
             fmt,
         };
     },

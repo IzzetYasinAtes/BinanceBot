@@ -14,7 +14,8 @@ public sealed record OpenOrUpdatePositionCommand(
     string OrderSide,
     decimal Quantity,
     decimal Price,
-    long? StrategyId) : IRequest<Result<long>>;
+    long? StrategyId,
+    TradingMode Mode) : IRequest<Result<long>>;
 
 public sealed class OpenOrUpdatePositionCommandHandler
     : IRequestHandler<OpenOrUpdatePositionCommand, Result<long>>
@@ -40,7 +41,9 @@ public sealed class OpenOrUpdatePositionCommandHandler
         var positionSide = side == OrderSide.Buy ? PositionSide.Long : PositionSide.Short;
 
         var open = await _db.Positions
-            .Where(p => p.Symbol == symbolVo && p.Status == PositionStatus.Open)
+            .Where(p => p.Symbol == symbolVo
+                     && p.Mode == request.Mode
+                     && p.Status == PositionStatus.Open)
             .FirstOrDefaultAsync(ct);
 
         try
@@ -48,7 +51,7 @@ public sealed class OpenOrUpdatePositionCommandHandler
             if (open is null)
             {
                 var created = Position.Open(symbolVo, positionSide, request.Quantity, request.Price,
-                    request.StrategyId, _clock.UtcNow);
+                    request.StrategyId, request.Mode, _clock.UtcNow);
                 _db.Positions.Add(created);
                 await _db.SaveChangesAsync(ct);
                 return Result.Success(created.Id);

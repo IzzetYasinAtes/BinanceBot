@@ -1,6 +1,6 @@
 const baseUrl = window.location.origin;
 
-async function request(path, { method = "GET", query, body, signal } = {}) {
+async function request(path, { method = "GET", query, body, headers, signal } = {}) {
     const url = new URL(path, baseUrl);
     if (query) {
         for (const [k, v] of Object.entries(query)) {
@@ -17,6 +17,12 @@ async function request(path, { method = "GET", query, body, signal } = {}) {
     if (body !== undefined) {
         init.headers["Content-Type"] = "application/json";
         init.body = JSON.stringify(body);
+    }
+    if (headers) {
+        for (const [k, v] of Object.entries(headers)) {
+            if (v === undefined || v === null) continue;
+            init.headers[k] = v;
+        }
     }
 
     let response;
@@ -50,6 +56,25 @@ export class ApiError extends Error {
     }
 }
 
+const ADMIN_KEY_STORAGE = "adminKey";
+const DEFAULT_ADMIN_KEY_HINT = "dev-admin-key-change-me";
+
+export function getAdminKey({ prompt: doPrompt = true, promptMessage } = {}) {
+    let key = null;
+    try { key = localStorage.getItem(ADMIN_KEY_STORAGE); } catch { /* ignore */ }
+    if (key) return key;
+    if (!doPrompt || typeof window === "undefined" || typeof window.prompt !== "function") return null;
+    const message = promptMessage ?? "Admin key (ilk kez):";
+    const entered = window.prompt(message, DEFAULT_ADMIN_KEY_HINT);
+    if (!entered) return null;
+    try { localStorage.setItem(ADMIN_KEY_STORAGE, entered); } catch { /* ignore */ }
+    return entered;
+}
+
+export function clearAdminKey() {
+    try { localStorage.removeItem(ADMIN_KEY_STORAGE); } catch { /* ignore */ }
+}
+
 export const api = {
     raw: request,
 
@@ -74,6 +99,16 @@ export const api = {
         open: (symbol) => request("/api/orders/open", { query: { symbol } }),
         history: (q = {}) => request("/api/orders/history", { query: q }),
         byClientId: (id) => request(`/api/orders/${encodeURIComponent(id)}`),
+    },
+
+    balances: {
+        list: () => request("/api/balances"),
+        resetPaper: (startingBalance, adminKey) =>
+            request("/api/papertrade/reset", {
+                method: "POST",
+                body: { startingBalance },
+                headers: { "X-Admin-Key": adminKey },
+            }),
     },
 
     positions: {

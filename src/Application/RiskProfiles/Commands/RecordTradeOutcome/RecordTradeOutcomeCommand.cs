@@ -1,5 +1,6 @@
 using Ardalis.Result;
 using BinanceBot.Application.Abstractions;
+using BinanceBot.Domain.Common;
 using BinanceBot.Domain.RiskProfiles;
 using MediatR;
 using Microsoft.EntityFrameworkCore;
@@ -7,6 +8,7 @@ using Microsoft.EntityFrameworkCore;
 namespace BinanceBot.Application.RiskProfiles.Commands.RecordTradeOutcome;
 
 public sealed record RecordTradeOutcomeCommand(
+    TradingMode Mode,
     decimal RealizedPnl,
     decimal EquityAfter) : IRequest<Result>;
 
@@ -23,7 +25,8 @@ public sealed class RecordTradeOutcomeCommandHandler : IRequestHandler<RecordTra
 
     public async Task<Result> Handle(RecordTradeOutcomeCommand request, CancellationToken ct)
     {
-        var profile = await _db.RiskProfiles.FirstOrDefaultAsync(r => r.Id == RiskProfile.SingletonId, ct);
+        var profileId = RiskProfile.IdFor(request.Mode);
+        var profile = await _db.RiskProfiles.FirstOrDefaultAsync(r => r.Id == profileId, ct);
         if (profile is null) return Result.NotFound("Risk profile missing.");
 
         profile.RecordTradeOutcome(request.RealizedPnl, request.EquityAfter, _clock.UtcNow);

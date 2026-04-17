@@ -8,13 +8,15 @@ public sealed record OrderPlacedEvent(
     OrderSide Side,
     OrderType Type,
     decimal Quantity,
-    decimal? Price) : DomainEventBase;
+    decimal? Price,
+    TradingMode Mode) : DomainEventBase;
 
 public sealed record OrderFilledEvent(
     string ClientOrderId,
     string Symbol,
     decimal ExecutedQuantity,
-    decimal CumulativeQuoteQty) : DomainEventBase;
+    decimal CumulativeQuoteQty,
+    TradingMode Mode) : DomainEventBase;
 
 public sealed record OrderCancelledEvent(
     string ClientOrderId,

@@ -1,3 +1,4 @@
+using System.Text.Json.Serialization;
 using BinanceBot.Api.Endpoints;
 using BinanceBot.Api.Infrastructure;
 using BinanceBot.Application;
@@ -53,6 +54,11 @@ builder.Services.AddHttpContextAccessor();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddOpenApi();
 
+builder.Services.ConfigureHttpJsonOptions(opts =>
+{
+    opts.SerializerOptions.Converters.Add(new JsonStringEnumConverter());
+});
+
 builder.Services.AddApplication();
 builder.Services.AddInfrastructure(builder.Configuration);
 
@@ -82,6 +88,7 @@ app.MapStrategyEndpoints();
 app.MapRiskEndpoints();
 app.MapSystemEndpoints();
 app.MapBacktestEndpoints();
+app.MapBalanceEndpoints();
 
 await DatabaseInitializer.MigrateAsync(app.Services, CancellationToken.None);
 

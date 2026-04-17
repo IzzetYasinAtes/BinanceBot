@@ -1,6 +1,7 @@
 using Ardalis.Result;
 using BinanceBot.Application.Abstractions;
 using BinanceBot.Application.RiskProfiles.Queries;
+using BinanceBot.Domain.Common;
 using BinanceBot.Domain.RiskProfiles;
 using MediatR;
 using Microsoft.EntityFrameworkCore;
@@ -21,7 +22,7 @@ public sealed class GetCircuitBreakerStatusQueryHandler
     {
         var r = await _db.RiskProfiles
             .AsNoTracking()
-            .FirstOrDefaultAsync(rp => rp.Id == RiskProfile.SingletonId, ct);
+            .FirstOrDefaultAsync(rp => rp.Id == RiskProfile.IdFor(TradingMode.Paper), ct);
 
         if (r is null)
         {

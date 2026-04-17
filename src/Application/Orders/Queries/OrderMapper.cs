@@ -18,6 +18,7 @@ internal static class OrderMapper
         order.CumulativeQuoteQty,
         order.Status.ToString(),
         order.StrategyId,
+        order.Mode.ToString(),
         order.CreatedAt,
         order.UpdatedAt);
 }

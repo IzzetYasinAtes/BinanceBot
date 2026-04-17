@@ -20,6 +20,7 @@ public sealed class PositionConfiguration : IEntityTypeConfiguration<Position>
 
         builder.Property(p => p.Side).HasConversion<int>();
         builder.Property(p => p.Status).HasConversion<int>();
+        builder.Property(p => p.Mode).HasConversion<int>().IsRequired();
 
         builder.Property(p => p.Quantity).HasPrecision(28, 10);
         builder.Property(p => p.AverageEntryPrice).HasPrecision(28, 10);
@@ -28,12 +29,14 @@ public sealed class PositionConfiguration : IEntityTypeConfiguration<Position>
         builder.Property(p => p.UnrealizedPnl).HasPrecision(28, 10);
         builder.Property(p => p.RealizedPnl).HasPrecision(28, 10);
 
-        builder.HasIndex(p => p.Symbol)
+        builder.HasIndex(p => new { p.Symbol, p.Mode })
             .IsUnique()
             .HasFilter("[Status] = 1")
-            .HasDatabaseName("UX_Positions_Symbol_Open");
+            .HasDatabaseName("UX_Positions_Symbol_Mode_Open");
         builder.HasIndex(p => new { p.Status, p.UpdatedAt })
             .HasDatabaseName("IX_Positions_Status_Updated");
+        builder.HasIndex(p => new { p.Mode, p.Status, p.UpdatedAt })
+            .HasDatabaseName("IX_Positions_Mode_Status");
         builder.HasIndex(p => p.StrategyId)
             .HasDatabaseName("IX_Positions_StrategyId");
 

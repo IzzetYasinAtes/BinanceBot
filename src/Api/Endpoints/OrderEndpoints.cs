@@ -4,6 +4,7 @@ using BinanceBot.Application.Orders.Commands.PlaceOrder;
 using BinanceBot.Application.Orders.Queries.GetOrderByClientId;
 using BinanceBot.Application.Orders.Queries.ListOpenOrders;
 using BinanceBot.Application.Orders.Queries.ListOrderHistory;
+using BinanceBot.Domain.Common;
 using MediatR;
 
 namespace BinanceBot.Api.Endpoints;
@@ -19,7 +20,8 @@ public static class OrderEndpoints
         decimal Quantity,
         decimal? Price,
         decimal? StopPrice,
-        long? StrategyId);
+        long? StrategyId,
+        TradingMode? Mode);
 
     public static IEndpointRouteBuilder MapOrderEndpoints(this IEndpointRouteBuilder app)
     {
@@ -44,7 +46,8 @@ public static class OrderEndpoints
         group.MapPost("/", async (PlaceOrderRequest req, IMediator m, CancellationToken ct) =>
             (await m.Send(new PlaceOrderCommand(
                 req.ClientOrderId, req.Symbol, req.Side, req.Type, req.TimeInForce,
-                req.Quantity, req.Price, req.StopPrice, req.StrategyId, DryRun: true), ct))
+                req.Quantity, req.Price, req.StopPrice, req.StrategyId,
+                req.Mode ?? TradingMode.Paper), ct))
                 .ToHttpResult())
             .WithName("PlaceOrder");
 

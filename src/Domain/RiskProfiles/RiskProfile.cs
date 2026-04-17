@@ -5,7 +5,11 @@ namespace BinanceBot.Domain.RiskProfiles;
 
 public sealed class RiskProfile : AggregateRoot<int>
 {
-    public const int SingletonId = 1;
+    /// <summary>
+    /// RiskProfile is singleton-per-mode (ADR-0008):
+    /// Id 1=Paper, 2=LiveTestnet, 3=LiveMainnet. See <see cref="IdFor"/>.
+    /// </summary>
+    public static int IdFor(TradingMode mode) => (int)mode;
 
     public decimal RiskPerTradePct { get; private set; }
     public decimal MaxPositionSizePct { get; private set; }
@@ -30,10 +34,10 @@ public sealed class RiskProfile : AggregateRoot<int>
 
     private RiskProfile() { }
 
-    public static RiskProfile CreateDefault(DateTimeOffset now) =>
+    public static RiskProfile CreateDefault(TradingMode mode, DateTimeOffset now) =>
         new()
         {
-            Id = SingletonId,
+            Id = IdFor(mode),
             RiskPerTradePct = 0.01m,
             MaxPositionSizePct = 0.10m,
             MaxDrawdown24hPct = 0.05m,

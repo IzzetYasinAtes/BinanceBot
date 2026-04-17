@@ -2,8 +2,11 @@ using System.Text.Json;
 using Ardalis.Result;
 using BinanceBot.Application.Abstractions;
 using BinanceBot.Application.Abstractions.Binance;
+using BinanceBot.Application.Abstractions.Trading;
+using BinanceBot.Domain.Balances;
 using BinanceBot.Domain.Common;
 using BinanceBot.Domain.Instruments;
+using BinanceBot.Domain.MarketData;
 using BinanceBot.Domain.Orders;
 using BinanceBot.Domain.RiskProfiles;
 using BinanceBot.Domain.SystemEvents;
@@ -25,7 +28,7 @@ public sealed record PlaceOrderCommand(
     decimal? Price,
     decimal? StopPrice,
     long? StrategyId,
-    bool DryRun) : IRequest<Result<PlacedOrderDto>>;
+    TradingMode Mode) : IRequest<Result<PlacedOrderDto>>;
 
 public sealed record PlacedOrderDto(
     string ClientOrderId,
@@ -33,7 +36,7 @@ public sealed record PlacedOrderDto(
     string Status,
     decimal Quantity,
     decimal? Price,
-    bool DryRun);
+    TradingMode Mode);
 
 public sealed class PlaceOrderCommandValidator : AbstractValidator<PlaceOrderCommand>
 {
@@ -45,6 +48,7 @@ public sealed class PlaceOrderCommandValidator : AbstractValidator<PlaceOrderCom
         RuleFor(c => c.Type).Must(t => Enum.TryParse<OrderType>(t, true, out _));
         RuleFor(c => c.TimeInForce).Must(t => Enum.TryParse<TimeInForce>(t, true, out _));
         RuleFor(c => c.Quantity).GreaterThan(0m);
+        RuleFor(c => c.Mode).IsInEnum();
     }
 }
 
@@ -53,6 +57,8 @@ public sealed class PlaceOrderCommandHandler
 {
     private readonly IApplicationDbContext _db;
     private readonly IBinanceTrading _trading;
+    private readonly IBinanceCredentialsProvider _credentials;
+    private readonly IPaperFillSimulator _paperFills;
     private readonly IClock _clock;
     private readonly ICorrelationIdAccessor _correlation;
     private readonly ILogger<PlaceOrderCommandHandler> _logger;
@@ -60,12 +66,16 @@ public sealed class PlaceOrderCommandHandler
     public PlaceOrderCommandHandler(
         IApplicationDbContext db,
         IBinanceTrading trading,
+        IBinanceCredentialsProvider credentials,
+        IPaperFillSimulator paperFills,
         IClock clock,
         ICorrelationIdAccessor correlation,
         ILogger<PlaceOrderCommandHandler> logger)
     {
         _db = db;
         _trading = trading;
+        _credentials = credentials;
+        _paperFills = paperFills;
         _clock = clock;
         _correlation = correlation;
         _logger = logger;
@@ -73,14 +83,17 @@ public sealed class PlaceOrderCommandHandler
 
     public async Task<Result<PlacedOrderDto>> Handle(PlaceOrderCommand request, CancellationToken ct)
     {
+        // Idempotency: (ClientOrderId, Mode) composite
         var existing = await _db.Orders
             .AsNoTracking()
-            .FirstOrDefaultAsync(o => o.ClientOrderId == request.ClientOrderId, ct);
+            .FirstOrDefaultAsync(
+                o => o.ClientOrderId == request.ClientOrderId && o.Mode == request.Mode,
+                ct);
         if (existing is not null)
         {
             return Result.Success(new PlacedOrderDto(
                 existing.ClientOrderId, existing.Symbol.Value, existing.Status.ToString(),
-                existing.Quantity, existing.Price, request.DryRun));
+                existing.Quantity, existing.Price, request.Mode));
         }
 
         if (!Enum.TryParse<OrderSide>(request.Side, true, out var side)
@@ -106,67 +119,49 @@ public sealed class PlaceOrderCommandHandler
             return filterResult;
         }
 
-        var riskProfile = await _db.RiskProfiles
-            .AsNoTracking()
-            .FirstOrDefaultAsync(r => r.Id == RiskProfile.SingletonId, ct);
-        if (riskProfile is null)
+        // Risk gate: mode-scoped. LiveMainnet short-circuits before risk read (ADR-0008 §8.7).
+        if (request.Mode != TradingMode.LiveMainnet)
         {
-            return Result<PlacedOrderDto>.Error("Risk profile missing.");
-        }
+            var profileId = RiskProfile.IdFor(request.Mode);
+            var riskProfile = await _db.RiskProfiles
+                .AsNoTracking()
+                .FirstOrDefaultAsync(r => r.Id == profileId, ct);
+            if (riskProfile is null)
+            {
+                return Result<PlacedOrderDto>.Error($"Risk profile missing for mode {request.Mode}.");
+            }
 
-        var riskResult = RiskGate(riskProfile);
-        if (!riskResult.IsSuccess)
-        {
-            return riskResult;
+            var riskResult = RiskGate(riskProfile);
+            if (!riskResult.IsSuccess)
+            {
+                return riskResult;
+            }
         }
 
         var order = Order.Place(
             request.ClientOrderId, symbolVo, side, type, tif,
             request.Quantity, request.Price, request.StopPrice,
-            request.StrategyId, _clock.UtcNow);
+            request.StrategyId, request.Mode, _clock.UtcNow);
 
         _db.Orders.Add(order);
 
-        var binanceReq = new PlaceOrderRequest(
-            symbolVo.Value, side.ToString().ToUpperInvariant(),
-            type.ToString().ToUpperInvariant(), tif.ToString().ToUpperInvariant(),
-            request.Quantity, request.Price, request.StopPrice, request.ClientOrderId);
-
-        if (request.DryRun)
+        switch (request.Mode)
         {
-            _logger.LogInformation("Placing DRY-RUN order {Cid} {Symbol} {Side} {Qty}",
-                request.ClientOrderId, symbolVo, side, request.Quantity);
+            case TradingMode.LiveMainnet:
+                HandleMainnetBlocked(order, ct);
+                break;
 
-            var testResult = await _trading.PlaceTestOrderAsync(binanceReq, ct);
-            if (!testResult.Accepted)
-            {
-                order.Reject(testResult.ErrorMessage ?? "test_endpoint_failed", _clock.UtcNow);
-            }
-        }
-        else
-        {
-            _logger.LogInformation("Placing LIVE order {Cid} {Symbol} {Side} {Qty}",
-                request.ClientOrderId, symbolVo, side, request.Quantity);
+            case TradingMode.LiveTestnet:
+                await HandleLiveTestnet(order, symbolVo, side, type, tif, request, ct);
+                break;
 
-            var liveResult = await _trading.PlaceLiveOrderAsync(binanceReq, ct);
-            if (!liveResult.Accepted)
-            {
-                order.Reject(liveResult.ErrorMessage ?? liveResult.ErrorCode ?? "live_endpoint_failed",
-                    _clock.UtcNow);
-            }
-            else
-            {
-                if (liveResult.ExchangeOrderId is long xid)
-                {
-                    order.AttachExchangeId(xid, _clock.UtcNow);
-                }
-                foreach (var fill in liveResult.Fills)
-                {
-                    order.RegisterFill(
-                        fill.TradeId, fill.Price, fill.Quantity,
-                        fill.Commission, fill.CommissionAsset, _clock.UtcNow);
-                }
-            }
+            case TradingMode.Paper:
+                await HandlePaper(order, instrument, symbolVo, ct);
+                break;
+
+            default:
+                order.Reject($"unknown_mode_{request.Mode}", _clock.UtcNow);
+                break;
         }
 
         _db.SystemEvents.Add(SystemEvent.Record(
@@ -181,7 +176,7 @@ public sealed class PlaceOrderCommandHandler
                 order.Quantity,
                 order.Price,
                 Status = order.Status.ToString(),
-                request.DryRun,
+                Mode = request.Mode.ToString(),
             }),
             source: "PlaceOrderCommand",
             correlationId: _correlation.CorrelationId == Guid.Empty ? null : _correlation.CorrelationId,
@@ -191,7 +186,129 @@ public sealed class PlaceOrderCommandHandler
 
         return Result.Success(new PlacedOrderDto(
             order.ClientOrderId, order.Symbol.Value, order.Status.ToString(),
-            order.Quantity, order.Price, request.DryRun));
+            order.Quantity, order.Price, request.Mode));
+    }
+
+    private void HandleMainnetBlocked(Order order, CancellationToken ct)
+    {
+        _ = ct;
+        _logger.LogWarning("LiveMainnet order blocked by ADR-0006: {Cid} {Symbol}",
+            order.ClientOrderId, order.Symbol);
+
+        order.Reject("mainnet_blocked_by_adr_0006", _clock.UtcNow);
+
+        _db.SystemEvents.Add(SystemEvent.Record(
+            eventType: "order.mainnet_blocked",
+            severity: SystemEventSeverity.Warning,
+            payloadJson: JsonSerializer.Serialize(new
+            {
+                order.ClientOrderId,
+                Symbol = order.Symbol.Value,
+                order.StrategyId,
+            }),
+            source: "PlaceOrderCommand.MainnetGuard",
+            correlationId: _correlation.CorrelationId == Guid.Empty ? null : _correlation.CorrelationId,
+            occurredAt: _clock.UtcNow));
+    }
+
+    private async Task HandleLiveTestnet(
+        Order order,
+        Symbol symbolVo,
+        OrderSide side,
+        OrderType type,
+        TimeInForce tif,
+        PlaceOrderCommand request,
+        CancellationToken ct)
+    {
+        if (!_credentials.HasTestnetCredentials())
+        {
+            _logger.LogInformation("LiveTestnet order rejected (no credentials) {Cid}", order.ClientOrderId);
+            order.Reject("no_credentials_testnet", _clock.UtcNow);
+
+            _db.SystemEvents.Add(SystemEvent.Record(
+                eventType: "order.testnet_no_credentials",
+                severity: SystemEventSeverity.Warning,
+                payloadJson: JsonSerializer.Serialize(new
+                {
+                    order.ClientOrderId,
+                    Symbol = order.Symbol.Value,
+                }),
+                source: "PlaceOrderCommand.TestnetGuard",
+                correlationId: _correlation.CorrelationId == Guid.Empty ? null : _correlation.CorrelationId,
+                occurredAt: _clock.UtcNow));
+            return;
+        }
+
+        var binanceReq = new PlaceOrderRequest(
+            symbolVo.Value, side.ToString().ToUpperInvariant(),
+            type.ToString().ToUpperInvariant(), tif.ToString().ToUpperInvariant(),
+            request.Quantity, request.Price, request.StopPrice, request.ClientOrderId);
+
+        _logger.LogInformation("Placing LIVE-TESTNET order {Cid} {Symbol} {Side} {Qty}",
+            order.ClientOrderId, symbolVo, side, request.Quantity);
+
+        var liveResult = await _trading.PlaceLiveOrderAsync(binanceReq, ct);
+        if (!liveResult.Accepted)
+        {
+            order.Reject(liveResult.ErrorMessage ?? liveResult.ErrorCode ?? "live_endpoint_failed", _clock.UtcNow);
+        }
+        else
+        {
+            if (liveResult.ExchangeOrderId is long xid)
+            {
+                order.AttachExchangeId(xid, _clock.UtcNow);
+            }
+            foreach (var fill in liveResult.Fills)
+            {
+                order.RegisterFill(
+                    fill.TradeId, fill.Price, fill.Quantity,
+                    fill.Commission, fill.CommissionAsset, _clock.UtcNow);
+            }
+        }
+    }
+
+    private async Task HandlePaper(
+        Order order,
+        Instrument instrument,
+        Symbol symbolVo,
+        CancellationToken ct)
+    {
+        var bookTicker = await _db.BookTickers
+            .AsNoTracking()
+            .FirstOrDefaultAsync(b => b.Symbol == symbolVo, ct);
+        if (bookTicker is null)
+        {
+            order.Reject("paper_no_book_ticker", _clock.UtcNow);
+            return;
+        }
+
+        var depth = await _db.OrderBookSnapshots
+            .AsNoTracking()
+            .Where(s => s.Symbol == symbolVo)
+            .OrderByDescending(s => s.CapturedAt)
+            .FirstOrDefaultAsync(ct);
+
+        var outcome = _paperFills.Simulate(order, instrument, bookTicker, depth, _clock.UtcNow);
+
+        _logger.LogInformation(
+            "Paper fill {Cid} filled={Filled} qty={Qty} avg={Avg} cashDelta={Cash}",
+            order.ClientOrderId, outcome.Filled, outcome.ExecutedQuantity,
+            outcome.AvgFillPrice, outcome.RealizedCashDelta);
+
+        // Apply realized cash delta to VirtualBalance (Paper row)
+        if (outcome.ExecutedQuantity > 0m && outcome.RealizedCashDelta != 0m)
+        {
+            var paperBalance = await _db.VirtualBalances
+                .FirstOrDefaultAsync(b => b.Id == (int)TradingMode.Paper, ct);
+            if (paperBalance is not null)
+            {
+                paperBalance.ApplyFill(outcome.RealizedCashDelta, _clock.UtcNow);
+            }
+            else
+            {
+                _logger.LogWarning("Paper VirtualBalance seed missing; skipping balance update");
+            }
+        }
     }
 
     private static Result<PlacedOrderDto> ValidateFilters(

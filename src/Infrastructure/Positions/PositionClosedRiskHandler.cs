@@ -31,18 +31,18 @@ public sealed class PositionClosedRiskHandler : INotificationHandler<PositionClo
 
         var totalRealised = await db.Positions
             .AsNoTracking()
-            .Where(p => p.Status == PositionStatus.Closed)
+            .Where(p => p.Mode == notification.Mode && p.Status == PositionStatus.Closed)
             .SumAsync(p => (decimal?)p.RealizedPnl, cancellationToken) ?? 0m;
 
         var openUnrealised = await db.Positions
             .AsNoTracking()
-            .Where(p => p.Status == PositionStatus.Open)
+            .Where(p => p.Mode == notification.Mode && p.Status == PositionStatus.Open)
             .SumAsync(p => (decimal?)p.UnrealizedPnl, cancellationToken) ?? 0m;
 
         var equity = totalRealised + openUnrealised;
 
         await mediator.Send(
-            new RecordTradeOutcomeCommand(notification.RealizedPnl, equity),
+            new RecordTradeOutcomeCommand(notification.Mode, notification.RealizedPnl, equity),
             cancellationToken);
 
         _logger.LogInformation("Trade outcome recorded: pos={PosId} pnl={Pnl} equity={Equity}",

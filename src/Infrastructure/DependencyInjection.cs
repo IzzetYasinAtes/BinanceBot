@@ -1,5 +1,6 @@
 using BinanceBot.Application.Abstractions;
 using BinanceBot.Application.Abstractions.Binance;
+using BinanceBot.Application.Abstractions.Trading;
 using BinanceBot.Application.Strategies.Evaluation;
 using BinanceBot.Application.System.Queries.GetSystemStatus;
 using BinanceBot.Infrastructure.Binance;
@@ -13,6 +14,7 @@ using BinanceBot.Infrastructure.Positions;
 using BinanceBot.Infrastructure.Strategies;
 using BinanceBot.Infrastructure.Strategies.Evaluators;
 using BinanceBot.Infrastructure.Time;
+using BinanceBot.Infrastructure.Trading.Paper;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -112,6 +114,9 @@ public static class DependencyInjection
             var logger = sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<BinanceTradingClient>>();
             return new BinanceTradingClient(http, opts, logger);
         });
+
+        services.AddSingleton<IBinanceCredentialsProvider, BinanceCredentialsProvider>();
+        services.AddSingleton<IPaperFillSimulator, PaperFillSimulator>();
 
         services.AddSingleton<BinanceStreamBus>();
         services.AddSingleton<IBinanceMarketStream>(sp => sp.GetRequiredService<BinanceStreamBus>());

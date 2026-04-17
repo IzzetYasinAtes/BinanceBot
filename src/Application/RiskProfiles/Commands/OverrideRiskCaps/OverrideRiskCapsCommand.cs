@@ -36,7 +36,7 @@ public sealed class OverrideRiskCapsCommandHandler : IRequestHandler<OverrideRis
 
     public async Task<Result> Handle(OverrideRiskCapsCommand request, CancellationToken ct)
     {
-        var profile = await _db.RiskProfiles.FirstOrDefaultAsync(r => r.Id == RiskProfile.SingletonId, ct);
+        var profile = await _db.RiskProfiles.FirstOrDefaultAsync(r => r.Id == RiskProfile.IdFor(TradingMode.Paper), ct);
         if (profile is null) return Result.NotFound("Risk profile missing.");
 
         try

@@ -32,9 +32,18 @@ public sealed class RiskProfileConfiguration : IEntityTypeConfiguration<RiskProf
 
         builder.Ignore(r => r.DomainEvents);
 
-        builder.HasData(new
+        var seedTimestamp = new DateTimeOffset(2026, 4, 17, 0, 0, 0, TimeSpan.Zero);
+        builder.HasData(
+            SeedRow(BinanceBot.Domain.Common.TradingMode.Paper, seedTimestamp),
+            SeedRow(BinanceBot.Domain.Common.TradingMode.LiveTestnet, seedTimestamp),
+            SeedRow(BinanceBot.Domain.Common.TradingMode.LiveMainnet, seedTimestamp));
+    }
+
+    private static object SeedRow(
+        BinanceBot.Domain.Common.TradingMode mode,
+        DateTimeOffset now) => new
         {
-            Id = RiskProfile.SingletonId,
+            Id = RiskProfile.IdFor(mode),
             RiskPerTradePct = 0.01m,
             MaxPositionSizePct = 0.10m,
             MaxDrawdown24hPct = 0.05m,
@@ -46,7 +55,6 @@ public sealed class RiskProfileConfiguration : IEntityTypeConfiguration<RiskProf
             RealizedPnlAllTime = 0m,
             PeakEquity = 0m,
             CurrentDrawdownPct = 0m,
-            UpdatedAt = new DateTimeOffset(2026, 4, 17, 0, 0, 0, TimeSpan.Zero),
-        });
-    }
+            UpdatedAt = now,
+        };
 }
