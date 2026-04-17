@@ -5,6 +5,9 @@
 
 set -u
 
+# cwd-independent: Claude Code resmi env var'ı, repo root'a geç
+cd "${CLAUDE_PROJECT_DIR:-.}" 2>/dev/null || true
+
 KIND="${1:-unknown}"
 TRACE_DIR=".ai-trace"
 DATE="$(date -u +%F)"

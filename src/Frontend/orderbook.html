@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Derinlik · BinanceBot</title>
+<link rel="stylesheet" href="/css/style.css">
+<script type="importmap">
+{ "imports": { "vue": "https://unpkg.com/vue@3.5.13/dist/vue.esm-browser.prod.js" } }
+</script>
+</head>
+<body>
+<div id="app"></div>
+<script type="module">
+import { createApp, ref, computed, watch } from "vue";
+import { api } from "/js/api.js";
+import { fmt } from "/js/format.js";
+import { Sidebar, ErrorBanner, usePolling } from "/js/ui.js";
+
+const App = {
+    components: { Sidebar, ErrorBanner },
+    template: `
+        <div class="app">
+            <Sidebar active="orderbook" />
+            <main>
+                <section class="block">
+                    <h2 class="section">Derinlik</h2>
+                    <p class="section-sub">Emir defteri — bid/ask seviyeleri, spread ve likidite dağılımı. 1 saniyede bir yenilenir.</p>
+                    <div class="toolbar">
+                        <label>Sembol
+                            <select v-model="symbol">
+                                <option>BTCUSDT</option><option>ETHUSDT</option><option>BNBUSDT</option>
+                            </select>
+                        </label>
+                        <label>Seviye
+                            <select v-model.number="depth">
+                                <option>10</option><option>20</option><option>50</option>
+                            </select>
+                        </label>
+                    </div>
+                    <ErrorBanner :error="book.error.value" />
+
+                    <div class="kpi-row">
+                        <div class="kpi"><div class="label">Mid Fiyat</div><div class="value">{{ ticker ? fmt.price(ticker.midPrice) : '—' }}</div></div>
+                        <div class="kpi"><div class="label">Spread (bps)</div><div class="value">{{ ticker ? fmt.num2(ticker.spreadBps) : '—' }}</div></div>
+                        <div class="kpi"><div class="label">Bid Likidite</div><div class="value small">{{ fmt.num4(bidSum) }}</div></div>
+                        <div class="kpi"><div class="label">Ask Likidite</div><div class="value small">{{ fmt.num4(askSum) }}</div></div>
+                        <div class="kpi"><div class="label">Dengesizlik</div>
+                            <div class="value small" :class="imbalanceClass">{{ fmt.num2(imbalance) }}%</div>
+                        </div>
+                    </div>
+                </section>
+
+                <section class="block">
+                    <div class="orderbook-grid">
+                        <div class="book-side">
+                            <h4>BIDS</h4>
+                            <div v-if="!book.data.value" class="skeleton" style="height:280px"></div>
+                            <template v-else>
+                                <div v-for="(b, i) in book.data.value.bids.slice(0, depth)" :key="i" class="book-row bid">
+                                    <span class="price bid">{{ fmt.price(b.price) }}</span>
+                                    <span class="align-right">{{ fmt.num4(b.quantity) }}</span>
+                                </div>
+                            </template>
+                        </div>
+                        <div class="book-side">
+                            <h4>ASKS</h4>
+                            <div v-if="!book.data.value" class="skeleton" style="height:280px"></div>
+                            <template v-else>
+                                <div v-for="(a, i) in book.data.value.asks.slice(0, depth)" :key="i" class="book-row ask">
+                                    <span class="price ask">{{ fmt.price(a.price) }}</span>
+                                    <span class="align-right">{{ fmt.num4(a.quantity) }}</span>
+                                </div>
+                            </template>
+                        </div>
+                    </div>
+                </section>
+            </main>
+        </div>
+    `,
+    setup() {
+        const symbol = ref("BTCUSDT");
+        const depth = ref(20);
+
+        const book = usePolling(() => api.depth(symbol.value, 50), 1000);
+        const tickerPoll = usePolling(() => api.bookTicker(symbol.value), 1000);
+
+        watch([symbol], () => { book.refresh(); tickerPoll.refresh(); });
+
+        const bidSum = computed(() => (book.data.value?.bids ?? [])
+            .slice(0, depth.value).reduce((a, b) => a + Number(b.quantity), 0));
+        const askSum = computed(() => (book.data.value?.asks ?? [])
+            .slice(0, depth.value).reduce((a, b) => a + Number(b.quantity), 0));
+        const imbalance = computed(() => {
+            const t = bidSum.value + askSum.value;
+            return t > 0 ? ((bidSum.value - askSum.value) / t) * 100 : 0;
+        });
+        const imbalanceClass = computed(() => fmt.sign(imbalance.value));
+
+        return { symbol, depth, book, ticker: tickerPoll.data,
+                 bidSum, askSum, imbalance, imbalanceClass, fmt };
+    },
+};
+createApp(App).mount("#app");
+</script>
+</body>
+</html>

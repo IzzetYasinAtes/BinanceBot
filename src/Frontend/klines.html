@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Canlı Grafik · BinanceBot</title>
+<link rel="stylesheet" href="/css/style.css">
+<script type="importmap">
+{
+    "imports": {
+        "vue": "https://unpkg.com/vue@3.5.13/dist/vue.esm-browser.prod.js",
+        "chart.js/auto": "https://cdn.jsdelivr.net/npm/chart.js@4.4.7/+esm"
+    }
+}
+</script>
+</head>
+<body>
+<div id="app"></div>
+<script type="module">
+import { createApp, ref, onMounted, watch, onBeforeUnmount } from "vue";
+import Chart from "chart.js/auto";
+import { api } from "/js/api.js";
+import { fmt } from "/js/format.js";
+import { Sidebar, ErrorBanner, usePolling } from "/js/ui.js";
+
+const App = {
+    components: { Sidebar, ErrorBanner },
+    template: `
+        <div class="app">
+            <Sidebar active="klines" />
+            <main>
+                <section class="block">
+                    <h2 class="section">Canlı Grafik</h2>
+                    <p class="section-sub">Seçilen sembolün kline verileri. 2 saniyede bir güncellenir.</p>
+                    <div class="toolbar">
+                        <label>Sembol
+                            <select v-model="symbol">
+                                <option>BTCUSDT</option><option>ETHUSDT</option><option>BNBUSDT</option>
+                            </select>
+                        </label>
+                        <label>Aralık
+                            <select v-model="interval">
+                                <option>1m</option><option>5m</option><option>15m</option>
+                                <option>1h</option><option>4h</option><option>1d</option>
+                            </select>
+                        </label>
+                        <label>Bar
+                            <select v-model.number="limit">
+                                <option>100</option><option>250</option><option>500</option>
+                            </select>
+                        </label>
+                        <span v-if="lastClose" style="color:var(--fg-2);font-size:12px;margin-left:auto;">
+                            son kapanış: <strong style="color:var(--fg-0);">{{ fmt.price(lastClose) }}</strong>
+                        </span>
+                    </div>
+                    <ErrorBanner :error="poll.error.value" />
+                    <div class="chart-wrap">
+                        <canvas ref="canvasEl"></canvas>
+                    </div>
+                </section>
+            </main>
+        </div>
+    `,
+    setup() {
+        const symbol = ref("BTCUSDT");
+        const interval = ref("1m");
+        const limit = ref(500);
+        const canvasEl = ref(null);
+        let chart = null;
+        const lastClose = ref(null);
+
+        const poll = usePolling(
+            () => api.klines(symbol.value, interval.value, limit.value),
+            2000);
+
+        function render(rows) {
+            if (!canvasEl.value || !rows) return;
+            const labels = rows.map(r => fmt.timeHms(r.openTime));
+            const closes = rows.map(r => r.close);
+            lastClose.value = closes.length > 0 ? closes[closes.length - 1] : null;
+
+            if (!chart) {
+                chart = new Chart(canvasEl.value, {
+                    type: "line",
+                    data: {
+                        labels,
+                        datasets: [{
+                            label: `${symbol.value} ${interval.value}`,
+                            data: closes,
+                            borderColor: "#22d3a6",
+                            backgroundColor: "rgba(34,211,166,.10)",
+                            fill: true,
+                            tension: 0.15,
+                            pointRadius: 0,
+                        }],
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        animation: false,
+                        plugins: { legend: { labels: { color: "#e6edf3" } } },
+                        scales: {
+                            x: { ticks: { color: "#6b788a", maxTicksLimit: 10 }, grid: { color: "#141a23" } },
+                            y: { ticks: { color: "#9aa8b9" }, grid: { color: "#141a23" } },
+                        },
+                    },
+                });
+            } else {
+                chart.data.labels = labels;
+                chart.data.datasets[0].data = closes;
+                chart.data.datasets[0].label = `${symbol.value} ${interval.value}`;
+                chart.update("none");
+            }
+        }
+
+        onMounted(() => { if (poll.data.value) render(poll.data.value); });
+        watch(poll.data, (v) => render(v));
+        watch([symbol, interval, limit], () => poll.refresh());
+        onBeforeUnmount(() => { if (chart) chart.destroy(); });
+
+        return { symbol, interval, limit, canvasEl, poll, lastClose, fmt };
+    },
+};
+
+createApp(App).mount("#app");
+</script>
+</body>
+</html>

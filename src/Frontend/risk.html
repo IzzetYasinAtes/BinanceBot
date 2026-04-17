@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Risk · BinanceBot</title>
+<link rel="stylesheet" href="/css/style.css">
+<script type="importmap">
+{
+    "imports": {
+        "vue": "https://unpkg.com/vue@3.5.13/dist/vue.esm-browser.prod.js",
+        "chart.js/auto": "https://cdn.jsdelivr.net/npm/chart.js@4.4.7/+esm"
+    }
+}
+</script>
+</head>
+<body>
+<div id="app"></div>
+<script type="module">
+import { createApp, ref, onMounted, watch, onBeforeUnmount, computed } from "vue";
+import Chart from "chart.js/auto";
+import { api } from "/js/api.js";
+import { fmt } from "/js/format.js";
+import { Sidebar, ErrorBanner, usePolling } from "/js/ui.js";
+
+const App = {
+    components: { Sidebar, ErrorBanner },
+    template: `
+        <div class="app">
+            <Sidebar active="risk" />
+            <main>
+                <section class="block">
+                    <h2 class="section">Risk Yönetimi</h2>
+                    <p class="section-sub">Güncel risk limitleri, devre kesici durumu ve drawdown.</p>
+                    <ErrorBanner :error="anyError" />
+
+                    <div class="kpi-row" v-if="profile">
+                        <div class="kpi">
+                            <div class="label">Risk / İşlem</div>
+                            <div class="value small">{{ fmt.pct(profile.riskPerTradePct) }}</div>
+                        </div>
+                        <div class="kpi">
+                            <div class="label">Max Pozisyon</div>
+                            <div class="value small">{{ fmt.pct(profile.maxPositionSizePct) }}</div>
+                        </div>
+                        <div class="kpi">
+                            <div class="label">Max DD 24s</div>
+                            <div class="value small">{{ fmt.pct(profile.maxDrawdown24hPct) }}</div>
+                        </div>
+                        <div class="kpi">
+                            <div class="label">Max DD Alltime</div>
+                            <div class="value small">{{ fmt.pct(profile.maxDrawdownAllTimePct) }}</div>
+                        </div>
+                        <div class="kpi">
+                            <div class="label">Max Consec Losses</div>
+                            <div class="value small">{{ profile.maxConsecutiveLosses }}</div>
+                        </div>
+                    </div>
+
+                    <div class="kpi-row" v-if="profile" style="margin-top:12px;">
+                        <div class="kpi">
+                            <div class="label">Devre Kesici</div>
+                            <div class="value small">
+                                <span class="badge" :class="cbClass">{{ cb?.status ?? '—' }}</span>
+                            </div>
+                            <div class="hint" v-if="cb?.reason">{{ cb.reason }}</div>
+                        </div>
+                        <div class="kpi">
+                            <div class="label">Anlık Drawdown</div>
+                            <div class="value" :class="ddClass">{{ fmt.pct(profile.currentDrawdownPct) }}</div>
+                        </div>
+                        <div class="kpi">
+                            <div class="label">Consec Losses</div>
+                            <div class="value">{{ profile.consecutiveLosses }}</div>
+                        </div>
+                        <div class="kpi">
+                            <div class="label">Realized 24s</div>
+                            <div class="value small" :class="fmt.sign(profile.realizedPnl24h)">{{ fmt.num2(profile.realizedPnl24h) }}</div>
+                        </div>
+                        <div class="kpi">
+                            <div class="label">Realized Alltime</div>
+                            <div class="value small" :class="fmt.sign(profile.realizedPnlAllTime)">{{ fmt.num2(profile.realizedPnlAllTime) }}</div>
+                        </div>
+                    </div>
+                </section>
+
+                <section class="block">
+                    <h2 class="section">Drawdown Geçmişi (30 gün)</h2>
+                    <p class="section-sub">Her kapanan pozisyon sonrası kümülatif equity ve drawdown.</p>
+                    <div class="chart-wrap" style="height:320px;">
+                        <canvas ref="canvasEl"></canvas>
+                    </div>
+                </section>
+            </main>
+        </div>
+    `,
+    setup() {
+        const profilePoll = usePolling(() => api.risk.profile(), 3000);
+        const cbPoll = usePolling(() => api.risk.circuitBreaker(), 3000);
+        const ddPoll = usePolling(() => api.risk.drawdownHistory(30), 10000);
+
+        const canvasEl = ref(null);
+        let chart = null;
+
+        function render(points) {
+            if (!canvasEl.value || !points) return;
+            const labels = points.map(p => fmt.timeHms(p.atUtc));
+            const equity = points.map(p => Number(p.equity));
+            const dd = points.map(p => Number(p.drawdownPct) * 100);
+
+            if (!chart) {
+                chart = new Chart(canvasEl.value, {
+                    type: "line",
+                    data: {
+                        labels,
+                        datasets: [
+                            { label: "Equity", data: equity, borderColor: "#22d3a6", yAxisID: "y", pointRadius: 0, tension: 0.1 },
+                            { label: "Drawdown %", data: dd, borderColor: "#ef5350", yAxisID: "y1", pointRadius: 0, tension: 0.1 },
+                        ],
+                    },
+                    options: {
+                        responsive: true, maintainAspectRatio: false, animation: false,
+                        plugins: { legend: { labels: { color: "#e6edf3" } } },
+                        scales: {
+                            x: { ticks: { color: "#6b788a", maxTicksLimit: 8 }, grid: { color: "#141a23" } },
+                            y: { ticks: { color: "#9aa8b9" }, grid: { color: "#141a23" } },
+                            y1: { ticks: { color: "#ef5350" }, grid: { drawOnChartArea: false }, position: "right" },
+                        },
+                    },
+                });
+            } else {
+                chart.data.labels = labels;
+                chart.data.datasets[0].data = equity;
+                chart.data.datasets[1].data = dd;
+                chart.update("none");
+            }
+        }
+
+        watch(ddPoll.data, render);
+        onMounted(() => { if (ddPoll.data.value) render(ddPoll.data.value); });
+        onBeforeUnmount(() => chart?.destroy());
+
+        const anyError = computed(() =>
+            profilePoll.error.value ?? cbPoll.error.value ?? ddPoll.error.value);
+
+        const ddClass = computed(() => {
+            const d = profilePoll.data.value?.currentDrawdownPct ?? 0;
+            return d > 0.05 ? "metric-bad" : d > 0.02 ? "metric-warn" : "metric-good";
+        });
+        const cbClass = computed(() => {
+            const s = cbPoll.data.value?.status;
+            return s === "Healthy" ? "good" : s === "Tripped" ? "bad" : "warn";
+        });
+
+        return { profile: profilePoll.data, cb: cbPoll.data, canvasEl,
+                 anyError, ddClass, cbClass, fmt };
+    },
+};
+
+createApp(App).mount("#app");
+</script>
+</body>
+</html>

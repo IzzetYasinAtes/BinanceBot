@@ -1,41 +1,68 @@
-var builder = WebApplication.CreateBuilder(args);
+using BinanceBot.Api.Endpoints;
+using BinanceBot.Api.Infrastructure;
+using BinanceBot.Application;
+using BinanceBot.Application.Abstractions;
+using BinanceBot.Infrastructure;
+using BinanceBot.Infrastructure.Persistence;
+using Microsoft.Extensions.FileProviders;
+using Serilog;
 
-// Add services to the container.
-// Learn more about configuring OpenAPI at https://aka.ms/aspnet/openapi
+var contentRoot = Directory.GetCurrentDirectory();
+var frontendRoot = Path.GetFullPath(Path.Combine(contentRoot, "..", "Frontend"));
+
+var builder = WebApplication.CreateBuilder(new WebApplicationOptions
+{
+    Args = args,
+    ContentRootPath = contentRoot,
+    WebRootPath = Directory.Exists(frontendRoot) ? frontendRoot : null,
+});
+
+builder.Host.UseSerilog((ctx, sp, cfg) =>
+{
+    cfg.ReadFrom.Configuration(ctx.Configuration)
+       .ReadFrom.Services(sp)
+       .Enrich.FromLogContext();
+});
+
+builder.Services.AddHttpContextAccessor();
+builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddOpenApi();
+
+builder.Services.AddApplication();
+builder.Services.AddInfrastructure(builder.Configuration);
+
+builder.Services.AddScoped<ICorrelationIdAccessor, CorrelationIdAccessor>();
+builder.Services.AddSingleton<AdminAuthFilter>();
 
 var app = builder.Build();
 
-// Configure the HTTP request pipeline.
+app.UseSerilogRequestLogging();
+app.UseMiddleware<CorrelationIdMiddleware>();
+
+app.UseDefaultFiles();
+app.UseStaticFiles();
+
 if (app.Environment.IsDevelopment())
 {
     app.MapOpenApi();
 }
 
-app.UseHttpsRedirection();
+app.MapHealthEndpoints();
+app.MapKlineEndpoints();
+app.MapMarketEndpoints();
+app.MapInstrumentEndpoints();
+app.MapOrderEndpoints();
+app.MapPositionEndpoints();
+app.MapStrategyEndpoints();
+app.MapRiskEndpoints();
+app.MapSystemEndpoints();
+app.MapBacktestEndpoints();
 
-var summaries = new[]
-{
-    "Freezing", "Bracing", "Chilly", "Cool", "Mild", "Warm", "Balmy", "Hot", "Sweltering", "Scorching"
-};
-
-app.MapGet("/weatherforecast", () =>
-{
-    var forecast =  Enumerable.Range(1, 5).Select(index =>
-        new WeatherForecast
-        (
-            DateOnly.FromDateTime(DateTime.Now.AddDays(index)),
-            Random.Shared.Next(-20, 55),
-            summaries[Random.Shared.Next(summaries.Length)]
-        ))
-        .ToArray();
-    return forecast;
-})
-.WithName("GetWeatherForecast");
+await DatabaseInitializer.MigrateAsync(app.Services, CancellationToken.None);
 
 app.Run();
 
-record WeatherForecast(DateOnly Date, int TemperatureC, string? Summary)
+namespace BinanceBot.Api
 {
-    public int TemperatureF => 32 + (int)(TemperatureC / 0.5556);
+    public partial class Program { }
 }

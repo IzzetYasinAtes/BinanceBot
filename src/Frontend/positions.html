@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Portföy · BinanceBot</title>
+<link rel="stylesheet" href="/css/style.css">
+<script type="importmap">
+{ "imports": { "vue": "https://unpkg.com/vue@3.5.13/dist/vue.esm-browser.prod.js" } }
+</script>
+</head>
+<body>
+<div id="app"></div>
+<script type="module">
+import { createApp, ref, watch } from "vue";
+import { api } from "/js/api.js";
+import { fmt } from "/js/format.js";
+import { Sidebar, ErrorBanner, usePolling } from "/js/ui.js";
+
+const App = {
+    components: { Sidebar, ErrorBanner },
+    template: `
+        <div class="app">
+            <Sidebar active="positions" />
+            <main>
+                <section class="block">
+                    <h2 class="section">Portföy</h2>
+                    <p class="section-sub">Açık ve kapalı pozisyonlar. Yön, giriş fiyatı ve anlık kar/zarar durumu.</p>
+                    <div class="toolbar">
+                        <label>Durum
+                            <select v-model="status">
+                                <option value="">hepsi</option>
+                                <option value="open">açık</option>
+                                <option value="closed">kapalı</option>
+                            </select>
+                        </label>
+                        <label>Sembol
+                            <input v-model="symbol" placeholder="opsiyonel" style="width:120px;">
+                        </label>
+                    </div>
+                    <ErrorBanner :error="poll.error.value" />
+
+                    <table class="data" v-if="poll.data.value">
+                        <thead><tr>
+                            <th>#</th><th>Sembol</th><th>Yön</th><th>Durum</th>
+                            <th class="align-right">Adet</th>
+                            <th class="align-right">Giriş</th>
+                            <th class="align-right">Mark</th>
+                            <th class="align-right">Unrealized</th>
+                            <th class="align-right">Realized</th>
+                            <th>Açılış</th><th>Kapanış</th>
+                        </tr></thead>
+                        <tbody>
+                            <tr v-for="p in poll.data.value" :key="p.id">
+                                <td>{{ p.id }}</td>
+                                <td><strong>{{ p.symbol }}</strong></td>
+                                <td><span class="badge" :class="p.side === 'Long' ? 'up' : 'down'">{{ p.side === 'Long' ? 'UP' : 'DOWN' }}</span></td>
+                                <td><span class="badge" :class="p.status === 'Open' ? 'open' : ''">{{ p.status === 'Open' ? 'OPEN' : 'CLOSED' }}</span></td>
+                                <td class="align-right">{{ fmt.num4(p.quantity) }}</td>
+                                <td class="align-right">{{ fmt.price(p.averageEntryPrice) }}</td>
+                                <td class="align-right">{{ fmt.price(p.markPrice) }}</td>
+                                <td class="align-right" :class="fmt.sign(p.unrealizedPnl)">{{ fmt.num2(p.unrealizedPnl) }}</td>
+                                <td class="align-right" :class="fmt.sign(p.realizedPnl)">{{ fmt.num2(p.realizedPnl) }}</td>
+                                <td style="color:var(--fg-3);">{{ fmt.timeHms(p.openedAt) }}</td>
+                                <td style="color:var(--fg-3);">{{ p.closedAt ? fmt.timeHms(p.closedAt) : '—' }}</td>
+                            </tr>
+                            <tr v-if="poll.data.value.length === 0">
+                                <td colspan="11" style="text-align:center;color:var(--fg-3);padding:24px;">Henüz pozisyon yok</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                    <div v-else class="skeleton" style="height:180px"></div>
+                </section>
+            </main>
+        </div>
+    `,
+    setup() {
+        const status = ref("");
+        const symbol = ref("");
+        const poll = usePolling(
+            () => api.positions.list({ status: status.value, symbol: symbol.value }),
+            2000);
+        watch([status, symbol], () => poll.refresh());
+        return { status, symbol, poll, fmt };
+    },
+};
+createApp(App).mount("#app");
+</script>
+</body>
+</html>

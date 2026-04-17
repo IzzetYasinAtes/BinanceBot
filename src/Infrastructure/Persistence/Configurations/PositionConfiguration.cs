@@ -1,0 +1,42 @@
+using BinanceBot.Domain.Positions;
+using BinanceBot.Domain.ValueObjects;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Metadata.Builders;
+
+namespace BinanceBot.Infrastructure.Persistence.Configurations;
+
+public sealed class PositionConfiguration : IEntityTypeConfiguration<Position>
+{
+    public void Configure(EntityTypeBuilder<Position> builder)
+    {
+        builder.ToTable("Positions");
+        builder.HasKey(p => p.Id);
+        builder.Property(p => p.Id).ValueGeneratedOnAdd();
+
+        builder.Property(p => p.Symbol)
+            .HasConversion(s => s.Value, v => Symbol.From(v))
+            .HasMaxLength(20)
+            .IsRequired();
+
+        builder.Property(p => p.Side).HasConversion<int>();
+        builder.Property(p => p.Status).HasConversion<int>();
+
+        builder.Property(p => p.Quantity).HasPrecision(28, 10);
+        builder.Property(p => p.AverageEntryPrice).HasPrecision(28, 10);
+        builder.Property(p => p.ExitPrice).HasPrecision(28, 10);
+        builder.Property(p => p.MarkPrice).HasPrecision(28, 10);
+        builder.Property(p => p.UnrealizedPnl).HasPrecision(28, 10);
+        builder.Property(p => p.RealizedPnl).HasPrecision(28, 10);
+
+        builder.HasIndex(p => p.Symbol)
+            .IsUnique()
+            .HasFilter("[Status] = 1")
+            .HasDatabaseName("UX_Positions_Symbol_Open");
+        builder.HasIndex(p => new { p.Status, p.UpdatedAt })
+            .HasDatabaseName("IX_Positions_Status_Updated");
+        builder.HasIndex(p => p.StrategyId)
+            .HasDatabaseName("IX_Positions_StrategyId");
+
+        builder.Ignore(p => p.DomainEvents);
+    }
+}

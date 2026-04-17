@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Loglar · BinanceBot</title>
+<link rel="stylesheet" href="/css/style.css">
+<script type="importmap">
+{ "imports": { "vue": "https://unpkg.com/vue@3.5.13/dist/vue.esm-browser.prod.js" } }
+</script>
+</head>
+<body>
+<div id="app"></div>
+<script type="module">
+import { createApp, ref, onMounted, onBeforeUnmount, watch } from "vue";
+import { api } from "/js/api.js";
+import { fmt } from "/js/format.js";
+import { Sidebar, ErrorBanner } from "/js/ui.js";
+
+const App = {
+    components: { Sidebar, ErrorBanner },
+    template: `
+        <div class="app">
+            <Sidebar active="logs" />
+            <main>
+                <section class="block">
+                    <h2 class="section">Loglar</h2>
+                    <p class="section-sub">Sistem olayları (order.placed, circuit_breaker, vb.) append-only akışı.</p>
+                    <div class="toolbar">
+                        <label>Seviye
+                            <select v-model="level">
+                                <option value="">hepsi</option>
+                                <option>Info</option><option>Warning</option>
+                                <option>Error</option><option>Critical</option>
+                            </select>
+                        </label>
+                        <label>Limit
+                            <select v-model.number="limit">
+                                <option>50</option><option>100</option>
+                                <option>200</option><option>500</option>
+                            </select>
+                        </label>
+                        <span style="color:var(--fg-3);font-size:12px;">cursor: {{ cursor }}</span>
+                    </div>
+                    <ErrorBanner :error="error" />
+
+                    <table class="data">
+                        <thead><tr>
+                            <th>Id</th><th>Zaman</th><th>Seviye</th>
+                            <th>Kaynak</th><th>Olay</th><th>Correlation</th>
+                        </tr></thead>
+                        <tbody>
+                            <tr v-for="e in rows" :key="e.id">
+                                <td>{{ e.id }}</td>
+                                <td style="color:var(--fg-3);">{{ fmt.timeHms(e.occurredAt) }}</td>
+                                <td><span class="badge" :class="sevBadge(e.severity)">{{ e.severity }}</span></td>
+                                <td>{{ e.source }}</td>
+                                <td>{{ e.eventType }}</td>
+                                <td style="font-size:10.5px;color:var(--fg-3);">{{ e.correlationId || '—' }}</td>
+                            </tr>
+                            <tr v-if="rows.length === 0">
+                                <td colspan="6" style="text-align:center;color:var(--fg-3);padding:24px;">Kayıt yok</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </section>
+            </main>
+        </div>
+    `,
+    setup() {
+        const rows = ref([]);
+        const cursor = ref(0);
+        const level = ref("");
+        const limit = ref(100);
+        const error = ref(null);
+        let timer = null;
+
+        async function tick() {
+            try {
+                const resp = await api.logsTail(cursor.value || undefined, level.value || undefined, limit.value);
+                if (resp.items.length > 0) {
+                    rows.value = [...resp.items, ...rows.value].slice(0, 500);
+                    cursor.value = resp.cursor;
+                }
+                error.value = null;
+            } catch (e) { error.value = e; }
+        }
+        function reset() { rows.value = []; cursor.value = 0; tick(); }
+        watch([level, limit], reset);
+
+        function sevBadge(s) {
+            if (s === "Error" || s === "Critical") return "bad";
+            if (s === "Warning") return "warn";
+            return "";
+        }
+
+        onMounted(() => { tick(); timer = setInterval(tick, 5000); });
+        onBeforeUnmount(() => clearInterval(timer));
+
+        return { rows, cursor, level, limit, error, fmt, sevBadge };
+    },
+};
+createApp(App).mount("#app");
+</script>
+</body>
+</html>

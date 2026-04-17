@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sinyaller · BinanceBot</title>
+<link rel="stylesheet" href="/css/style.css">
+<script type="importmap">
+{ "imports": { "vue": "https://unpkg.com/vue@3.5.13/dist/vue.esm-browser.prod.js" } }
+</script>
+</head>
+<body>
+<div id="app"></div>
+<script type="module">
+import { createApp, ref, watch } from "vue";
+import { api } from "/js/api.js";
+import { fmt } from "/js/format.js";
+import { Sidebar, ErrorBanner, usePolling } from "/js/ui.js";
+
+const App = {
+    components: { Sidebar, ErrorBanner },
+    template: `
+        <div class="app">
+            <Sidebar active="strategies" />
+            <main>
+                <section class="block">
+                    <h2 class="section">Sinyaller</h2>
+                    <p class="section-sub">Tüm stratejiler ve onların son ürettiği sinyaller.</p>
+                    <div class="toolbar">
+                        <label>Durum
+                            <select v-model="status">
+                                <option value="">hepsi</option>
+                                <option>Draft</option>
+                                <option>Paused</option>
+                                <option>Active</option>
+                            </select>
+                        </label>
+                    </div>
+                    <ErrorBanner :error="listPoll.error.value" />
+
+                    <div class="signals-grid" v-if="listPoll.data.value">
+                        <div v-for="s in listPoll.data.value" :key="s.id" class="signal-card"
+                             @click="select(s.id)" style="cursor:pointer;">
+                            <div class="head">
+                                <div>
+                                    <span class="sym">{{ s.name }}</span>
+                                    <span class="iv">{{ s.type }}</span>
+                                </div>
+                                <span class="badge" :class="statusBadge(s.status)">{{ s.status }}</span>
+                            </div>
+                            <div class="rows">
+                                <span class="k">Semboller</span>
+                                <span class="v" style="grid-column:span 3;">{{ s.symbols.join(', ') }}</span>
+                                <span class="k">Oluşturma</span>
+                                <span class="v">{{ fmt.timeHms(s.createdAt) }}</span>
+                                <span class="k">Güncelleme</span>
+                                <span class="v">{{ fmt.timeHms(s.updatedAt) }}</span>
+                            </div>
+                        </div>
+                        <div v-if="listPoll.data.value.length === 0" class="kpi" style="grid-column:1/-1;text-align:center;color:var(--fg-2);padding:24px;">
+                            Henüz strateji yok
+                        </div>
+                    </div>
+                    <div v-else class="skeleton" style="height:120px"></div>
+                </section>
+
+                <section class="block" v-if="detail">
+                    <h2 class="section">Detay — {{ detail.name }} (#{{ detail.id }})</h2>
+                    <p class="section-sub">Parametreler ve son sinyaller.</p>
+                    <div class="kpi-row">
+                        <div class="kpi"><div class="label">Tip</div><div class="value small">{{ detail.type }}</div></div>
+                        <div class="kpi"><div class="label">Durum</div>
+                            <div class="value small">
+                                <span class="badge" :class="statusBadge(detail.status)">{{ detail.status }}</span>
+                            </div>
+                        </div>
+                        <div class="kpi"><div class="label">Sinyal (24s)</div><div class="value small">{{ detail.signalCountLast24h }}</div></div>
+                        <div class="kpi"><div class="label">Aktivasyon</div>
+                            <div class="value small">{{ detail.activatedAt ? fmt.timeIso(detail.activatedAt) : '—' }}</div>
+                        </div>
+                    </div>
+                    <pre style="margin-top:12px;padding:10px;background:var(--bg-2);border-radius:var(--radius-sm);overflow:auto;font-size:11px;color:var(--fg-1);">{{ detail.parametersJson }}</pre>
+
+                    <h2 class="section" style="margin-top:18px;">Son Sinyaller</h2>
+                    <table class="data" v-if="signals">
+                        <thead><tr>
+                            <th>Zaman</th><th>Sembol</th><th>Yön</th>
+                            <th class="align-right">Qty</th><th class="align-right">Fiyat</th>
+                        </tr></thead>
+                        <tbody>
+                            <tr v-for="s in signals.slice(0, 20)" :key="s.id">
+                                <td style="color:var(--fg-3);">{{ fmt.timeHms(s.emittedAt) }}</td>
+                                <td><strong>{{ s.symbol }}</strong></td>
+                                <td><span class="badge" :class="dirBadge(s.direction)">{{ dirLabel(s.direction) }}</span></td>
+                                <td class="align-right">{{ fmt.num4(s.suggestedQuantity) }}</td>
+                                <td class="align-right">{{ s.suggestedPrice ? fmt.price(s.suggestedPrice) : '—' }}</td>
+                            </tr>
+                            <tr v-if="signals.length === 0">
+                                <td colspan="5" style="text-align:center;color:var(--fg-3);padding:18px;">Sinyal yok</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </section>
+            </main>
+        </div>
+    `,
+    setup() {
+        const status = ref("");
+        const detail = ref(null);
+        const signals = ref(null);
+
+        const listPoll = usePolling(() => api.strategies.list(status.value), 5000);
+        watch(status, () => listPoll.refresh());
+
+        async function select(id) {
+            detail.value = null; signals.value = null;
+            try {
+                detail.value = await api.strategies.detail(id);
+                signals.value = await api.strategies.signals(id);
+            } catch {}
+        }
+
+        function statusBadge(s) {
+            if (s === "Active") return "good";
+            if (s === "Paused") return "warn";
+            return "";
+        }
+        function dirLabel(d) { return d === "Long" ? "UP" : d === "Short" ? "DOWN" : "EXIT"; }
+        function dirBadge(d) { return d === "Long" ? "up" : d === "Short" ? "down" : "warn"; }
+
+        return { status, detail, signals, listPoll, select, statusBadge, dirLabel, dirBadge, fmt };
+    },
+};
+createApp(App).mount("#app");
+</script>
+</body>
+</html>

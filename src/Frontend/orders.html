@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>İşlemler · BinanceBot</title>
+<link rel="stylesheet" href="/css/style.css">
+<script type="importmap">
+{ "imports": { "vue": "https://unpkg.com/vue@3.5.13/dist/vue.esm-browser.prod.js" } }
+</script>
+</head>
+<body>
+<div id="app"></div>
+<script type="module">
+import { createApp, ref, watch, computed } from "vue";
+import { api } from "/js/api.js";
+import { fmt } from "/js/format.js";
+import { Sidebar, ErrorBanner, usePolling } from "/js/ui.js";
+
+const OrderRows = {
+    props: ["rows"],
+    setup(props) {
+        function statusBadge(s) {
+            if (s === "Filled") return "good";
+            if (s === "Rejected" || s === "Cancelled" || s === "Expired") return "bad";
+            if (s === "PartiallyFilled") return "warn";
+            return "open";
+        }
+        return { fmt, statusBadge };
+    },
+    template: `
+        <table class="data">
+            <thead><tr>
+                <th>ClientId</th><th>Sembol</th><th>Yön</th><th>Tip</th><th>Durum</th>
+                <th class="align-right">Adet</th>
+                <th class="align-right">Gerçekleşen</th>
+                <th class="align-right">Fiyat</th>
+                <th>Zaman</th>
+            </tr></thead>
+            <tbody>
+                <tr v-for="o in rows" :key="o.clientOrderId">
+                    <td style="font-size:10.5px;color:var(--fg-3);">{{ o.clientOrderId }}</td>
+                    <td><strong>{{ o.symbol }}</strong></td>
+                    <td><span class="badge" :class="o.side === 'Buy' ? 'up' : 'down'">{{ o.side === 'Buy' ? 'UP' : 'DOWN' }}</span></td>
+                    <td>{{ o.type }}</td>
+                    <td><span class="badge" :class="statusBadge(o.status)">{{ o.status }}</span></td>
+                    <td class="align-right">{{ fmt.num4(o.quantity) }}</td>
+                    <td class="align-right">{{ fmt.num4(o.executedQuantity) }}</td>
+                    <td class="align-right">{{ o.price ? fmt.price(o.price) : '—' }}</td>
+                    <td style="color:var(--fg-3);">{{ fmt.timeHms(o.createdAt) }}</td>
+                </tr>
+                <tr v-if="rows.length === 0">
+                    <td colspan="9" style="text-align:center;color:var(--fg-3);padding:18px;">Kayıt yok</td>
+                </tr>
+            </tbody>
+        </table>
+    `,
+};
+
+const App = {
+    components: { Sidebar, ErrorBanner, OrderRows },
+    template: `
+        <div class="app">
+            <Sidebar active="orders" />
+            <main>
+                <section class="block">
+                    <h2 class="section">Açık İşlemler</h2>
+                    <p class="section-sub">Henüz doldurulmamış aktif order'lar.</p>
+                    <ErrorBanner :error="openPoll.error.value" />
+                    <OrderRows v-if="openPoll.data.value" :rows="openPoll.data.value" />
+                    <div v-else class="skeleton" style="height:80px"></div>
+                </section>
+
+                <section class="block">
+                    <h2 class="section">İşlem Geçmişi</h2>
+                    <p class="section-sub">Son gerçekleşen alım/satım kayıtları.</p>
+                    <div class="toolbar">
+                        <label>Sembol
+                            <input v-model="symbol" placeholder="opsiyonel" style="width:120px;">
+                        </label>
+                        <label>Limit
+                            <select v-model.number="take">
+                                <option>20</option><option>50</option><option>100</option>
+                            </select>
+                        </label>
+                        <span style="color:var(--fg-3);font-size:12px;" v-if="historyPoll.data.value">
+                            toplam: {{ historyPoll.data.value.totalCount }}
+                        </span>
+                    </div>
+                    <ErrorBanner :error="historyPoll.error.value" />
+                    <OrderRows v-if="historyPoll.data.value" :rows="historyPoll.data.value.items" />
+                    <div v-else class="skeleton" style="height:80px"></div>
+                </section>
+            </main>
+        </div>
+    `,
+    setup() {
+        const symbol = ref("");
+        const take = ref(50);
+
+        const openPoll = usePolling(() => api.orders.open(symbol.value), 3000);
+        const historyPoll = usePolling(
+            () => api.orders.history({ symbol: symbol.value, skip: 0, take: take.value }),
+            5000);
+
+        watch([symbol, take], () => { openPoll.refresh(); historyPoll.refresh(); });
+
+        return { symbol, take, openPoll, historyPoll };
+    },
+};
+
+createApp(App).mount("#app");
+</script>
+</body>
+</html>

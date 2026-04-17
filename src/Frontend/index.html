@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Genel Bakış · BinanceBot</title>
+<link rel="stylesheet" href="/css/style.css">
+<script type="importmap">
+{
+    "imports": {
+        "vue": "https://unpkg.com/vue@3.5.13/dist/vue.esm-browser.prod.js"
+    }
+}
+</script>
+</head>
+<body>
+<div id="app"></div>
+<script type="module">
+import { createApp, computed } from "vue";
+import { api } from "/js/api.js";
+import { fmt } from "/js/format.js";
+import { Sidebar, ErrorBanner, usePolling } from "/js/ui.js";
+
+const SYMBOLS = ["BTCUSDT", "ETHUSDT", "BNBUSDT"];
+
+const App = {
+    components: { Sidebar, ErrorBanner },
+    template: `
+        <div class="app">
+            <Sidebar active="dashboard" />
+            <main>
+                <ErrorBanner :error="anyError" />
+
+                <section class="block">
+                    <h2 class="section">Portföy Özeti</h2>
+                    <p class="section-sub">
+                        Çalışan motorların anlık özet bilgileri. Mevcut bakiye, kar/zarar, kazanma oranı ve açık pozisyon sayısı burada görünür.
+                    </p>
+                    <div class="kpi-row">
+                        <div class="kpi">
+                            <div class="label">Başlangıç Bakiyesi</div>
+                            <div class="value">$1.000,00</div>
+                        </div>
+                        <div class="kpi">
+                            <div class="label">Mevcut Bakiye</div>
+                            <div class="value" :class="equityClass">\${{ fmt.num2(equity) }}</div>
+                        </div>
+                        <div class="kpi">
+                            <div class="label">Realized Today</div>
+                            <div class="value" :class="fmt.sign(pnl?.realizedToday)">
+                                \${{ fmt.num2(pnl?.realizedToday ?? 0) }}
+                            </div>
+                        </div>
+                        <div class="kpi">
+                            <div class="label">Unrealized</div>
+                            <div class="value" :class="fmt.sign(pnl?.unrealizedTotal)">
+                                \${{ fmt.num2(pnl?.unrealizedTotal ?? 0) }}
+                            </div>
+                        </div>
+                        <div class="kpi">
+                            <div class="label">Kazanma Oranı</div>
+                            <div class="value small">{{ winRateLabel }}</div>
+                            <div class="hint">{{ winRateHint }}</div>
+                        </div>
+                        <div class="kpi">
+                            <div class="label">Toplam İşlem</div>
+                            <div class="value">{{ totalOrders }}</div>
+                            <div class="hint">{{ openCount }} açık</div>
+                        </div>
+                    </div>
+                </section>
+
+                <section class="block">
+                    <h2 class="section">Aktif Sinyaller</h2>
+                    <p class="section-sub">
+                        Sistem tarafından üretilen son alım-satım sinyalleri. Her kart bir kripto para için
+                        üretilen yön tahminini gösterir. UP = fiyat artacak, DOWN = fiyat düşecek.
+                    </p>
+                    <div class="signals-grid" v-if="signals && signals.length > 0">
+                        <div v-for="s in signals" :key="s.id" class="signal-card">
+                            <div class="head">
+                                <div>
+                                    <span class="sym">{{ baseAsset(s.symbol) }}</span>
+                                    <span class="iv">{{ s.strategyType }}</span>
+                                </div>
+                                <span class="badge" :class="signalBadge(s.direction)">{{ signalLabel(s.direction) }}</span>
+                            </div>
+                            <div class="rows">
+                                <span class="k">Fiyat</span>
+                                <span class="v accent">{{ s.suggestedPrice ? fmt.price(s.suggestedPrice) : '—' }}</span>
+                                <span class="k">Qty</span>
+                                <span class="v">{{ fmt.num4(s.suggestedQuantity) }}</span>
+                                <span class="k">Bar</span>
+                                <span class="v">{{ fmt.timeHms(s.barOpenTime) }}</span>
+                                <span class="k">Strat</span>
+                                <span class="v">{{ s.strategyName }}</span>
+                            </div>
+                            <div class="time">{{ fmt.timeIso(s.emittedAt) }}</div>
+                        </div>
+                    </div>
+                    <div v-else-if="signals" class="kpi" style="color:var(--fg-2);text-align:center;padding:20px;">
+                        Henüz sinyal yok · Aktif strateji gerekiyor
+                    </div>
+                    <div v-else class="signals-grid">
+                        <div v-for="n in 4" :key="n" class="skeleton" style="height:120px"></div>
+                    </div>
+                </section>
+
+                <section class="block">
+                    <h2 class="section">Canlı Piyasa</h2>
+                    <p class="section-sub">Takip edilen sembollerin son fiyat ve 24s hacmi.</p>
+                    <table class="data" v-if="summary">
+                        <thead><tr>
+                            <th>Sembol</th>
+                            <th class="align-right">Son Fiyat</th>
+                            <th class="align-right">Mid</th>
+                            <th class="align-right">24s Değişim</th>
+                            <th class="align-right">24s Hacim</th>
+                            <th class="align-right">Güncelleme</th>
+                        </tr></thead>
+                        <tbody>
+                            <tr v-for="row in summary" :key="row.symbol">
+                                <td><strong>{{ row.symbol }}</strong></td>
+                                <td class="align-right">{{ fmt.price(row.lastPrice) }}</td>
+                                <td class="align-right">{{ fmt.price(row.markPrice) }}</td>
+                                <td class="align-right" :class="fmt.sign(row.change24hPct)">
+                                    {{ fmt.pctRaw(row.change24hPct) }}
+                                </td>
+                                <td class="align-right">{{ fmt.num2(row.volume24hQuote) }}</td>
+                                <td class="align-right" style="color:var(--fg-3);">{{ fmt.timeHms(row.asOfUtc) }}</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                    <div v-else class="skeleton" style="height:140px"></div>
+                </section>
+
+                <section class="block">
+                    <h2 class="section">Son İşlemler</h2>
+                    <p class="section-sub">En son gerçekleştirilen alım-satım işlemleri. Giriş fiyatı, kar/zarar ve işlem durumu burada takip edilir.</p>
+                    <table class="data" v-if="orders">
+                        <thead><tr>
+                            <th>Sembol</th><th>Yön</th><th>Tip</th>
+                            <th class="align-right">Adet</th>
+                            <th class="align-right">Fiyat</th>
+                            <th class="align-right">Gerçekleşen</th>
+                            <th>Durum</th>
+                            <th>Zaman</th>
+                        </tr></thead>
+                        <tbody>
+                            <tr v-for="o in orders.items" :key="o.clientOrderId">
+                                <td><strong>{{ o.symbol }}</strong></td>
+                                <td><span class="badge" :class="o.side === 'Buy' ? 'up' : 'down'">{{ o.side === 'Buy' ? 'UP' : 'DOWN' }}</span></td>
+                                <td>{{ o.type }}</td>
+                                <td class="align-right">{{ fmt.num4(o.quantity) }}</td>
+                                <td class="align-right">{{ o.price ? fmt.price(o.price) : '—' }}</td>
+                                <td class="align-right">{{ fmt.num4(o.executedQuantity) }}</td>
+                                <td><span class="badge" :class="statusBadge(o.status)">{{ statusLabel(o.status) }}</span></td>
+                                <td style="color:var(--fg-3);">{{ fmt.timeHms(o.createdAt) }}</td>
+                            </tr>
+                            <tr v-if="orders.items.length === 0">
+                                <td colspan="8" style="text-align:center;color:var(--fg-3);padding:18px;">Henüz işlem yok</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                    <div v-else class="skeleton" style="height:140px"></div>
+                </section>
+            </main>
+        </div>
+    `,
+    setup() {
+        const summaryPoll  = usePolling(() => api.marketSummary(SYMBOLS), 3000);
+        const pnlPoll      = usePolling(() => api.positions.pnlToday(), 3000);
+        const signalsPoll  = usePolling(() => api.strategies.latestSignals(8), 5000);
+        const ordersPoll   = usePolling(() => api.orders.history({ skip: 0, take: 15 }), 5000);
+
+        const anyError = computed(() =>
+            summaryPoll.error.value ?? pnlPoll.error.value
+            ?? signalsPoll.error.value ?? ordersPoll.error.value);
+
+        const equity = computed(() => {
+            const realized = Number(pnlPoll.data.value?.realizedToday ?? 0);
+            const unreal   = Number(pnlPoll.data.value?.unrealizedTotal ?? 0);
+            return 1000 + realized + unreal;
+        });
+        const equityClass = computed(() => {
+            const diff = equity.value - 1000;
+            return diff > 0 ? "metric-good" : diff < 0 ? "metric-bad" : "metric-neutral";
+        });
+
+        const totalOrders = computed(() => ordersPoll.data.value?.totalCount ?? 0);
+        const openCount   = computed(() => pnlPoll.data.value?.openPositionCount ?? 0);
+
+        const winRateLabel = computed(() => {
+            const items = ordersPoll.data.value?.items ?? [];
+            if (items.length === 0) return "—";
+            const filled = items.filter(o => o.status === "Filled").length;
+            const rejected = items.filter(o => ["Rejected","Expired","Cancelled"].includes(o.status)).length;
+            const total = filled + rejected;
+            if (total === 0) return "—";
+            return `${((filled / total) * 100).toFixed(1)}%`;
+        });
+        const winRateHint = computed(() => {
+            const items = ordersPoll.data.value?.items ?? [];
+            const filled = items.filter(o => o.status === "Filled").length;
+            return `${filled} doldu / ${items.length} toplam`;
+        });
+
+        function baseAsset(sym) {
+            return sym.replace(/USDT$/i, "");
+        }
+        function signalLabel(dir) {
+            return dir === "Long" ? "UP" : dir === "Short" ? "DOWN" : "EXIT";
+        }
+        function signalBadge(dir) {
+            return dir === "Long" ? "up" : dir === "Short" ? "down" : "warn";
+        }
+        function statusBadge(s) {
+            if (s === "Filled") return "good";
+            if (s === "Rejected" || s === "Cancelled" || s === "Expired") return "bad";
+            if (s === "PartiallyFilled") return "warn";
+            return "open";
+        }
+        function statusLabel(s) {
+            return s === "Filled" ? "FILLED"
+                : s === "Cancelled" ? "CANCEL"
+                : s === "Rejected" ? "REJECT"
+                : s === "PartiallyFilled" ? "PART"
+                : s === "Expired" ? "EXPIR"
+                : "OPEN";
+        }
+
+        return {
+            summary: summaryPoll.data,
+            pnl: pnlPoll.data,
+            signals: signalsPoll.data,
+            orders: ordersPoll.data,
+            anyError,
+            equity, equityClass, totalOrders, openCount,
+            winRateLabel, winRateHint,
+            baseAsset, signalLabel, signalBadge, statusBadge, statusLabel,
+            fmt,
+        };
+    },
+};
+
+createApp(App).mount("#app");
+</script>
+</body>
+</html>

@@ -11,6 +11,11 @@
 *.sln.docstates
 *.env
 
+# Runtime artifacts
+src/Api/logs/
+.claude/scheduled_tasks.lock
+.claude/scheduled_tasks.json
+
 # User-specific files (MonoDevelop/Xamarin Studio)
 *.userprefs
 
