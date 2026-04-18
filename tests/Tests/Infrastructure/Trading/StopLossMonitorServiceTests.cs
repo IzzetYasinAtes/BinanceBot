@@ -24,12 +24,22 @@ namespace BinanceBot.Tests.Infrastructure.Trading;
 /// </summary>
 public class StopLossMonitorServiceTests
 {
-    private static IServiceScopeFactory BuildScope(StubDbContext db, IMediator mediator)
+    private static IServiceScopeFactory BuildScope(StubDbContext db, IMediator mediator, IClock? clock = null)
     {
         var sc = new ServiceCollection();
         sc.AddSingleton<IApplicationDbContext>(db);
         sc.AddSingleton(mediator);
+        // ADR-0014 §14.5: monitor now resolves IClock to drive the time-stop branch.
+        sc.AddSingleton(clock ?? new FixedClock(DateTimeOffset.UtcNow));
         return sc.BuildServiceProvider().GetRequiredService<IServiceScopeFactory>();
+    }
+
+    private sealed class FixedClock : IClock
+    {
+        public FixedClock(DateTimeOffset now) { UtcNow = now; }
+        public DateTimeOffset UtcNow { get; }
+        public long BinanceServerTimeMs => UtcNow.ToUnixTimeMilliseconds();
+        public long DriftMs => 0;
     }
 
     private static StubDbContext NewDb()

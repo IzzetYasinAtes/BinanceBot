@@ -31,6 +31,16 @@ public sealed class Position : AggregateRoot<long>
     /// </summary>
     public decimal? TakeProfit { get; private set; }
 
+    /// <summary>
+    /// Optional pattern-based time stop (ADR-0014 §14.5). When set,
+    /// <see cref="Infrastructure.Trading.StopLossMonitorService"/> dispatches a
+    /// <c>CloseSignalPositionCommand</c> when <c>Now - OpenedAt &gt; MaxHoldDuration</c>.
+    /// Persisted as <c>MaxHoldDurationSeconds</c> (long?) — null means no time stop.
+    /// Pattern detectors return per-pattern <c>MaxHoldBars</c>; the handler converts
+    /// it to <see cref="TimeSpan"/> via 1 bar = 1 minute (BinanceBot 1m bars).
+    /// </summary>
+    public TimeSpan? MaxHoldDuration { get; private set; }
+
     public decimal UnrealizedPnl { get; private set; }
     public decimal RealizedPnl { get; private set; }
     public long? StrategyId { get; private set; }
@@ -50,7 +60,8 @@ public sealed class Position : AggregateRoot<long>
         long? strategyId,
         TradingMode mode,
         DateTimeOffset now,
-        decimal? takeProfit = null)
+        decimal? takeProfit = null,
+        TimeSpan? maxHoldDuration = null)
     {
         if (quantity <= 0m)
         {
@@ -68,6 +79,10 @@ public sealed class Position : AggregateRoot<long>
         {
             throw new DomainException("Take-profit must be positive when set.");
         }
+        if (maxHoldDuration is TimeSpan d && d <= TimeSpan.Zero)
+        {
+            throw new DomainException("Max hold duration must be positive when set.");
+        }
 
         var position = new Position
         {
@@ -79,6 +94,7 @@ public sealed class Position : AggregateRoot<long>
             MarkPrice = entryPrice,
             StopPrice = stopPrice,
             TakeProfit = takeProfit,
+            MaxHoldDuration = maxHoldDuration,
             StrategyId = strategyId,
             Mode = mode,
             OpenedAt = now,

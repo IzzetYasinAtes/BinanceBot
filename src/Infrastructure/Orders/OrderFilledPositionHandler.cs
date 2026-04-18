@@ -1,3 +1,4 @@
+using System.Text.Json;
 using BinanceBot.Application.Abstractions;
 using BinanceBot.Domain.Common;
 using BinanceBot.Domain.Orders;
@@ -66,6 +67,44 @@ public sealed class OrderFilledPositionHandler : INotificationHandler<OrderFille
                 p.Mode == order.Mode &&
                 p.Status == PositionStatus.Open, cancellationToken);
 
+        // ADR-0014 §14.5 + decision-pattern-reform.md C9 (option B): the pattern
+        // evaluator's MaxHoldBars travels in StrategySignal.ContextJson (the Order
+        // schema doesn't carry it). Look up the most recent signal for the same
+        // (symbol, strategy) within a 5-minute freshness window and decode the
+        // optional <c>maxHoldBars</c> field. Older / non-pattern strategies leave
+        // it null — Position.MaxHoldDuration stays null and time stop is inert.
+        TimeSpan? maxHoldDuration = null;
+        if (order.StrategyId is long sid)
+        {
+            var freshnessCutoff = now.AddMinutes(-5);
+            var lastSignal = await db.StrategySignals.AsNoTracking()
+                .Where(s => s.Symbol == order.Symbol
+                    && s.StrategyId == sid
+                    && s.EmittedAt >= freshnessCutoff)
+                .OrderByDescending(s => s.EmittedAt)
+                .FirstOrDefaultAsync(cancellationToken);
+
+            if (lastSignal is not null && !string.IsNullOrWhiteSpace(lastSignal.ContextJson))
+            {
+                try
+                {
+                    using var doc = JsonDocument.Parse(lastSignal.ContextJson);
+                    if (doc.RootElement.TryGetProperty("maxHoldBars", out var mhb)
+                        && mhb.ValueKind == JsonValueKind.Number
+                        && mhb.TryGetInt32(out var bars)
+                        && bars > 0)
+                    {
+                        // BinanceBot 1m bars — 1 bar = 1 minute.
+                        maxHoldDuration = TimeSpan.FromMinutes(bars);
+                    }
+                }
+                catch (JsonException)
+                {
+                    // Non-pattern strategies' ContextJson is opaque — silent.
+                }
+            }
+        }
+
         try
         {
             if (openPosition is null)
@@ -75,9 +114,11 @@ public sealed class OrderFilledPositionHandler : INotificationHandler<OrderFille
                 // can soft-trigger an exit when mark price crosses the level.
                 // Loop 10 take-profit fix: same forwarding pattern for Order.TakeProfit so
                 // TakeProfitMonitorService can realize gains on the resulting Position.
+                // ADR-0014 §14.5: maxHoldDuration sourced above from StrategySignal.ContextJson.
                 var pos = Position.Open(order.Symbol, newSide, fillQty, fillPrice,
                     order.StopPrice, order.StrategyId, order.Mode, now,
-                    takeProfit: order.TakeProfit);
+                    takeProfit: order.TakeProfit,
+                    maxHoldDuration: maxHoldDuration);
                 db.Positions.Add(pos);
                 _logger.LogInformation(
                     "Position opened from fill {Cid} side={Side} qty={Qty} price={Price}",
@@ -112,7 +153,8 @@ public sealed class OrderFilledPositionHandler : INotificationHandler<OrderFille
                         // The flip uses the same incoming stop / take-profit hints as the closing entry order.
                         var flip = Position.Open(order.Symbol, flipSide, leftover, fillPrice,
                             order.StopPrice, order.StrategyId, order.Mode, now,
-                            takeProfit: order.TakeProfit);
+                            takeProfit: order.TakeProfit,
+                            maxHoldDuration: maxHoldDuration);
                         db.Positions.Add(flip);
                         _logger.LogInformation(
                             "Position {Pos} flipped from leftover qty={Qty}",

@@ -30,6 +30,14 @@ public sealed class PositionConfiguration : IEntityTypeConfiguration<Position>
         builder.Property(p => p.StopPrice).HasColumnType("decimal(18,8)");
         // Loop 10 take-profit fix — symmetric to StopPrice (decimal(18,8) NULL).
         builder.Property(p => p.TakeProfit).HasColumnType("decimal(18,8)");
+        // ADR-0014 §14.5: pattern-based time stop. TimeSpan is not a native EF type;
+        // store seconds (long?). null = no time stop. Conversion is symmetric so the
+        // domain stays in TimeSpan and the database stays in bigint.
+        builder.Property(p => p.MaxHoldDuration)
+            .HasColumnName("MaxHoldDurationSeconds")
+            .HasConversion(
+                v => v.HasValue ? (long?)(long)v.Value.TotalSeconds : null,
+                v => v.HasValue ? (TimeSpan?)TimeSpan.FromSeconds(v.Value) : null);
         builder.Property(p => p.UnrealizedPnl).HasPrecision(28, 10);
         builder.Property(p => p.RealizedPnl).HasPrecision(28, 10);
 
