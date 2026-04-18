@@ -28,7 +28,10 @@ public sealed record PlaceOrderCommand(
     decimal? Price,
     decimal? StopPrice,
     long? StrategyId,
-    TradingMode Mode) : IRequest<Result<PlacedOrderDto>>;
+    TradingMode Mode,
+    // Loop 10 take-profit fix — optional profit target forwarded onto the resulting Position.
+    // Default null preserves backward compatibility with existing call sites and tests.
+    decimal? TakeProfit = null) : IRequest<Result<PlacedOrderDto>>;
 
 public sealed record PlacedOrderDto(
     string ClientOrderId,
@@ -141,7 +144,8 @@ public sealed class PlaceOrderCommandHandler
         var order = Order.Place(
             request.ClientOrderId, symbolVo, side, type, tif,
             request.Quantity, request.Price, request.StopPrice,
-            request.StrategyId, request.Mode, _clock.UtcNow);
+            request.StrategyId, request.Mode, _clock.UtcNow,
+            takeProfit: request.TakeProfit);
 
         _db.Orders.Add(order);
 

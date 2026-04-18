@@ -12,6 +12,12 @@ public sealed class StrategySignal : Entity<long>
     public decimal SuggestedQuantity { get; private set; }
     public decimal? SuggestedPrice { get; private set; }
     public decimal? SuggestedStopPrice { get; private set; }
+    /// <summary>
+    /// Loop 10 take-profit fix — evaluator-suggested profit target travelling alongside
+    /// the entry signal. Default null preserves backward compatibility for callers that
+    /// don't compute one (e.g. Grid).
+    /// </summary>
+    public decimal? SuggestedTakeProfit { get; private set; }
     public string ContextJson { get; private set; } = "{}";
     public DateTimeOffset EmittedAt { get; private set; }
 
@@ -25,7 +31,8 @@ public sealed class StrategySignal : Entity<long>
         decimal? price,
         decimal? stopPrice,
         string contextJson,
-        DateTimeOffset emittedAt)
+        DateTimeOffset emittedAt,
+        decimal? takeProfit = null)
     {
         if (quantity <= 0m)
         {
@@ -40,6 +47,7 @@ public sealed class StrategySignal : Entity<long>
             SuggestedQuantity = quantity,
             SuggestedPrice = price,
             SuggestedStopPrice = stopPrice,
+            SuggestedTakeProfit = takeProfit,
             ContextJson = string.IsNullOrWhiteSpace(contextJson) ? "{}" : contextJson,
             EmittedAt = emittedAt,
         };

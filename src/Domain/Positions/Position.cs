@@ -22,6 +22,15 @@ public sealed class Position : AggregateRoot<long>
     /// </summary>
     public decimal? StopPrice { get; private set; }
 
+    /// <summary>
+    /// Optional profit-taking level captured at open time (Loop 10 fix — realize gains).
+    /// Persisted alongside the aggregate so <c>TakeProfitMonitorService</c> can soft-trigger
+    /// an exit when mark price reaches this threshold. Symmetric to <see cref="StopPrice"/>:
+    /// long positions exit when price &gt;= TakeProfit; short positions when price &lt;= TakeProfit.
+    /// Stored independently — strategies compute TP per evaluator (ATR multiple, mean band, etc.).
+    /// </summary>
+    public decimal? TakeProfit { get; private set; }
+
     public decimal UnrealizedPnl { get; private set; }
     public decimal RealizedPnl { get; private set; }
     public long? StrategyId { get; private set; }
@@ -40,7 +49,8 @@ public sealed class Position : AggregateRoot<long>
         decimal? stopPrice,
         long? strategyId,
         TradingMode mode,
-        DateTimeOffset now)
+        DateTimeOffset now,
+        decimal? takeProfit = null)
     {
         if (quantity <= 0m)
         {
@@ -54,6 +64,10 @@ public sealed class Position : AggregateRoot<long>
         {
             throw new DomainException("Stop price must be positive when set.");
         }
+        if (takeProfit is decimal tp && tp <= 0m)
+        {
+            throw new DomainException("Take-profit must be positive when set.");
+        }
 
         var position = new Position
         {
@@ -64,6 +78,7 @@ public sealed class Position : AggregateRoot<long>
             AverageEntryPrice = entryPrice,
             MarkPrice = entryPrice,
             StopPrice = stopPrice,
+            TakeProfit = takeProfit,
             StrategyId = strategyId,
             Mode = mode,
             OpenedAt = now,

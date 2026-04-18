@@ -14,6 +14,9 @@ public sealed class TrendFollowingEvaluator : IStrategyEvaluator
         public int SlowEma { get; set; } = 8;
         public int AtrPeriod { get; set; } = 14;
         public decimal AtrStopMultiplier { get; set; } = 2.0m;
+        // Loop 10 take-profit fix — asymmetric R:R: stop @ ATR×2 (default) / TP @ ATR×3
+        // ⇒ R:R = 1.5. Override per strategy seed when needed.
+        public decimal AtrTakeProfitMultiplier { get; set; } = 3.0m;
         public decimal OrderSize { get; set; } = 0.001m;
 
         // ADR-0012 §12.5: RSI confirmation filter — drop EMA crosses while the market is in
@@ -59,6 +62,14 @@ public sealed class TrendFollowingEvaluator : IStrategyEvaluator
         var stopPrice = crossedUp
             ? latest.ClosePrice - atr * p.AtrStopMultiplier
             : latest.ClosePrice + atr * p.AtrStopMultiplier;
+        // Loop 10 take-profit fix — TP at ATR multiple opposite the stop (asymmetric R:R).
+        // Skipped when ATR is non-positive (insufficient history) — null is forwarded as
+        // "no TP target" and TakeProfitMonitorService leaves the position alone.
+        decimal? takeProfit = atr > 0m
+            ? (crossedUp
+                ? latest.ClosePrice + atr * p.AtrTakeProfitMultiplier
+                : latest.ClosePrice - atr * p.AtrTakeProfitMultiplier)
+            : null;
 
         var ctx = EvaluatorParameterHelper.SerializeContext(new
         {
@@ -68,6 +79,7 @@ public sealed class TrendFollowingEvaluator : IStrategyEvaluator
             atr,
             rsi,
             cross = crossedUp ? "up" : "down",
+            takeProfit,
         });
 
         return Task.FromResult<StrategyEvaluation?>(new StrategyEvaluation(
@@ -75,6 +87,7 @@ public sealed class TrendFollowingEvaluator : IStrategyEvaluator
             p.OrderSize,
             latest.ClosePrice,
             stopPrice,
-            ctx));
+            ctx,
+            SuggestedTakeProfit: takeProfit));
     }
 }

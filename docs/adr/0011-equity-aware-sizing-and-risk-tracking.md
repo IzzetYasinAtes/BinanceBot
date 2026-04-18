@@ -3,11 +3,11 @@
 Date: 2026-04-17
 Status: Accepted
 
-> Operasyonel detay (kod sablonu, dosya/satir listesi, agent zinciri) icin bkz. `loop_3/decision-sizing.md`. Burada normatif karar.
+> Operasyonel detay (kod sablonu, dosya/satir listesi, agent zinciri) icin bkz. `loops/loop_3/decision-sizing.md`. Burada normatif karar.
 
 ## Context
 
-Loop 2 sonrasi PM tanisi (`loop_3/plan.md` P0 #3+#4+#7+#8) ve binance-expert arastirmasi (`loop_3/research-sizing.md`) birlesik tek bir kirilma noktasini ortaya koydu: BinanceBot'un risk yonetimi **kagit uzerinde var, calisma anlaminda yok**. Detaylar:
+Loop 2 sonrasi PM tanisi (`loops/loop_3/plan.md` P0 #3+#4+#7+#8) ve binance-expert arastirmasi (`loops/loop_3/research-sizing.md`) birlesik tek bir kirilma noktasini ortaya koydu: BinanceBot'un risk yonetimi **kagit uzerinde var, calisma anlaminda yok**. Detaylar:
 
 1. **Sizing equity-aware degil.** `TrendFollowingEvaluator` ve `MeanReversionEvaluator` `parametersJson.OrderSize`'tan sabit `qty` doner (BTC 0.001, BNB 0.01). Sermaye buyuse de kuculse de ayni miktar. Quarter Kelly + risk-per-trade pratigi ([ADR-0005](./0005-risk-limit-policy.md)) calismiyor.
 2. **`StrategySignalToOrderHandler` hardcode `0.001m` BTC** (mevcut satir 56). Sinyal `SuggestedQuantity` taşisa bile fan-out handler okumuyor — fixed `0.001m` her zaman; BNB icin $0.63 notional → minNotional `5 USDT` altina duser → testnet reject; XRP icin stepSize 0.1 ile uyumsuz.
@@ -15,8 +15,8 @@ Loop 2 sonrasi PM tanisi (`loop_3/plan.md` P0 #3+#4+#7+#8) ve binance-expert ara
 4. **Exit sinyali yok sayiliyor.** `StrategySignalToOrderHandler:31-34` `if (notification.Direction == Exit) return;` log + sessizce drop. Acik pozisyonlar surekli OPEN; trend stratejisi cikis veremiyor; risk hesaplari (`RealizedPnl24h`) hep 0.
 5. **RiskProfile guncellemesi sadece `PositionClosedEvent`'e bagli** — pozisyon kapatma akisi yoksa, bu handler hic tetiklenmez. Sonuc: `RealizedPnl24h=0`, `PeakEquity=0`, `CurrentDrawdownPct=0`, `CircuitBreakerStatus=Healthy` permanent. CB hicbir zaman trip olmaz.
 6. **Risk parametre default'lari boot'tan gelmiyor.** `RiskProfile.CreateDefault` 3 mode icin (`ADR-0008 §8.6`) `RiskPerTradePct=0.01`, `MaxPositionSizePct=0.10` yaziyor; ama `StrategyConfigSeeder`'a paralel `RiskProfileSeeder` yok — boot davranisi tek kaynaktan tanimli degil.
-7. **Slippage modeli yok.** Paper, depth `bookTicker` (single-level) varsa best-ask/bid ile dolduruyor; gercek mainnet'te 5-10 bps slippage tipiktir; testnet depth zayif. `loop_3/research-sizing.md` `%0.05` sabit slippage onermistir.
-8. **Cikis emrinde Stop-Loss yok.** [ADR-0005 §5.3](./0005-risk-limit-policy.md) "her trade'le paired STOP_LOSS_LIMIT" diyor; mevcut implementasyon `StopPrice` field'ini Order'a yaziyor ama Binance tarafinda OCO atmiyor. Bu **ADR-0011 scope disinda** — ayri ADR-0012 STOP/OCO icin reserve edilir; Loop 3'te sadece **client-side soft-exit** (Evaluator Direction.Exit + ClosePositionCommand) eklenir, `loop_3/decision-sizing.md`'de net.
+7. **Slippage modeli yok.** Paper, depth `bookTicker` (single-level) varsa best-ask/bid ile dolduruyor; gercek mainnet'te 5-10 bps slippage tipiktir; testnet depth zayif. `loops/loop_3/research-sizing.md` `%0.05` sabit slippage onermistir.
+8. **Cikis emrinde Stop-Loss yok.** [ADR-0005 §5.3](./0005-risk-limit-policy.md) "her trade'le paired STOP_LOSS_LIMIT" diyor; mevcut implementasyon `StopPrice` field'ini Order'a yaziyor ama Binance tarafinda OCO atmiyor. Bu **ADR-0011 scope disinda** — ayri ADR-0012 STOP/OCO icin reserve edilir; Loop 3'te sadece **client-side soft-exit** (Evaluator Direction.Exit + ClosePositionCommand) eklenir, `loops/loop_3/decision-sizing.md`'de net.
 
 ## Decision
 
@@ -357,9 +357,9 @@ ADR-0005 §5.3 hemen tam karşilamak. Reddedildi — Spot OCO ayri bir tasarim s
 - [ADR-0008 Trading Modes Fan-Out](./0008-trading-modes.md)
 - [ADR-0009 REST Kline Backfill On Boot](./0009-rest-kline-backfill-on-boot.md)
 - [ADR-0010 Backfill Event Suppression](./0010-backfill-event-suppression.md)
-- [loop_3/research-sizing.md](../../loop_3/research-sizing.md) — binance-expert min notional + fee + slippage
-- [loop_3/decision-sizing.md](../../loop_3/decision-sizing.md) — operasyonel detay + backend-dev sablonu
-- [loop_3/plan.md §P0 #3+#4+#7+#8](../../loop_3/plan.md)
+- [loop_3/research-sizing.md](../../loops/loop_3/research-sizing.md) — binance-expert min notional + fee + slippage
+- [loop_3/decision-sizing.md](../../loops/loop_3/decision-sizing.md) — operasyonel detay + backend-dev sablonu
+- [loop_3/plan.md §P0 #3+#4+#7+#8](../../loops/loop_3/plan.md)
 - [Eric Evans — Domain-Driven Design ch. 5 Services](https://www.dddcommunity.org/learning-ddd/what_is_ddd/)
 - [Microsoft Learn — DDD-CQRS patterns: Application services](https://learn.microsoft.com/en-us/dotnet/architecture/microservices/microservice-ddd-cqrs-patterns/)
 - [jasontaylordev/CleanArchitecture — handler-per-action](https://github.com/jasontaylordev/CleanArchitecture)

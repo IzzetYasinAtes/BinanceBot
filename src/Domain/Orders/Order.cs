@@ -17,6 +17,12 @@ public sealed class Order : AggregateRoot<long>
     public decimal Quantity { get; private set; }
     public decimal? Price { get; private set; }
     public decimal? StopPrice { get; private set; }
+    /// <summary>
+    /// Optional profit-taking hint forwarded to the resulting <see cref="Domain.Positions.Position"/>
+    /// (Loop 10 fix). Not sent to Binance — MARKET execution ignores it. Pure metadata for the
+    /// downstream <c>TakeProfitMonitorService</c>.
+    /// </summary>
+    public decimal? TakeProfit { get; private set; }
     public decimal ExecutedQuantity { get; private set; }
     public decimal CumulativeQuoteQty { get; private set; }
     public OrderStatus Status { get; private set; }
@@ -40,7 +46,8 @@ public sealed class Order : AggregateRoot<long>
         decimal? stopPrice,
         long? strategyId,
         TradingMode mode,
-        DateTimeOffset now)
+        DateTimeOffset now,
+        decimal? takeProfit = null)
     {
         if (string.IsNullOrWhiteSpace(clientOrderId) || clientOrderId.Length > 36)
         {
@@ -61,6 +68,10 @@ public sealed class Order : AggregateRoot<long>
         {
             throw new DomainException("Stop/TakeProfit orders require positive StopPrice.");
         }
+        if (takeProfit is decimal tp && tp <= 0m)
+        {
+            throw new DomainException("TakeProfit hint must be positive when set.");
+        }
 
         var order = new Order
         {
@@ -72,6 +83,7 @@ public sealed class Order : AggregateRoot<long>
             Quantity = quantity,
             Price = price,
             StopPrice = stopPrice,
+            TakeProfit = takeProfit,
             Status = OrderStatus.New,
             StrategyId = strategyId,
             Mode = mode,

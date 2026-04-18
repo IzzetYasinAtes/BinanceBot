@@ -107,7 +107,8 @@ public sealed class StrategyEvaluationHandler : INotificationHandler<KlineClosed
                 eval.SuggestedQuantity,
                 eval.SuggestedPrice,
                 eval.SuggestedStopPrice,
-                eval.ContextJson);
+                eval.ContextJson,
+                SuggestedTakeProfit: eval.SuggestedTakeProfit);
 
             var result = await mediator.Send(emit, cancellationToken);
             if (!result.IsSuccess)

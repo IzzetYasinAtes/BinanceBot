@@ -47,6 +47,16 @@ public sealed class MeanReversionEvaluator : IStrategyEvaluator
         else if (shortSignal) direction = StrategySignalDirection.Short;
         else direction = StrategySignalDirection.Exit;
 
+        // Loop 10 take-profit fix — for entry signals the BB middle band IS the mean-reversion
+        // target; price reverting to the mean is the canonical exit. Exit signals carry no TP
+        // (the exit IS the trigger).
+        decimal? takeProfit = direction switch
+        {
+            StrategySignalDirection.Long when mean > latest.ClosePrice => mean,
+            StrategySignalDirection.Short when mean < latest.ClosePrice => mean,
+            _ => null,
+        };
+
         var ctx = EvaluatorParameterHelper.SerializeContext(new
         {
             type = "meanrev",
@@ -55,6 +65,7 @@ public sealed class MeanReversionEvaluator : IStrategyEvaluator
             upper,
             lower,
             price = latest.ClosePrice,
+            takeProfit,
         });
 
         return Task.FromResult<StrategyEvaluation?>(new StrategyEvaluation(
@@ -62,6 +73,7 @@ public sealed class MeanReversionEvaluator : IStrategyEvaluator
             p.OrderSize,
             latest.ClosePrice,
             null,
-            ctx));
+            ctx,
+            SuggestedTakeProfit: takeProfit));
     }
 }

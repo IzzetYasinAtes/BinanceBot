@@ -3,13 +3,13 @@
 Date: 2026-04-17
 Status: Accepted
 
-> Bu ADR'in operasyonel detayli uretim notu `loop_1/decision.md` icindedir. Burada normatif karar ozeti tutulur.
+> Bu ADR'in operasyonel detayli uretim notu `loops/loop_1/decision.md` icindedir. Burada normatif karar ozeti tutulur.
 
 ## Context
 
 `KlineIngestionWorker` yalnizca WS akisindan beslenir. Her DB drop / fresh boot sonrasi evaluator'lar (TrendFollowing SlowEma=20, ATR=14; MeanReversion BB=20, RSI=14) ~20-30 dk warmup yasiyor. 4h test loop'larinda olculen "calisan strateji suresi" bozuluyor.
 
-binance-expert arastirmasi (`loop_1/research.md`):
+binance-expert arastirmasi (`loops/loop_1/research.md`):
 - `GET /api/v3/klines` testnet'te calisir, weight=2/istek; 1m x 1000 bar tek istekte (~16h 40dk derinlik).
 - 3 sembol = 6 weight; mainnet 1200/dk limitinin %0.5'i.
 - `BinanceMarketDataClient.GetKlinesAsync` hazir; `KlineIngestionWorker.PersistAsync` zaten upsert (bkz. [0003 §3.1](./0003-idempotent-handler-discipline.md)).
@@ -86,7 +86,7 @@ Yeni kod `RestBaseUrl`'i **okumaz**, URL hardcode etmez. `IBinanceMarketData` me
 - [0002-binance-ws-supervisor-pattern.md](./0002-binance-ws-supervisor-pattern.md)
 - [0003-idempotent-handler-discipline.md](./0003-idempotent-handler-discipline.md)
 - [0006-testnet-first-policy.md](./0006-testnet-first-policy.md)
-- [loop_1/research.md](../../loop_1/research.md)
-- [loop_1/decision.md](../../loop_1/decision.md)
+- [loop_1/research.md](../../loops/loop_1/research.md)
+- [loop_1/decision.md](../../loops/loop_1/decision.md)
 - [Microsoft Learn — Generic Host / IHostedService](https://learn.microsoft.com/en-us/dotnet/core/extensions/generic-host#ihostedservice-interface)
 - [Binance Spot REST — /api/v3/klines](https://developers.binance.com/docs/binance-spot-api-docs/rest-api/market-data-endpoints#klinecandlestick-data)

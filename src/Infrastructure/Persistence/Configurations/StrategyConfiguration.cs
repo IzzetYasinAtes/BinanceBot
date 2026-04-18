@@ -52,6 +52,8 @@ public sealed class StrategySignalConfiguration : IEntityTypeConfiguration<Strat
         builder.Property(s => s.SuggestedQuantity).HasPrecision(28, 10);
         builder.Property(s => s.SuggestedPrice).HasPrecision(28, 10);
         builder.Property(s => s.SuggestedStopPrice).HasPrecision(28, 10);
+        // Loop 10 take-profit fix — same precision as the rest of the suggested price columns.
+        builder.Property(s => s.SuggestedTakeProfit).HasPrecision(28, 10);
         builder.Property(s => s.ContextJson).HasColumnType("nvarchar(max)").IsRequired();
 
         builder.HasIndex(s => new { s.StrategyId, s.BarOpenTime, s.Symbol })

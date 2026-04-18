@@ -3,7 +3,7 @@
 Date: 2026-04-17
 Status: Accepted
 
-> Bu ADR'in operasyonel detayli loop notu `loop_3/decision.md` icindedir. Burada normatif karar ozeti tutulur.
+> Bu ADR'in operasyonel detayli loop notu `loops/loop_3/decision.md` icindedir. Burada normatif karar ozeti tutulur.
 
 ## Context
 
@@ -82,6 +82,6 @@ Yeni config alani **eklenmez**. Davranis cagri-yerinde explicit; toggle yok. Bac
 
 - [0003-idempotent-handler-discipline.md](./0003-idempotent-handler-discipline.md)
 - [0009-rest-kline-backfill-on-boot.md](./0009-rest-kline-backfill-on-boot.md)
-- [loop_3/decision.md](../../loop_3/decision.md) — operasyonel detay + backend-dev sablonu
+- [loop_3/decision.md](../../loops/loop_3/decision.md) — operasyonel detay + backend-dev sablonu
 - [Microsoft Learn — Domain events: design and implementation](https://learn.microsoft.com/en-us/dotnet/architecture/microservices/microservice-ddd-cqrs-patterns/domain-events-design-implementation)
 - [jasontaylordev/CleanArchitecture — DispatchDomainEventsInterceptor pattern](https://github.com/jasontaylordev/CleanArchitecture)
