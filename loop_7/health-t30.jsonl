@@ -1,0 +1,4 @@
+{"t":30,"ts":"2026-04-18T12:40:00Z","api":"ready","ws":"Streaming","paper_equity":70.75,"paper_delta_30min":-29.25,"signals":13,"orders":4,"stop_loss_triggered":1,"peak_equity":100.00,"peak_equity_fix":"verified",
+"cb":"Healthy","cb_should_be_tripped":true,"drawdown_pct":29.25,"max_drawdown_24h_pct":5.0,
+"red_flags":["bug_19_CB_no_trip_at_29pct_DD","strategy_algo_kayba_giriyor"],
+"errors":0,"verdict":"HALT_LOOP_7_FIX_AND_RESTART"}
