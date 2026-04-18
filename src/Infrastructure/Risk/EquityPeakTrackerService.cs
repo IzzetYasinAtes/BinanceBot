@@ -38,6 +38,13 @@ namespace BinanceBot.Infrastructure.Risk;
 /// <see cref="ApplicationDbContext"/> publisher fans the
 /// <c>CircuitBreakerTrippedEvent</c> out to <c>CircuitBreakerTrippedHandler</c>
 /// (kill-switch deactivates active strategies).
+///
+/// Loop 12 reform: switched from <c>GetEquityAsync</c> (mark-to-market) to
+/// <c>GetRealizedEquityAsync</c> (cash balance after closed fills). Loops 6/7/9/10/11
+/// each tripped the CB on a transient unrealized spike that never realized; e.g. Loop 11
+/// Paper $100 → unrealized peak $164 → equity unwound to $99 → DD 39% → false trip.
+/// PeakEquity now ratchets only on realized cash growth, so intraday open-position
+/// volatility cannot inflate the peak.
 /// </summary>
 public sealed class EquityPeakTrackerService : BackgroundService
 {
@@ -103,7 +110,8 @@ public sealed class EquityPeakTrackerService : BackgroundService
         var dirty = 0;
         foreach (var mode in TrackedModes)
         {
-            var equity = await equityProvider.GetEquityAsync(mode, ct);
+            // Loop 12: realized-only equity — ignore unrealized swings (see class doc).
+            var equity = await equityProvider.GetRealizedEquityAsync(mode, ct);
             if (equity <= 0m)
             {
                 continue;
