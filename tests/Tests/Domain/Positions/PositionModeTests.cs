@@ -19,6 +19,7 @@ public class PositionModeTests
             PositionSide.Long,
             quantity: 0.01m,
             entryPrice: 30000m,
+            stopPrice: null,
             strategyId: 1,
             mode: mode,
             now: DateTimeOffset.UtcNow);
@@ -33,7 +34,7 @@ public class PositionModeTests
     public void Close_EmitsClosedEventWithMode()
     {
         var p = Position.Open(Symbol.From("BTCUSDT"), PositionSide.Long,
-            0.01m, 30000m, 1, TradingMode.LiveTestnet, DateTimeOffset.UtcNow);
+            0.01m, 30000m, null, 1, TradingMode.LiveTestnet, DateTimeOffset.UtcNow);
         p.ClearDomainEvents();
 
         p.Close(exitPrice: 31000m, reason: "tp_hit", now: DateTimeOffset.UtcNow);

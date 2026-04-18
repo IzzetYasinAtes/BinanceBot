@@ -17,8 +17,9 @@ namespace BinanceBot.Tests.Infrastructure.Trading;
 /// </summary>
 public class PaperFillSimulator_MarketMinNotionalTests
 {
+    // ADR-0012 §12.9: tests pin SimulatedLatencyMs=0.
     private static IOptions<PaperFillOptions> Opts(decimal slip = 0m) =>
-        Options.Create(new PaperFillOptions { FixedSlippagePct = slip });
+        Options.Create(new PaperFillOptions { FixedSlippagePct = slip, SimulatedLatencyMs = 0 });
 
     private static Instrument BuildInstrument(decimal minNotional = 10m) =>
         Instrument.Create(
@@ -39,7 +40,7 @@ public class PaperFillSimulator_MarketMinNotionalTests
             updateId: 1, updatedAt: DateTimeOffset.UtcNow);
 
     [Fact]
-    public void Below5UsdtNotional_Rejects()
+    public async Task Below5UsdtNotional_Rejects()
     {
         var sut = new PaperFillSimulator(NullLogger<PaperFillSimulator>.Instance, Opts());
         var now = DateTimeOffset.UtcNow;
@@ -54,7 +55,7 @@ public class PaperFillSimulator_MarketMinNotionalTests
             price: null, stopPrice: null,
             strategyId: 1, mode: TradingMode.Paper, now: now);
 
-        var outcome = sut.Simulate(order, instrument, bt, depthSnapshot: null, now: now);
+        var outcome = await sut.SimulateAsync(order, instrument, bt, depthSnapshot: null, now: now, CancellationToken.None);
 
         outcome.Rejected.Should().BeTrue();
         outcome.RejectReason.Should().StartWith("filter_MIN_NOTIONAL_");
@@ -63,7 +64,7 @@ public class PaperFillSimulator_MarketMinNotionalTests
     }
 
     [Fact]
-    public void AboveMinNotional_FillsNormally()
+    public async Task AboveMinNotional_FillsNormally()
     {
         var sut = new PaperFillSimulator(NullLogger<PaperFillSimulator>.Instance, Opts());
         var now = DateTimeOffset.UtcNow;
@@ -78,7 +79,7 @@ public class PaperFillSimulator_MarketMinNotionalTests
             price: null, stopPrice: null,
             strategyId: 1, mode: TradingMode.Paper, now: now);
 
-        var outcome = sut.Simulate(order, instrument, bt, depthSnapshot: null, now: now);
+        var outcome = await sut.SimulateAsync(order, instrument, bt, depthSnapshot: null, now: now, CancellationToken.None);
 
         outcome.Filled.Should().BeTrue();
         outcome.Rejected.Should().BeFalse();
@@ -86,7 +87,7 @@ public class PaperFillSimulator_MarketMinNotionalTests
     }
 
     [Fact]
-    public void Slippage_AppliedToBuy_RaisesFillPrice()
+    public async Task Slippage_AppliedToBuy_RaisesFillPrice()
     {
         // 0.0005 (5 bps) slip on 30000 -> 30015 fill price for BUY
         var sut = new PaperFillSimulator(NullLogger<PaperFillSimulator>.Instance, Opts(slip: 0.0005m));
@@ -100,7 +101,7 @@ public class PaperFillSimulator_MarketMinNotionalTests
             TimeInForce.Ioc, quantity: 0.001m, price: null, stopPrice: null,
             strategyId: 1, mode: TradingMode.Paper, now: now);
 
-        var outcome = sut.Simulate(order, instrument, bt, depthSnapshot: null, now: now);
+        var outcome = await sut.SimulateAsync(order, instrument, bt, depthSnapshot: null, now: now, CancellationToken.None);
 
         outcome.Filled.Should().BeTrue();
         outcome.AvgFillPrice.Should().Be(30015m);
@@ -109,7 +110,7 @@ public class PaperFillSimulator_MarketMinNotionalTests
     }
 
     [Fact]
-    public void Slippage_AppliedToSell_LowersReceivedPrice()
+    public async Task Slippage_AppliedToSell_LowersReceivedPrice()
     {
         var sut = new PaperFillSimulator(NullLogger<PaperFillSimulator>.Instance, Opts(slip: 0.0005m));
         var now = DateTimeOffset.UtcNow;
@@ -122,7 +123,7 @@ public class PaperFillSimulator_MarketMinNotionalTests
             TimeInForce.Ioc, quantity: 0.001m, price: null, stopPrice: null,
             strategyId: 1, mode: TradingMode.Paper, now: now);
 
-        var outcome = sut.Simulate(order, instrument, bt, depthSnapshot: null, now: now);
+        var outcome = await sut.SimulateAsync(order, instrument, bt, depthSnapshot: null, now: now, CancellationToken.None);
 
         outcome.Filled.Should().BeTrue();
         // SELL: 30000 * (1 - 0.0005) = 29985

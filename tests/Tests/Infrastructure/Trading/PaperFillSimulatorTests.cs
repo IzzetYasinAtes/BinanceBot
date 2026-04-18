@@ -14,8 +14,9 @@ public class PaperFillSimulatorTests
 {
     // These existing tests focus on depth-walk + commission semantics; slippage is exercised
     // separately in PaperFillSimulator_MarketMinNotionalTests.
+    // ADR-0012 §12.9: tests pin SimulatedLatencyMs=0 to keep the suite fast.
     private static IOptions<PaperFillOptions> NoSlipOpts() =>
-        Options.Create(new PaperFillOptions { FixedSlippagePct = 0m });
+        Options.Create(new PaperFillOptions { FixedSlippagePct = 0m, SimulatedLatencyMs = 0 });
 
     private static Instrument BuildInstrument() => Instrument.Create(
         Symbol.From("BTCUSDT"),
@@ -35,7 +36,7 @@ public class PaperFillSimulatorTests
             updateId: 1, updatedAt: DateTimeOffset.UtcNow);
 
     [Fact]
-    public void Simulate_MarketBuy_HappyPath_FillsAtBestAsk_BaseCommission()
+    public async Task Simulate_MarketBuy_HappyPath_FillsAtBestAsk_BaseCommission()
     {
         var sut = new PaperFillSimulator(NullLogger<PaperFillSimulator>.Instance, NoSlipOpts());
         var now = DateTimeOffset.UtcNow;
@@ -47,7 +48,7 @@ public class PaperFillSimulatorTests
             "cid-p-buy", Symbol.From("BTCUSDT"), OrderSide.Buy, OrderType.Market,
             TimeInForce.Ioc, 0.001m, null, null, 1, TradingMode.Paper, now);
 
-        var outcome = sut.Simulate(order, instrument, bt, depthSnapshot: null, now);
+        var outcome = await sut.SimulateAsync(order, instrument, bt, depthSnapshot: null, now, CancellationToken.None);
 
         outcome.Filled.Should().BeTrue();
         outcome.Rejected.Should().BeFalse();
@@ -63,7 +64,7 @@ public class PaperFillSimulatorTests
     }
 
     [Fact]
-    public void Simulate_MarketSell_HappyPath_FillsAtBestBid_QuoteCommission()
+    public async Task Simulate_MarketSell_HappyPath_FillsAtBestBid_QuoteCommission()
     {
         var sut = new PaperFillSimulator(NullLogger<PaperFillSimulator>.Instance, NoSlipOpts());
         var now = DateTimeOffset.UtcNow;
@@ -75,7 +76,7 @@ public class PaperFillSimulatorTests
             "cid-p-sell", Symbol.From("BTCUSDT"), OrderSide.Sell, OrderType.Market,
             TimeInForce.Ioc, 0.001m, null, null, 1, TradingMode.Paper, now);
 
-        var outcome = sut.Simulate(order, instrument, bt, depthSnapshot: null, now);
+        var outcome = await sut.SimulateAsync(order, instrument, bt, depthSnapshot: null, now, CancellationToken.None);
 
         outcome.Filled.Should().BeTrue();
         outcome.ExecutedQuantity.Should().Be(0.001m);
@@ -88,7 +89,7 @@ public class PaperFillSimulatorTests
     }
 
     [Fact]
-    public void Simulate_RejectsWhenQuantityBelowLotSize()
+    public async Task Simulate_RejectsWhenQuantityBelowLotSize()
     {
         var sut = new PaperFillSimulator(NullLogger<PaperFillSimulator>.Instance, NoSlipOpts());
         var now = DateTimeOffset.UtcNow;
@@ -102,14 +103,14 @@ public class PaperFillSimulatorTests
             quantity: 0.000001m, // below minQty (0.00001)
             null, null, 1, TradingMode.Paper, now);
 
-        var outcome = sut.Simulate(order, instrument, bt, null, now);
+        var outcome = await sut.SimulateAsync(order, instrument, bt, null, now, CancellationToken.None);
 
         outcome.Rejected.Should().BeTrue();
         order.Status.Should().Be(OrderStatus.Rejected);
     }
 
     [Fact]
-    public void Simulate_LimitMakerThatCrosses_Rejected_MinusTwoThousandTen()
+    public async Task Simulate_LimitMakerThatCrosses_Rejected_MinusTwoThousandTen()
     {
         var sut = new PaperFillSimulator(NullLogger<PaperFillSimulator>.Instance, NoSlipOpts());
         var now = DateTimeOffset.UtcNow;
@@ -122,14 +123,14 @@ public class PaperFillSimulatorTests
             TimeInForce.Gtc, 0.001m, price: 30010m, stopPrice: null,
             strategyId: 1, mode: TradingMode.Paper, now);
 
-        var outcome = sut.Simulate(order, instrument, bt, null, now);
+        var outcome = await sut.SimulateAsync(order, instrument, bt, null, now, CancellationToken.None);
 
         outcome.Rejected.Should().BeTrue();
         order.Status.Should().Be(OrderStatus.Rejected);
     }
 
     [Fact]
-    public void Simulate_MarketBuy_WalksDepthLevels_ProducesSlippage()
+    public async Task Simulate_MarketBuy_WalksDepthLevels_ProducesSlippage()
     {
         var sut = new PaperFillSimulator(NullLogger<PaperFillSimulator>.Instance, NoSlipOpts());
         var now = DateTimeOffset.UtcNow;
@@ -147,7 +148,7 @@ public class PaperFillSimulatorTests
             "cid-walk", Symbol.From("BTCUSDT"), OrderSide.Buy, OrderType.Market,
             TimeInForce.Ioc, 0.001m, null, null, 1, TradingMode.Paper, now);
 
-        var outcome = sut.Simulate(order, instrument, bt, snapshot, now);
+        var outcome = await sut.SimulateAsync(order, instrument, bt, snapshot, now, CancellationToken.None);
 
         outcome.Filled.Should().BeTrue();
         order.Fills.Should().HaveCount(2);

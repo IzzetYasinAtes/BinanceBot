@@ -112,6 +112,7 @@ public class StrategySignalToOrderHandlerTests
                 openPositionSide,
                 quantity: 0.01m,
                 entryPrice: 29500m,
+                stopPrice: null,
                 strategyId: 1,
                 mode: TradingMode.Paper,
                 now: DateTimeOffset.UtcNow);
