@@ -1,0 +1,52 @@
+{
+  "loop": 3,
+  "started_utc": "2026-04-18T01:10:00Z",
+  "ended_utc": "2026-04-18T08:00:00Z",
+  "duration_h": 6.83,
+  "type": "infra-reform-loop (DB-preserve, kullanıcı backlog)",
+  "balances": {
+    "Paper": {
+      "starting": 100.00,
+      "ending": 174.36,
+      "note": "Loop 2 sonu $98.93'tü, Loop 3 boot canlı sinyallerden $174.36'ya çıktı, sonra restart sonrası FREEZE oldu (yeni kod regression — order yaratımı durdu)"
+    }
+  },
+  "backlog_status": {
+    "P0_done": ["#11 ValidationBehavior 500", "#10 backfill event suppression (ADR-0010)", "#3+#4+#7+#8 sizing+exit+risk reform (ADR-0011)"],
+    "P1_done": ["#5 Fill Başarısı label", "#6 Açık Pozisyonlar tablosu"],
+    "P2_done": ["#1 Timezone Europe/Istanbul", "#2 Header son 1dk ticker"],
+    "P3_pending": ["#9 GitHub achievements workflow"]
+  },
+  "commits": [
+    "402c460 - Loop 3 plan",
+    "11dad75 - W2 #11 ValidationBehavior + #1 timezone",
+    "a3eb082 - W3 #10 ADR-0010 backfill event suppression",
+    "a977e4d - W4 ADR-0011 design + decision-sizing",
+    "9deb13e - W5 ADR-0011 implementation + ClientOrderId blocker fix",
+    "c26597a - W6 #5+#6 UI fixes",
+    "(W7) - #2 ticker bar"
+  ],
+  "tests": {
+    "before": 50,
+    "after": 73,
+    "new": 23
+  },
+  "regression_critical": {
+    "issue": "ADR-0011 sonrası restart sonrası HİÇ YENİ ORDER YOK (4+ saat)",
+    "evidence": "Sinyaller akıyor (id 495, 100+ sinyal), error log boş, ama orders/history son order 03:53 (restart öncesi)",
+    "hypothesis": [
+      "EquitySnapshotProvider 0 dönüyor → sizing skip",
+      "PositionSizingService minNotional altı → skip",
+      "OrderFilledPositionHandler reverse-side close mantığı sinyali yutuyor"
+    ],
+    "next_loop_priority": "P0 — Loop 4 boot'ta önce diagnose + fix, sonra normal cycle"
+  },
+  "risk_profile_state": {
+    "maxPositionSizePct": 0.15,
+    "reconciler_works": true,
+    "realizedPnl24h": 0.00,
+    "peakEquity": 0.00,
+    "currentDrawdownPct": 0.00,
+    "note": "Hiç pozisyon kapanmadığı için risk takibi 0 — beklenen davranış (regression sonucu)"
+  }
+}
