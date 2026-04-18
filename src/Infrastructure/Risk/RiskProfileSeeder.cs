@@ -22,6 +22,7 @@ public sealed record RiskProfileDefaultsOptions
     public decimal MaxDrawdown24hPct { get; init; } = 0.05m;
     public decimal MaxDrawdownAllTimePct { get; init; } = 0.25m;
     public int MaxConsecutiveLosses { get; init; } = 3;
+    public int MaxOpenPositions { get; init; } = 2;
 }
 
 /// <summary>
@@ -81,11 +82,12 @@ public sealed class RiskProfileSeeder : IHostedService
                     defaults.MaxDrawdown24hPct,
                     defaults.MaxDrawdownAllTimePct,
                     defaults.MaxConsecutiveLosses,
+                    defaults.MaxOpenPositions,
                     now);
                 db.RiskProfiles.Add(profile);
                 _logger.LogInformation(
-                    "Seeded RiskProfile mode={Mode} riskPct={Risk} maxPosPct={Pos}",
-                    mode, defaults.RiskPerTradePct, defaults.MaxPositionSizePct);
+                    "Seeded RiskProfile mode={Mode} riskPct={Risk} maxPosPct={Pos} maxOpen={Open}",
+                    mode, defaults.RiskPerTradePct, defaults.MaxPositionSizePct, defaults.MaxOpenPositions);
                 continue;
             }
 
@@ -94,7 +96,8 @@ public sealed class RiskProfileSeeder : IHostedService
                 existing.MaxPositionSizePct != defaults.MaxPositionSizePct ||
                 existing.MaxDrawdown24hPct != defaults.MaxDrawdown24hPct ||
                 existing.MaxDrawdownAllTimePct != defaults.MaxDrawdownAllTimePct ||
-                existing.MaxConsecutiveLosses != defaults.MaxConsecutiveLosses;
+                existing.MaxConsecutiveLosses != defaults.MaxConsecutiveLosses ||
+                existing.MaxOpenPositions != defaults.MaxOpenPositions;
 
             if (diverged)
             {
@@ -104,6 +107,7 @@ public sealed class RiskProfileSeeder : IHostedService
                     defaults.MaxDrawdown24hPct,
                     defaults.MaxDrawdownAllTimePct,
                     defaults.MaxConsecutiveLosses,
+                    defaults.MaxOpenPositions,
                     now);
                 _logger.LogInformation(
                     "Reconciled RiskProfile mode={Mode} from appsettings", mode);

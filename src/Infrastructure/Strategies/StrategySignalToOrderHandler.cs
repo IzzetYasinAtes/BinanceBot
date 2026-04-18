@@ -4,6 +4,7 @@ using BinanceBot.Application.Orders.Commands.PlaceOrder;
 using BinanceBot.Application.Positions.Commands.ClosePosition;
 using BinanceBot.Domain.Common;
 using BinanceBot.Domain.Orders;
+using BinanceBot.Domain.Positions;
 using BinanceBot.Domain.RiskProfiles;
 using BinanceBot.Domain.Strategies;
 using BinanceBot.Domain.Strategies.Events;
@@ -118,6 +119,20 @@ public sealed class StrategySignalToOrderHandler : INotificationHandler<Strategy
             if (risk.CircuitBreakerStatus == CircuitBreakerStatus.Tripped)
             {
                 _logger.LogInformation("CB tripped mode={Mode}, signal skipped {Cid}", mode, cid);
+                continue;
+            }
+
+            // Loop 14 (research-paper-live-and-sizing.md §C5): cap concurrently-open
+            // positions per mode. Without this throttle a strategy storm on a
+            // $100 paper account can stack multiple $40 notionals across symbols and
+            // exhaust available equity before the CB has a chance to react.
+            var openCount = await db.Positions.AsNoTracking()
+                .CountAsync(p => p.Status == PositionStatus.Open && p.Mode == mode, ct);
+            if (openCount >= risk.MaxOpenPositions)
+            {
+                _logger.LogInformation(
+                    "Max open positions reached mode={Mode} count={Count}/{Max} skip {Cid}",
+                    mode, openCount, risk.MaxOpenPositions, cid);
                 continue;
             }
 

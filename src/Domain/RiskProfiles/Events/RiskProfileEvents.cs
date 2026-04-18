@@ -7,7 +7,8 @@ public sealed record RiskProfileUpdatedEvent(
     decimal MaxPositionSizePct,
     decimal MaxDrawdown24hPct,
     decimal MaxDrawdownAllTimePct,
-    int MaxConsecutiveLosses) : DomainEventBase;
+    int MaxConsecutiveLosses,
+    int MaxOpenPositions) : DomainEventBase;
 
 public sealed record RiskCapsOverriddenEvent(
     decimal RiskPerTradeCap,

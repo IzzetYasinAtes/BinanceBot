@@ -16,7 +16,8 @@ public static class RiskEndpoints
         decimal MaxPositionSizePct,
         decimal MaxDrawdown24hPct,
         decimal MaxDrawdownAllTimePct,
-        int MaxConsecutiveLosses);
+        int MaxConsecutiveLosses,
+        int MaxOpenPositions);
 
     public sealed record OverrideCapsRequest(
         decimal RiskPerTradeCap,
@@ -45,7 +46,7 @@ public static class RiskEndpoints
             (await m.Send(new UpdateRiskProfileCommand(
                 req.RiskPerTradePct, req.MaxPositionSizePct,
                 req.MaxDrawdown24hPct, req.MaxDrawdownAllTimePct,
-                req.MaxConsecutiveLosses), ct))
+                req.MaxConsecutiveLosses, req.MaxOpenPositions), ct))
                 .ToHttpResult())
             .AddEndpointFilter<AdminAuthFilter>()
             .WithName("UpdateRiskProfile");

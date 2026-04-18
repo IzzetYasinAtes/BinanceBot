@@ -34,6 +34,7 @@ public sealed class GetRiskProfileQueryHandler
             r.MaxDrawdown24hPct,
             r.MaxDrawdownAllTimePct,
             r.MaxConsecutiveLosses,
+            r.MaxOpenPositions,
             r.RiskPerTradeCap,
             r.MaxPositionCap,
             r.CapsAdminNote,
