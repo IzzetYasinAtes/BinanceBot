@@ -1,6 +1,7 @@
 using BinanceBot.Application.Abstractions;
 using BinanceBot.Application.Abstractions.Trading;
 using BinanceBot.Domain.Common;
+using BinanceBot.Domain.Positions;
 using Microsoft.EntityFrameworkCore;
 
 namespace BinanceBot.Infrastructure.Trading;
@@ -11,10 +12,21 @@ namespace BinanceBot.Infrastructure.Trading;
 /// Loop 12 reform: split into two reads.
 ///   - <see cref="GetEquityAsync"/> returns mark-to-market equity (Equity
 ///     column, falls back to CurrentBalance when unset). Used by sizing.
-///   - <see cref="GetRealizedEquityAsync"/> returns CurrentBalance only —
-///     the realized cash after closed fills, ignoring any open-position
-///     unrealized PnL. Used by <c>EquityPeakTrackerService</c> to stop
-///     intraday spikes from inflating PeakEquity (Loop 6/7/9/10/11 trace).
+///   - <see cref="GetRealizedEquityAsync"/> returns realized notional equity:
+///     cash + cost-basis of currently open positions, ignoring any
+///     open-position unrealized PnL. Used by <c>EquityPeakTrackerService</c>
+///     to stop intraday spikes from inflating PeakEquity (Loop 6/7/9/10/11 trace).
+///
+/// Loop 14/15 fix: <see cref="GetRealizedEquityAsync"/> previously returned
+/// only <c>VirtualBalance.CurrentBalance</c> (cash). When an order fills, cash
+/// drops by the cost basis (it is "locked" inside the open position) but no
+/// realized loss has occurred — the position can still close at break-even.
+/// Cash-only therefore manufactured a fake drawdown the moment any position
+/// opened (Loop 14 t30: $100 cash -> BUY $39.97 -> $60.03 cash -> 40% DD ->
+/// CB Tripped sahte). The correct realized notional equity adds the
+/// cost-basis of every still-open position back to cash. Unrealized PnL is
+/// still excluded (Loop 12 invariant): cost-basis uses
+/// <see cref="Position.AverageEntryPrice"/>, never <c>MarkPrice</c>.
 /// </summary>
 public sealed class EquitySnapshotProvider : IEquitySnapshotProvider
 {
@@ -62,9 +74,17 @@ public sealed class EquitySnapshotProvider : IEquitySnapshotProvider
             return 0m;
         }
 
-        // CurrentBalance is mutated only by VirtualBalance.ApplyFill (realized
-        // delta). ApplyUnrealized writes to Equity, never CurrentBalance —
-        // exactly the semantic Loop 12 needs for peak tracking.
-        return balance.CurrentBalance;
+        // Loop 14/15: cash + cost-basis of open positions. Cash is mutated
+        // only by VirtualBalance.ApplyFill (realized delta + locks cost basis
+        // when a position opens). Adding cost-basis back reconstructs the
+        // notional capital available before the lock — i.e. realized equity.
+        // AverageEntryPrice (NOT MarkPrice) keeps unrealized PnL out, which
+        // is the Loop 12 invariant the peak tracker depends on.
+        var openPositionsCostBasis = await _db.Positions
+            .AsNoTracking()
+            .Where(p => p.Mode == mode && p.Status == PositionStatus.Open)
+            .SumAsync(p => p.AverageEntryPrice * p.Quantity, ct);
+
+        return balance.CurrentBalance + openPositionsCostBasis;
     }
 }
