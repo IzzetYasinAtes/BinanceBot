@@ -182,6 +182,38 @@ public class StopLossMonitorServiceTests
             Times.Never);
     }
 
+    /// <summary>
+    /// Loop 7 bug #18 lock-in: a paused parent <see cref="Domain.Strategies.Strategy"/>
+    /// must NOT prevent its open positions from being stop-loss-protected. Pausing
+    /// only halts new signal evaluation, never risk-management exits.
+    /// </summary>
+    [Fact]
+    public async Task PausedStrategy_PositionStillTriggersStopLoss()
+    {
+        using var db = NewDb();
+        // Note: StubDbContext ignores Strategy entity; the monitor query never joins it.
+        // The contract under test is "tick scans positions independent of strategy state".
+        var pos = SeedOpenPosition(db, PositionSide.Long, stop: 76200m);
+        // BTC scenario from Loop 6: entry 76618, stop 76200 (~-0.55%), mark fell to 75876.
+        SeedTicker(db, bid: 75876m, ask: 75880m);
+
+        var mediator = new Mock<IMediator>(MockBehavior.Strict);
+        var sent = 0;
+        mediator
+            .Setup(m => m.Send(It.IsAny<CloseSignalPositionCommand>(), It.IsAny<CancellationToken>()))
+            .Callback(() => sent++)
+            .ReturnsAsync(Result.Success(new ClosedSignalPositionDto(
+                pos.Id, 0m, "stop_loss", "stop-1-x")));
+
+        var sut = new StopLossMonitorService(
+            BuildScope(db, mediator.Object),
+            NullLogger<StopLossMonitorService>.Instance);
+
+        await InvokeTickAsync(sut, CancellationToken.None);
+
+        sent.Should().Be(1, "stop-loss must fire regardless of parent strategy status");
+    }
+
     [Fact]
     public async Task LiveMainnetPosition_IsSkippedDefensively()
     {

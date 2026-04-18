@@ -1,0 +1,4 @@
+{"t":150,"ts":"2026-04-18T11:40:00Z","api":"ready","ws":"Streaming","drift_ms":804,"paper_equity":56.10,"paper_delta_60min":0.00,"signals_total":19,"signals_new_60min":0,"peak_equity":99.89,"peak_equity_status":"frozen",
+"cb":"Tripped","drawdown_pct":43.84,"strategies":"all_paused","open_positions":1,"open_btc_unrealized":-0.42,"open_btc_markprice":75876,"open_btc_entry":76618,
+"red_flags":["bug_17_peakEquity_no_intraday","bug_18_stop_loss_not_triggered_for_paused_strategy","cb_recovery_no_path"],
+"errors":0,"verdict":"loop_dead_continues_for_data"}
