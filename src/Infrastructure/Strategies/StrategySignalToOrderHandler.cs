@@ -153,6 +153,8 @@ public sealed class StrategySignalToOrderHandler : INotificationHandler<Strategy
             // ADR-0012 §12.4: forward evaluator-suggested stop into the Order so the eventual
             // Position carries it. The parameter is ignored for MARKET execution itself but
             // preserved on the Order aggregate for downstream stop-monitor wiring.
+            // Loop 10 take-profit fix: SuggestedTakeProfit travels via the same channel so the
+            // resulting Position carries a TP for TakeProfitMonitorService.
             var cmd = new PlaceOrderCommand(
                 cid,
                 notification.Symbol,
@@ -163,7 +165,8 @@ public sealed class StrategySignalToOrderHandler : INotificationHandler<Strategy
                 null,
                 notification.SuggestedStopPrice,
                 notification.StrategyId,
-                mode);
+                mode,
+                TakeProfit: notification.SuggestedTakeProfit);
 
             try
             {

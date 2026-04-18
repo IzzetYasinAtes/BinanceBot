@@ -3,11 +3,11 @@
 Date: 2026-04-17
 Status: Accepted
 
-> Operasyonel detay (commit-by-commit kod sablonu, dosya/satir listesi, agent zinciri) icin bkz. [`loop_5/decision-frequency.md`](../../loop_5/decision-frequency.md). Bu dokuman normatif karardir.
+> Operasyonel detay (commit-by-commit kod sablonu, dosya/satir listesi, agent zinciri) icin bkz. [`loops/loop_5/decision-frequency.md`](../../loops/loop_5/decision-frequency.md). Bu dokuman normatif karardir.
 
 ## Context
 
-Loop 4 (`loop_4/summary.md`) sonu: Paper portfoy `$100 → $95.30` (-%4.7), 40 dakikada sadece 4 trade, `consecutiveLosses=3=max` ama CB hala `Healthy`. Kullanici ulti­matomu net: **"kar etmeliyiz, hizli islem yap, canlida nasilsa oyle calis"** — yani (a) sinyal frekansi yeter­siz, (b) paper ile mainnet davranisi bir noktada divergent (24h ticker, stop trigger, fee/latency), (c) CB tetikleme zinciri bozuk. binance-expert audit'i (loop_5/research-audit.md ozeti — sohbet baglami) 8 kirilim noktasini onceliklendirdi:
+Loop 4 (`loops/loop_4/summary.md`) sonu: Paper portfoy `$100 → $95.30` (-%4.7), 40 dakikada sadece 4 trade, `consecutiveLosses=3=max` ama CB hala `Healthy`. Kullanici ulti­matomu net: **"kar etmeliyiz, hizli islem yap, canlida nasilsa oyle calis"** — yani (a) sinyal frekansi yeter­siz, (b) paper ile mainnet davranisi bir noktada divergent (24h ticker, stop trigger, fee/latency), (c) CB tetikleme zinciri bozuk. binance-expert audit'i (loop_5/research-audit.md ozeti — sohbet baglami) 8 kirilim noktasini onceliklendirdi:
 
 **P0 — kritik (canlida farkli davranis)**
 
@@ -350,7 +350,7 @@ Loop 5 t30 sonrasi log analizinden root cause cikar; tek-satir fix `decision-fre
 ### Negatif / Tradeoff
 - `IPaperFillSimulator.Simulate` sync→async imza degisikligi — `PaperFillOrderExecutor` (cagri yeri) ve tum testler async update; reviewer `await` zincirini denetler. Boilerplate.
 - StopLossMonitor 30s tick volatilite anlik degisimde gec kalir (2-3% aniden hareket → 30s gecikmeyle stop). ADR-0013 (Loop 6+) OCO server-side fix; Loop 5'te kabul edilir.
-- TrendFollowing RSI filtresi yanlis-negative riski (gercek trend ekstremde baslar → filtre eler). Backtest yok, gozlem-driven; `loop_6/research-trend-filter.md` ayri.
+- TrendFollowing RSI filtresi yanlis-negative riski (gercek trend ekstremde baslar → filtre eler). Backtest yok, gozlem-driven; `loops/loop_6/research-trend-filter.md` ayri.
 - BB 1.5σ false-positive riski — meanrev biraz daha sik, kuçuk hareketleri "mean reversion" sayar. Net etki Loop 5 sonu raporunda.
 - `XRP-Grid` reseed icin operatorel adim (deactivate → restart → activate) — `decision-frequency.md` P0-2 commit prosedurunde acik talimat.
 - `Position.StopPrice` migration — DB schema degisir (`AddPositionStopPrice`). EF migration gerek; mevcut prod yok, riskce dusuk.
@@ -391,5 +391,5 @@ Step `0.012` cok kucuk; gurultu bucket-cross uretir (false sinyal). 20 mvp; iler
 - [jasontaylordev/CleanArchitecture — BackgroundService pattern](https://github.com/jasontaylordev/CleanArchitecture)
 - [ardalis/CleanArchitecture — domain event reactor pattern](https://github.com/ardalis/CleanArchitecture)
 - [Eric Evans — Domain-Driven Design ch. 5 Aggregate state](https://www.dddcommunity.org/learning-ddd/what_is_ddd/)
-- [loop_5/decision-frequency.md](../../loop_5/decision-frequency.md) — operasyonel commit-by-commit
-- [loop_4/summary.md](../../loop_4/summary.md) — Paper $100→$95.30 raporu
+- [loop_5/decision-frequency.md](../../loops/loop_5/decision-frequency.md) — operasyonel commit-by-commit
+- [loop_4/summary.md](../../loops/loop_4/summary.md) — Paper $100→$95.30 raporu

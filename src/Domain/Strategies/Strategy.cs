@@ -98,7 +98,8 @@ public sealed class Strategy : AggregateRoot<long>
         decimal? price,
         decimal? stopPrice,
         string contextJson,
-        DateTimeOffset emittedAt)
+        DateTimeOffset emittedAt,
+        decimal? takeProfit = null)
     {
         if (Status != StrategyStatus.Active)
         {
@@ -114,10 +115,12 @@ public sealed class Strategy : AggregateRoot<long>
 
         var signal = StrategySignal.Emit(
             symbol, barOpenTime, direction, quantity,
-            price, stopPrice, contextJson, emittedAt);
+            price, stopPrice, contextJson, emittedAt,
+            takeProfit: takeProfit);
         _signals.Add(signal);
 
-        RaiseDomainEvent(new StrategySignalEmittedEvent(Id, symbol.Value, direction, barOpenTime, stopPrice));
+        RaiseDomainEvent(new StrategySignalEmittedEvent(
+            Id, symbol.Value, direction, barOpenTime, stopPrice, takeProfit));
         return signal;
     }
 }

@@ -20,4 +20,7 @@ public sealed record StrategyEvaluation(
     decimal SuggestedQuantity,
     decimal? SuggestedPrice,
     decimal? SuggestedStopPrice,
-    string ContextJson);
+    string ContextJson,
+    // Loop 10 take-profit fix — evaluator-suggested profit target. Default null is required
+    // for backward compatibility with older evaluators / tests that don't set it.
+    decimal? SuggestedTakeProfit = null);

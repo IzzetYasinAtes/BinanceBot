@@ -46,6 +46,8 @@ public sealed class OrderConfiguration : IEntityTypeConfiguration<Order>
         builder.Property(o => o.Quantity).HasPrecision(28, 10);
         builder.Property(o => o.Price).HasPrecision(28, 10);
         builder.Property(o => o.StopPrice).HasPrecision(28, 10);
+        // Loop 10 take-profit fix — pure metadata, never sent to Binance for MARKET orders.
+        builder.Property(o => o.TakeProfit).HasColumnType("decimal(18,8)");
         builder.Property(o => o.ExecutedQuantity).HasPrecision(28, 10);
         builder.Property(o => o.CumulativeQuoteQty).HasPrecision(28, 10);
 

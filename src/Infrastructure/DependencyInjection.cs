@@ -173,6 +173,12 @@ public static class DependencyInjection
         // skipped defensively).
         services.AddHostedService<StopLossMonitorService>();
 
+        // Loop 10 take-profit fix: symmetric counterpart to StopLossMonitor — closes open
+        // positions when mark price reaches the persisted Position.TakeProfit. Pre-Loop 10
+        // strategies opened positions but only ever exited via stop or rare exit signals;
+        // unrealised gains never converted to realised PnL, so equity peaked & bled.
+        services.AddHostedService<TakeProfitMonitorService>();
+
         // Loop 7 bug #17: intraday peak-equity tracker (30s tick) so PeakEquity follows
         // the live equity stream — closes alone don't capture unrealized spikes (Loop 6
         // t30 $195 spike was lost, t90 trip computed against stale $99 peak).

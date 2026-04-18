@@ -11,4 +11,7 @@ public sealed record StrategySignalEmittedEvent(
     string Symbol,
     StrategySignalDirection Direction,
     DateTimeOffset BarOpenTime,
-    decimal? SuggestedStopPrice = null) : DomainEventBase;
+    decimal? SuggestedStopPrice = null,
+    // Loop 10 take-profit fix — ADR-0011 §11.4 sapma #4 pattern (default null,
+    // backward compatible with older callers that don't set it).
+    decimal? SuggestedTakeProfit = null) : DomainEventBase;

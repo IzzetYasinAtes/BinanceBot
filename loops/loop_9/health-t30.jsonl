@@ -1,0 +1,1 @@
+{"t":30,"ts":"2026-04-18T13:58:00Z","api":"ready","ws":"Streaming","paper_equity":82.81,"paper_delta_30min":-17.19,"signals":6,"peak_equity":114.44,"cb":"Tripped","cb_reason":"drawdown_24h=27.64>=20","drawdown_pct":27.64,"strategies":"all_paused","root_problem":"no_take_profit_unrealized_peaks_dont_realize","verdict":"HALT_LOOP_10_TP_ADD"}

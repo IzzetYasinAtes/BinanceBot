@@ -1,1 +1,24 @@
-{}
+﻿{
+  "loop3-plan1-tz-istanbul": {
+    "TaskId": "loop3-plan1-tz-istanbul",
+    "Status": "Done",
+    "Owner": null,
+    "CreatedUtc": "2026-04-18T01:41:52.8413754Z",
+    "UpdatedUtc": "2026-04-18T01:42:19.0510913Z",
+    "History": [
+      "2026-04-18T01:41:52.8413754Z claimed by frontend-dev",
+      "2026-04-18T01:42:19.0510913Z released by frontend-dev -\u003E Done"
+    ]
+  },
+  "loop7-bug17-18-fix": {
+    "TaskId": "loop7-bug17-18-fix",
+    "Status": "Done",
+    "Owner": null,
+    "CreatedUtc": "2026-04-18T12:01:50.6520455Z",
+    "UpdatedUtc": "2026-04-18T12:06:44.9875619Z",
+    "History": [
+      "2026-04-18T12:01:50.6520455Z claimed by backend-dev",
+      "2026-04-18T12:06:44.9875619Z released by backend-dev -\u003E Done"
+    ]
+  }
+}

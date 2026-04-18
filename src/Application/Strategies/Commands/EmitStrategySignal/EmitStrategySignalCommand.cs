@@ -17,7 +17,9 @@ public sealed record EmitStrategySignalCommand(
     decimal SuggestedQuantity,
     decimal? SuggestedPrice,
     decimal? SuggestedStopPrice,
-    string ContextJson) : IRequest<Result<long>>;
+    string ContextJson,
+    // Loop 10 take-profit fix — default null preserves backward compatibility.
+    decimal? SuggestedTakeProfit = null) : IRequest<Result<long>>;
 
 public sealed class EmitStrategySignalCommandValidator : AbstractValidator<EmitStrategySignalCommand>
 {
@@ -71,7 +73,8 @@ public sealed class EmitStrategySignalCommandHandler
                 request.SuggestedPrice,
                 request.SuggestedStopPrice,
                 request.ContextJson,
-                _clock.UtcNow);
+                _clock.UtcNow,
+                takeProfit: request.SuggestedTakeProfit);
 
             await _db.SaveChangesAsync(ct);
             return Result.Success(signal.Id);
