@@ -235,7 +235,8 @@ public sealed class KlineBackfillWorker : IHostedService
             if (ct.IsCancellationRequested) return;
 
             var payload = ToWsPayload(symbol, interval, bar, nowUtc);
-            await persister.PersistAsync(payload, ct);
+            // ADR-0010: backfill must not replay historical bars as live signals.
+            await persister.PersistAsync(payload, ct, emitDomainEvents: false);
             persisted++;
         }
 
