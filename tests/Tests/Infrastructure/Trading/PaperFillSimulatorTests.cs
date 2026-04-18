@@ -6,11 +6,17 @@ using BinanceBot.Domain.ValueObjects;
 using BinanceBot.Infrastructure.Trading.Paper;
 using FluentAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 
 namespace BinanceBot.Tests.Infrastructure.Trading;
 
 public class PaperFillSimulatorTests
 {
+    // These existing tests focus on depth-walk + commission semantics; slippage is exercised
+    // separately in PaperFillSimulator_MarketMinNotionalTests.
+    private static IOptions<PaperFillOptions> NoSlipOpts() =>
+        Options.Create(new PaperFillOptions { FixedSlippagePct = 0m });
+
     private static Instrument BuildInstrument() => Instrument.Create(
         Symbol.From("BTCUSDT"),
         "BTC", "USDT",
@@ -31,7 +37,7 @@ public class PaperFillSimulatorTests
     [Fact]
     public void Simulate_MarketBuy_HappyPath_FillsAtBestAsk_BaseCommission()
     {
-        var sut = new PaperFillSimulator(NullLogger<PaperFillSimulator>.Instance);
+        var sut = new PaperFillSimulator(NullLogger<PaperFillSimulator>.Instance, NoSlipOpts());
         var now = DateTimeOffset.UtcNow;
 
         var instrument = BuildInstrument();
@@ -59,7 +65,7 @@ public class PaperFillSimulatorTests
     [Fact]
     public void Simulate_MarketSell_HappyPath_FillsAtBestBid_QuoteCommission()
     {
-        var sut = new PaperFillSimulator(NullLogger<PaperFillSimulator>.Instance);
+        var sut = new PaperFillSimulator(NullLogger<PaperFillSimulator>.Instance, NoSlipOpts());
         var now = DateTimeOffset.UtcNow;
 
         var instrument = BuildInstrument();
@@ -84,7 +90,7 @@ public class PaperFillSimulatorTests
     [Fact]
     public void Simulate_RejectsWhenQuantityBelowLotSize()
     {
-        var sut = new PaperFillSimulator(NullLogger<PaperFillSimulator>.Instance);
+        var sut = new PaperFillSimulator(NullLogger<PaperFillSimulator>.Instance, NoSlipOpts());
         var now = DateTimeOffset.UtcNow;
 
         var instrument = BuildInstrument();
@@ -105,7 +111,7 @@ public class PaperFillSimulatorTests
     [Fact]
     public void Simulate_LimitMakerThatCrosses_Rejected_MinusTwoThousandTen()
     {
-        var sut = new PaperFillSimulator(NullLogger<PaperFillSimulator>.Instance);
+        var sut = new PaperFillSimulator(NullLogger<PaperFillSimulator>.Instance, NoSlipOpts());
         var now = DateTimeOffset.UtcNow;
 
         var instrument = BuildInstrument();
@@ -125,7 +131,7 @@ public class PaperFillSimulatorTests
     [Fact]
     public void Simulate_MarketBuy_WalksDepthLevels_ProducesSlippage()
     {
-        var sut = new PaperFillSimulator(NullLogger<PaperFillSimulator>.Instance);
+        var sut = new PaperFillSimulator(NullLogger<PaperFillSimulator>.Instance, NoSlipOpts());
         var now = DateTimeOffset.UtcNow;
 
         var instrument = BuildInstrument();

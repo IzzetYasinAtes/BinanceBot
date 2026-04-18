@@ -10,4 +10,5 @@ public sealed record StrategySignalEmittedEvent(
     long StrategyId,
     string Symbol,
     StrategySignalDirection Direction,
-    DateTimeOffset BarOpenTime) : DomainEventBase;
+    DateTimeOffset BarOpenTime,
+    decimal? SuggestedStopPrice = null) : DomainEventBase;

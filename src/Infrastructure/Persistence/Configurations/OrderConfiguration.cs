@@ -13,7 +13,12 @@ public sealed class OrderConfiguration : IEntityTypeConfiguration<Order>
         builder.HasKey(o => o.Id);
         builder.Property(o => o.Id).ValueGeneratedOnAdd();
 
-        builder.Property(o => o.ClientOrderId).HasMaxLength(36).IsRequired();
+        // NOTE: Binance Spot API ClientOrderId max is 36 chars; we widen our DB column to 64
+        // to fit the internal correlation prefix `sig-{StrategyId}-{barUnix}-x-{modeSuffix}`
+        // even when StrategyId reaches long.MaxValue (worst case ~37–40 chars). The Mainnet
+        // path is currently blocked by ADR-0006; if/when we send a 36+ char cid to Binance
+        // we must truncate at the gateway. (ADR-0011 review round 2 — blocker fix.)
+        builder.Property(o => o.ClientOrderId).HasMaxLength(64).IsRequired();
 
         builder.Property(o => o.Mode)
             .HasConversion<int>()

@@ -211,7 +211,7 @@ Tek eksik §11.6'daki `OrderFilledPositionUpdater` glue idi. O eklenince zincir 
 }
 ```
 
-**Algoritma (`RiskProfileSeeder`):**
+**Algoritma (`RiskProfileSeeder`) — config-as-source-of-truth:**
 ```
 foreach mode in [Paper, LiveTestnet, LiveMainnet]:
     var existing = db.RiskProfiles.FirstOrDefault(r => r.Id == RiskProfile.IdFor(mode));
@@ -221,10 +221,16 @@ foreach mode in [Paper, LiveTestnet, LiveMainnet]:
                              opts.MaxDrawdown24hPct, opts.MaxDrawdownAllTimePct,
                              opts.MaxConsecutiveLosses, _clock.UtcNow);
         db.RiskProfiles.Add(profile);
+    else if (existing.diverges_from(opts)):
+        existing.UpdateLimits(opts.RiskPerTradePct, opts.MaxPositionSizePct,
+                              opts.MaxDrawdown24hPct, opts.MaxDrawdownAllTimePct,
+                              opts.MaxConsecutiveLosses, _clock.UtcNow);
 db.SaveChanges();
 ```
 
-**Idempotent:** mevcut row varsa **dokunma** — admin override (UI uzerinden `UpdateRiskProfileCommand`) preserve edilir.
+**Idempotent reconciler — config-as-source-of-truth.** appsettings.json `RiskProfile.Defaults` değişirse boot'ta DB ile reconcile edilir. UI üzerinden `UpdateRiskProfileCommand` ile yapılan değişiklikler **runtime experiment** sayılır; kalıcı kılınmak için appsettings.json'a yazılması gerekir. Bu pattern operations best-practice (12-factor app config) ve loop'lar arası deterministik baseline garanti eder.
+
+**Operasyonel sonuç:** Restart sonrası UI ayarları reset olur. Audit trail için her UpdateRiskProfileCommand SystemEvent yazar (zaten mevcut akış); operatör hangi değerin kaynağa ait olduğunu loga bakarak görebilir.
 
 **Reddedilen alternatif:** `RiskProfile.CreateDefault` icindeki sabitleri (`0.01, 0.10, 0.05, 0.25, 3`) `appsettings.json`'a tasimak ve `Domain.CreateDefault`'i parametre alır yapmak. Reddedildi — Domain layer config bilmez (dependency rule). `CreateDefault` factory'si "domain'e gore mantikli minimum default" doner; seeder Application/Infrastructure'da config okur ve `UpdateLimits` ile override eder.
 

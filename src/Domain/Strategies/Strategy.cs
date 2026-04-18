@@ -117,7 +117,7 @@ public sealed class Strategy : AggregateRoot<long>
             price, stopPrice, contextJson, emittedAt);
         _signals.Add(signal);
 
-        RaiseDomainEvent(new StrategySignalEmittedEvent(Id, symbol.Value, direction, barOpenTime));
+        RaiseDomainEvent(new StrategySignalEmittedEvent(Id, symbol.Value, direction, barOpenTime, stopPrice));
         return signal;
     }
 }

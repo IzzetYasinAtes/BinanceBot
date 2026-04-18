@@ -4,6 +4,7 @@ using BinanceBot.Domain.Instruments;
 using BinanceBot.Domain.MarketData;
 using BinanceBot.Domain.Orders;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 namespace BinanceBot.Infrastructure.Trading.Paper;
 
@@ -11,6 +12,7 @@ namespace BinanceBot.Infrastructure.Trading.Paper;
 /// Deterministic paper-fill engine (ADR-0008 §8.4 + docs/research/paper-fill-research.md).
 /// VIP0 0.1% taker commission, BUY commission in base, SELL commission in quote.
 /// MARKET orders walk depth asks (BUY) / bids (SELL) — with bookTicker single-level fallback.
+/// Per ADR-0011 §11.5 a fixed proportional slippage is applied per fill leg.
 /// </summary>
 public sealed class PaperFillSimulator : IPaperFillSimulator
 {
@@ -18,10 +20,14 @@ public sealed class PaperFillSimulator : IPaperFillSimulator
     private static long _virtualTradeCounter;
 
     private readonly ILogger<PaperFillSimulator> _logger;
+    private readonly PaperFillOptions _options;
 
-    public PaperFillSimulator(ILogger<PaperFillSimulator> logger)
+    public PaperFillSimulator(
+        ILogger<PaperFillSimulator> logger,
+        IOptions<PaperFillOptions> options)
     {
         _logger = logger;
+        _options = options.Value;
     }
 
     public PaperFillOutcome Simulate(
@@ -99,6 +105,22 @@ public sealed class PaperFillSimulator : IPaperFillSimulator
             return new PaperFillOutcome(false, true, "no_liquidity", 0m, 0m, 0m);
         }
 
+        // BUG-A FIX (ADR-0011 §11.5 / decision-sizing.md Commit 2):
+        // MARKET orders bypass ValidateFilters' MIN_NOTIONAL check (which only fires for LIMIT).
+        // Pre-check using top-of-book + post-slippage so a sub-MinNotional MARKET cannot
+        // ever appear filled.
+        var topPrice = levels[0].Price;
+        var topPriceWithSlip = order.Side == OrderSide.Buy
+            ? topPrice * (1m + _options.FixedSlippagePct)
+            : topPrice * (1m - _options.FixedSlippagePct);
+        var notionalEstimate = order.Quantity * topPriceWithSlip;
+        if (notionalEstimate < instrument.MinNotional)
+        {
+            var reason = $"filter_MIN_NOTIONAL_{notionalEstimate}<{instrument.MinNotional}";
+            order.Reject(reason, now);
+            return new PaperFillOutcome(false, true, reason, 0m, 0m, 0m);
+        }
+
         var fills = new List<(decimal Price, decimal Quantity)>();
         var remaining = order.Quantity;
         foreach (var lvl in levels)
@@ -106,7 +128,14 @@ public sealed class PaperFillSimulator : IPaperFillSimulator
             if (remaining <= 0m) break;
             var take = Math.Min(lvl.Qty, remaining);
             if (take <= 0m) continue;
-            fills.Add((lvl.Price, take));
+
+            // ADR-0011 §11.5 + decision-sizing.md Commit 3:
+            // Apply fixed slippage per leg — BUY pays more, SELL receives less.
+            var slipPrice = order.Side == OrderSide.Buy
+                ? lvl.Price * (1m + _options.FixedSlippagePct)
+                : lvl.Price * (1m - _options.FixedSlippagePct);
+
+            fills.Add((slipPrice, take));
             remaining -= take;
         }
 

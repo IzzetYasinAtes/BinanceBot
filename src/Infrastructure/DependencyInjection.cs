@@ -13,7 +13,9 @@ using BinanceBot.Infrastructure.Persistence;
 using BinanceBot.Infrastructure.Positions;
 using BinanceBot.Infrastructure.Strategies;
 using BinanceBot.Infrastructure.Strategies.Evaluators;
+using BinanceBot.Infrastructure.Risk;
 using BinanceBot.Infrastructure.Time;
+using BinanceBot.Infrastructure.Trading;
 using BinanceBot.Infrastructure.Trading.Paper;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
@@ -35,6 +37,9 @@ public static class DependencyInjection
             .Bind(configuration.GetSection(BinanceOptions.SectionName))
             .ValidateDataAnnotations()
             .ValidateOnStart();
+
+        // ADR-0011 §11.5 + decision-sizing.md Commit 1: Paper-only slippage config.
+        services.Configure<PaperFillOptions>(configuration.GetSection("PaperFill"));
 
         var connectionString = configuration.GetConnectionString("Default")
             ?? throw new InvalidOperationException("ConnectionStrings:Default is not configured.");
@@ -118,6 +123,9 @@ public static class DependencyInjection
         services.AddSingleton<IBinanceCredentialsProvider, BinanceCredentialsProvider>();
         services.AddSingleton<IPaperFillSimulator, PaperFillSimulator>();
 
+        // ADR-0011 §11.3 — equity snapshot is per-request (DbContext is scoped).
+        services.AddScoped<IEquitySnapshotProvider, EquitySnapshotProvider>();
+
         services.AddSingleton<BinanceStreamBus>();
         services.AddSingleton<IBinanceMarketStream>(sp => sp.GetRequiredService<BinanceStreamBus>());
 
@@ -143,6 +151,12 @@ public static class DependencyInjection
         services.AddOptions<StrategySeedOptions>()
             .Bind(configuration.GetSection(StrategySeedOptions.SectionName));
         services.AddHostedService<StrategySeeder>();
+
+        // ADR-0011 §11.8 + decision-sizing.md Commit 9 — keep RiskProfile rows in sync
+        // with appsettings on every boot (idempotent, no migration required).
+        services.Configure<RiskProfileDefaultsOptions>(
+            configuration.GetSection(RiskProfileDefaultsOptions.SectionName));
+        services.AddHostedService<RiskProfileSeeder>();
         services.AddTransient<MediatR.INotificationHandler<BinanceBot.Domain.MarketData.Events.KlineClosedEvent>,
             StrategyEvaluationHandler>();
         services.AddTransient<MediatR.INotificationHandler<BinanceBot.Domain.Strategies.Events.StrategySignalEmittedEvent>,
