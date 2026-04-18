@@ -4,6 +4,7 @@ using BinanceBot.Application.Orders.Commands.PlaceOrder;
 using BinanceBot.Domain.Common;
 using BinanceBot.Domain.Orders;
 using BinanceBot.Domain.Positions;
+using BinanceBot.Domain.ValueObjects;
 using FluentValidation;
 using MediatR;
 using Microsoft.EntityFrameworkCore;
@@ -61,10 +62,13 @@ public sealed class CloseSignalPositionCommandHandler
     public async Task<Result<ClosedSignalPositionDto>> Handle(
         CloseSignalPositionCommand req, CancellationToken ct)
     {
+        // EF Core cannot translate the `Symbol.Value` property accessor in WHERE predicates
+        // (Symbol is a value object mapped via HasConversion). Compare against the VO directly.
+        var symbolVo = Symbol.From(req.Symbol);
         var position = await _db.Positions
             .AsNoTracking()
             .FirstOrDefaultAsync(p =>
-                p.Symbol.Value == req.Symbol &&
+                p.Symbol == symbolVo &&
                 p.Mode == req.Mode &&
                 p.Status == PositionStatus.Open, ct);
         if (position is null)

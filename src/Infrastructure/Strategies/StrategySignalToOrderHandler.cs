@@ -7,6 +7,7 @@ using BinanceBot.Domain.Orders;
 using BinanceBot.Domain.RiskProfiles;
 using BinanceBot.Domain.Strategies;
 using BinanceBot.Domain.Strategies.Events;
+using BinanceBot.Domain.ValueObjects;
 using BinanceBot.Infrastructure.Trading.Paper;
 using MediatR;
 using Microsoft.EntityFrameworkCore;
@@ -70,8 +71,11 @@ public sealed class StrategySignalToOrderHandler : INotificationHandler<Strategy
             ? OrderSide.Buy
             : OrderSide.Sell;
 
+        // EF Core cannot translate the `Symbol.Value` property accessor in WHERE predicates
+        // (Symbol is a value object mapped via HasConversion). Compare against the VO directly.
+        var symbolVo = Symbol.From(notification.Symbol);
         var instrument = await db.Instruments.AsNoTracking()
-            .FirstOrDefaultAsync(i => i.Symbol.Value == notification.Symbol, ct);
+            .FirstOrDefaultAsync(i => i.Symbol == symbolVo, ct);
         if (instrument is null)
         {
             _logger.LogWarning("Instrument not registered: {Symbol}", notification.Symbol);
@@ -79,7 +83,7 @@ public sealed class StrategySignalToOrderHandler : INotificationHandler<Strategy
         }
 
         var ticker = await db.BookTickers.AsNoTracking()
-            .FirstOrDefaultAsync(b => b.Symbol.Value == notification.Symbol, ct);
+            .FirstOrDefaultAsync(b => b.Symbol == symbolVo, ct);
         if (ticker is null)
         {
             _logger.LogWarning("BookTicker missing: {Symbol}", notification.Symbol);
