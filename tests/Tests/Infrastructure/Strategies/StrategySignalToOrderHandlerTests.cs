@@ -46,7 +46,9 @@ public class StrategySignalToOrderHandlerTests
             bool seedTicker = true,
             bool seedRiskProfile = true,
             bool seedOpenPosition = false,
-            PositionSide openPositionSide = PositionSide.Long)
+            PositionSide openPositionSide = PositionSide.Long,
+            int? maxOpenPositionsOverride = null,
+            int seededOpenPositionsPerMode = 0)
     {
         var sc = new ServiceCollection();
 
@@ -98,6 +100,10 @@ public class StrategySignalToOrderHandlerTests
             foreach (var mode in new[] { TradingMode.Paper, TradingMode.LiveTestnet, TradingMode.LiveMainnet })
             {
                 var profile = RiskProfile.CreateDefault(mode, DateTimeOffset.UtcNow);
+                if (maxOpenPositionsOverride is int max)
+                {
+                    profile.UpdateLimits(0.02m, 0.40m, 0.20m, 0.40m, 10, max, DateTimeOffset.UtcNow);
+                }
                 if (cbState == CircuitBreakerStatus.Tripped)
                 {
                     profile.TripCircuitBreaker("test", 0.5m, DateTimeOffset.UtcNow);
@@ -117,6 +123,24 @@ public class StrategySignalToOrderHandlerTests
                 mode: TradingMode.Paper,
                 now: DateTimeOffset.UtcNow);
             db.Positions.Add(pos);
+        }
+        if (seededOpenPositionsPerMode > 0)
+        {
+            foreach (var mode in new[] { TradingMode.Paper, TradingMode.LiveTestnet, TradingMode.LiveMainnet })
+            {
+                for (var i = 0; i < seededOpenPositionsPerMode; i++)
+                {
+                    db.Positions.Add(Position.Open(
+                        Symbol.From("BTCUSDT"),
+                        PositionSide.Long,
+                        quantity: 0.01m,
+                        entryPrice: 29500m,
+                        stopPrice: null,
+                        strategyId: 1,
+                        mode: mode,
+                        now: DateTimeOffset.UtcNow));
+                }
+            }
         }
         db.SaveChanges();
 
@@ -284,6 +308,33 @@ public class StrategySignalToOrderHandlerTests
         cidPrefix.Length.Should().BeLessThanOrEqualTo(54);
         // Exit CID = `{prefix}-x-{suffix}` (suffix max 2 chars) — must also fit DB column.
         (cidPrefix.Length + "-x-lm".Length).Should().BeLessThanOrEqualTo(64);
+    }
+
+    /// <summary>
+    /// Loop 14 (research-paper-live-and-sizing.md §C5/§6): when the per-mode
+    /// MaxOpenPositions ceiling is already reached, the fan-out must skip the
+    /// entry without sending a PlaceOrderCommand. We seed two open positions
+    /// per mode and set MaxOpenPositions=2, so every mode hits the throttle.
+    /// </summary>
+    [Fact]
+    public async Task Long_SkipsAllModes_WhenMaxOpenPositionsAlreadyReached()
+    {
+        var (scopeFactory, mediator, _, _, _) = BuildHarness(
+            maxOpenPositionsOverride: 2,
+            seededOpenPositionsPerMode: 2);
+
+        mediator.Setup(m => m.Send(It.IsAny<PlaceOrderCommand>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Result.Success(new PlacedOrderDto("x", "BTCUSDT", "Filled", SizedQty, null, TradingMode.Paper)));
+
+        var sut = new StrategySignalToOrderHandler(
+            scopeFactory, NullLogger<StrategySignalToOrderHandler>.Instance);
+
+        await sut.Handle(new StrategySignalEmittedEvent(
+            1, "BTCUSDT", StrategySignalDirection.Long, DateTimeOffset.UtcNow, 29500m),
+            CancellationToken.None);
+
+        mediator.Verify(m => m.Send(It.IsAny<PlaceOrderCommand>(), It.IsAny<CancellationToken>()),
+            Times.Never);
     }
 
     [Fact]

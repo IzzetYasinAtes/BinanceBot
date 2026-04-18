@@ -13,17 +13,22 @@ public sealed record UpdateRiskProfileCommand(
     decimal MaxPositionSizePct,
     decimal MaxDrawdown24hPct,
     decimal MaxDrawdownAllTimePct,
-    int MaxConsecutiveLosses) : IRequest<Result>;
+    int MaxConsecutiveLosses,
+    int MaxOpenPositions) : IRequest<Result>;
 
 public sealed class UpdateRiskProfileCommandValidator : AbstractValidator<UpdateRiskProfileCommand>
 {
+    // Loop 14 (research-paper-live-and-sizing.md §C2/C3): bounds widened to match the
+    // domain — riskPerTradePct ≤ 5%, maxPositionSizePct ≤ 60%; new MaxOpenPositions
+    // throttle is [1, 10]. Domain still has the final word via UpdateLimits.
     public UpdateRiskProfileCommandValidator()
     {
-        RuleFor(c => c.RiskPerTradePct).GreaterThan(0m).LessThanOrEqualTo(0.02m);
-        RuleFor(c => c.MaxPositionSizePct).GreaterThan(0m).LessThanOrEqualTo(0.20m);
+        RuleFor(c => c.RiskPerTradePct).GreaterThan(0m).LessThanOrEqualTo(0.05m);
+        RuleFor(c => c.MaxPositionSizePct).GreaterThan(0m).LessThanOrEqualTo(0.60m);
         RuleFor(c => c.MaxDrawdown24hPct).GreaterThan(0m).LessThanOrEqualTo(0.30m);
         RuleFor(c => c.MaxDrawdownAllTimePct).GreaterThan(0m).LessThanOrEqualTo(0.60m);
         RuleFor(c => c.MaxConsecutiveLosses).InclusiveBetween(1, 15);
+        RuleFor(c => c.MaxOpenPositions).InclusiveBetween(1, 10);
     }
 }
 
@@ -51,6 +56,7 @@ public sealed class UpdateRiskProfileCommandHandler : IRequestHandler<UpdateRisk
                 request.MaxDrawdown24hPct,
                 request.MaxDrawdownAllTimePct,
                 request.MaxConsecutiveLosses,
+                request.MaxOpenPositions,
                 _clock.UtcNow);
         }
         catch (DomainException ex)

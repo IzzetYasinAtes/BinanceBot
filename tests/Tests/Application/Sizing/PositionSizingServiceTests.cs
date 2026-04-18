@@ -217,6 +217,30 @@ public class PositionSizingServiceTests
         result.SkipReason.Should().Be("entry_invalid");
     }
 
+    // --- Loop 14 widened envelope: %40 cap on $100 equity ($40 notional ceiling) ----------
+    // research-paper-live-and-sizing.md §B/C4 promotes the default cap from 15% to 40% so
+    // a $100 paper account can finally take a meaningful BNB position. With BNB at 600,
+    // 0% slippage, no stop:
+    //   qtyByCap = (100 * 0.40) / 600 = 0.0666... -> floor at 0.001 -> 0.066
+    //   notional = 0.066 * 600 = 39.6 (just under the 40 ceiling, matches step floor)
+    [Fact]
+    public void Loop14_FortyPctCapOn100Equity_BnbSizesNearFortyDollarsNotional()
+    {
+        var input = new PositionSizingInput(
+            Equity: 100m, EntryPrice: 600m, StopDistance: 0m,
+            RiskPct: 0.02m, MaxPositionPct: 0.40m,
+            MinNotional: 5m, StepSize: 0.001m, MinQty: 0.001m,
+            SlippagePct: 0m);
+
+        var result = _sut.Calculate(input);
+
+        result.SkipReason.Should().BeNull();
+        result.Quantity.Should().Be(0.066m);
+        result.NotionalEstimate.Should().Be(39.6m);
+        // Sanity: the new envelope must NOT let notional slip past the 40 ceiling.
+        result.NotionalEstimate.Should().BeLessThanOrEqualTo(40m);
+    }
+
     // --- Risk branch beats cap when stop is loose ---------------------------------------
     // equity 1000, riskPct 0.01 -> riskAmount 10
     // stopDistance 5000 (loose) -> qtyByRisk = 10 / 5000 = 0.002

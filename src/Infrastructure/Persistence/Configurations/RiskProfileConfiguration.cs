@@ -17,6 +17,7 @@ public sealed class RiskProfileConfiguration : IEntityTypeConfiguration<RiskProf
         builder.Property(r => r.MaxDrawdown24hPct).HasPrecision(10, 4);
         builder.Property(r => r.MaxDrawdownAllTimePct).HasPrecision(10, 4);
         builder.Property(r => r.MaxConsecutiveLosses);
+        builder.Property(r => r.MaxOpenPositions);
 
         builder.Property(r => r.RiskPerTradeCap).HasPrecision(10, 4);
         builder.Property(r => r.MaxPositionCap).HasPrecision(10, 4);
@@ -49,6 +50,7 @@ public sealed class RiskProfileConfiguration : IEntityTypeConfiguration<RiskProf
             MaxDrawdown24hPct = 0.05m,
             MaxDrawdownAllTimePct = 0.25m,
             MaxConsecutiveLosses = 3,
+            MaxOpenPositions = 2,
             CircuitBreakerStatus = CircuitBreakerStatus.Healthy,
             ConsecutiveLosses = 0,
             RealizedPnl24h = 0m,

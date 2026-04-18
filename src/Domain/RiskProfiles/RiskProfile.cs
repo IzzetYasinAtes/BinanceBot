@@ -17,6 +17,15 @@ public sealed class RiskProfile : AggregateRoot<int>
     public decimal MaxDrawdownAllTimePct { get; private set; }
     public int MaxConsecutiveLosses { get; private set; }
 
+    /// <summary>
+    /// Loop 14 (research-paper-live-and-sizing.md §B/C5): hard ceiling on the number
+    /// of simultaneously-open positions for this trading mode. The fan-out handler
+    /// counts open positions per mode and skips new entries once this limit is reached,
+    /// so a single strategy storm cannot overwhelm a $100 paper account by stacking
+    /// $40 notionals across symbols. Range [1, 10]; default 2.
+    /// </summary>
+    public int MaxOpenPositions { get; private set; }
+
     public decimal? RiskPerTradeCap { get; private set; }
     public decimal? MaxPositionCap { get; private set; }
     public string? CapsAdminNote { get; private set; }
@@ -43,26 +52,34 @@ public sealed class RiskProfile : AggregateRoot<int>
             MaxDrawdown24hPct = 0.05m,
             MaxDrawdownAllTimePct = 0.25m,
             MaxConsecutiveLosses = 3,
+            MaxOpenPositions = 2,
             CircuitBreakerStatus = CircuitBreakerStatus.Healthy,
             PeakEquity = 0m,
             UpdatedAt = now,
         };
 
+    /// <summary>
+    /// Loop 14 (research-paper-live-and-sizing.md §C2): risk envelope widened to make
+    /// $100 paper accounts viable — riskPerTradePct upper bound 2% → 5%, maxPositionSizePct
+    /// 20% → 60% (so a single $40 notional on a $100 equity is allowed). The MaxOpenPositions
+    /// parameter is the new fan-out throttle (range [1, 10]).
+    /// </summary>
     public void UpdateLimits(
         decimal riskPerTradePct,
         decimal maxPositionSizePct,
         decimal maxDrawdown24hPct,
         decimal maxDrawdownAllTimePct,
         int maxConsecutiveLosses,
+        int maxOpenPositions,
         DateTimeOffset now)
     {
-        if (riskPerTradePct is <= 0m or > 0.02m)
+        if (riskPerTradePct is <= 0m or > 0.05m)
         {
-            throw new DomainException("RiskPerTradePct must be (0, 0.02].");
+            throw new DomainException("RiskPerTradePct must be (0, 0.05].");
         }
-        if (maxPositionSizePct is <= 0m or > 0.20m)
+        if (maxPositionSizePct is <= 0m or > 0.60m)
         {
-            throw new DomainException("MaxPositionSizePct must be (0, 0.20].");
+            throw new DomainException("MaxPositionSizePct must be (0, 0.60].");
         }
         if (maxDrawdown24hPct is <= 0m or > 0.30m)
         {
@@ -76,17 +93,23 @@ public sealed class RiskProfile : AggregateRoot<int>
         {
             throw new DomainException("MaxConsecutiveLosses must be [1, 15].");
         }
+        if (maxOpenPositions is < 1 or > 10)
+        {
+            throw new DomainException("MaxOpenPositions must be [1, 10].");
+        }
 
         RiskPerTradePct = riskPerTradePct;
         MaxPositionSizePct = maxPositionSizePct;
         MaxDrawdown24hPct = maxDrawdown24hPct;
         MaxDrawdownAllTimePct = maxDrawdownAllTimePct;
         MaxConsecutiveLosses = maxConsecutiveLosses;
+        MaxOpenPositions = maxOpenPositions;
         UpdatedAt = now;
 
         RaiseDomainEvent(new RiskProfileUpdatedEvent(
             riskPerTradePct, maxPositionSizePct,
-            maxDrawdown24hPct, maxDrawdownAllTimePct, maxConsecutiveLosses));
+            maxDrawdown24hPct, maxDrawdownAllTimePct,
+            maxConsecutiveLosses, maxOpenPositions));
     }
 
     public void OverrideCaps(

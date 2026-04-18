@@ -160,7 +160,7 @@ public class RiskProfileTests
     {
         var rp = RiskProfile.CreateDefault(TradingMode.Paper, T0);
         // Reconfigure: 24h=10% (loose), all-time=8% (tighter than 24h).
-        rp.UpdateLimits(0.01m, 0.10m, 0.10m, 0.08m, 3, T0);
+        rp.UpdateLimits(0.01m, 0.10m, 0.10m, 0.08m, 3, 2, T0);
         rp.ClearDomainEvents();
 
         rp.RecordPeakEquitySnapshot(100m, T0);
@@ -241,5 +241,55 @@ public class RiskProfileTests
 
         rp.RecordTradeOutcome(2m, 100m, T0.AddMinutes(2));
         rp.ConsecutiveLosses.Should().Be(0);
+    }
+
+    /// <summary>
+    /// Loop 14 (research-paper-live-and-sizing.md §C5): MaxOpenPositions defaults
+    /// to 2 on a freshly created profile. Backfill migration mirrors the same value
+    /// for existing rows.
+    /// </summary>
+    [Fact]
+    public void CreateDefault_HasMaxOpenPositionsOfTwo()
+    {
+        var rp = RiskProfile.CreateDefault(TradingMode.Paper, T0);
+
+        rp.MaxOpenPositions.Should().Be(2);
+    }
+
+    /// <summary>
+    /// Loop 14 §C5: MaxOpenPositions is bounded to [1, 10] inside UpdateLimits.
+    /// Below the floor (0 or negative) and above the ceiling (>10) must throw
+    /// DomainException so the API/seeder cannot smuggle through unbounded values.
+    /// </summary>
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-1)]
+    [InlineData(11)]
+    [InlineData(50)]
+    public void UpdateLimits_RejectsMaxOpenPositionsOutsideRange(int badValue)
+    {
+        var rp = RiskProfile.CreateDefault(TradingMode.Paper, T0);
+
+        var act = () => rp.UpdateLimits(0.02m, 0.40m, 0.20m, 0.40m, 5, badValue, T0);
+
+        act.Should().Throw<BinanceBot.Domain.Common.DomainException>()
+            .WithMessage("*MaxOpenPositions*");
+    }
+
+    /// <summary>
+    /// Loop 14 §C5: happy path — UpdateLimits accepts the new MaxOpenPositions
+    /// argument inside [1, 10] and persists it on the aggregate alongside the
+    /// existing risk envelope.
+    /// </summary>
+    [Fact]
+    public void UpdateLimits_PersistsMaxOpenPositions_WithinBounds()
+    {
+        var rp = RiskProfile.CreateDefault(TradingMode.Paper, T0);
+
+        rp.UpdateLimits(0.02m, 0.40m, 0.20m, 0.40m, 10, 4, T0.AddMinutes(1));
+
+        rp.MaxOpenPositions.Should().Be(4);
+        rp.RiskPerTradePct.Should().Be(0.02m);
+        rp.MaxPositionSizePct.Should().Be(0.40m);
     }
 }

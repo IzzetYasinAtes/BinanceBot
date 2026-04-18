@@ -6,6 +6,7 @@ public sealed record RiskProfileDto(
     decimal MaxDrawdown24hPct,
     decimal MaxDrawdownAllTimePct,
     int MaxConsecutiveLosses,
+    int MaxOpenPositions,
     decimal? RiskPerTradeCap,
     decimal? MaxPositionCap,
     string? CapsAdminNote,
