@@ -69,27 +69,67 @@ const OrderRows = {
     `,
 };
 
+const PositionRows = {
+    props: ["rows"],
+    setup() {
+        function sideBadge(s) {
+            return s === "Long" ? "up" : s === "Short" ? "down" : "";
+        }
+        function sideLabel(s) {
+            return s === "Long" ? "LONG" : s === "Short" ? "SHORT" : s;
+        }
+        return { fmt, sideBadge, sideLabel };
+    },
+    template: `
+        <table class="data">
+            <thead><tr>
+                <th>Sembol</th>
+                <th>Yön</th>
+                <th class="align-right">Adet</th>
+                <th class="align-right">Giriş</th>
+                <th class="align-right">Mark</th>
+                <th class="align-right">Unrealized PnL</th>
+                <th>Açılış</th>
+            </tr></thead>
+            <tbody>
+                <tr v-for="p in rows" :key="p.id">
+                    <td><strong>{{ p.symbol }}</strong></td>
+                    <td><span class="badge" :class="sideBadge(p.side)">{{ sideLabel(p.side) }}</span></td>
+                    <td class="align-right">{{ fmt.num4(p.quantity) }}</td>
+                    <td class="align-right">{{ fmt.price(p.averageEntryPrice) }}</td>
+                    <td class="align-right">{{ fmt.price(p.markPrice) }}</td>
+                    <td class="align-right" :class="fmt.sign(p.unrealizedPnl)">
+                        \${{ fmt.num2(p.unrealizedPnl ?? 0) }}
+                    </td>
+                    <td style="color:var(--fg-3);">{{ fmt.timeHms(p.openedAt) }}</td>
+                </tr>
+                <tr v-if="rows.length === 0">
+                    <td colspan="7" style="text-align:center;color:var(--fg-3);padding:18px;">Açık pozisyon yok</td>
+                </tr>
+            </tbody>
+        </table>
+    `,
+};
+
 const App = {
-    components: { Sidebar, ErrorBanner, OrderRows },
+    components: { Sidebar, ErrorBanner, OrderRows, PositionRows },
     template: `
         <div class="app">
             <Sidebar active="orders" />
             <main>
                 <section class="block">
-                    <h2 class="section">Açık İşlemler</h2>
-                    <p class="section-sub">Henüz doldurulmamış aktif order'lar.</p>
+                    <h2 class="section">Açık Pozisyonlar</h2>
+                    <p class="section-sub">Şu anda açık olan trade pozisyonları.</p>
                     <div class="toolbar">
-                        <label>Mod
-                            <select v-model="mode">
-                                <option value="">hepsi</option>
-                                <option value="Paper">Paper</option>
-                                <option value="LiveTestnet">LiveTestnet</option>
-                                <option value="LiveMainnet">LiveMainnet</option>
-                            </select>
+                        <label>Sembol
+                            <input v-model="positionSymbol" placeholder="opsiyonel" style="width:120px;">
                         </label>
+                        <span style="color:var(--fg-3);font-size:12px;" v-if="positionsPoll.data.value">
+                            toplam: {{ positionsPoll.data.value.length }}
+                        </span>
                     </div>
-                    <ErrorBanner :error="openPoll.error.value" />
-                    <OrderRows v-if="filteredOpen" :rows="filteredOpen" />
+                    <ErrorBanner :error="positionsPoll.error.value" />
+                    <PositionRows v-if="positionsPoll.data.value" :rows="positionsPoll.data.value" />
                     <div v-else class="skeleton" style="height:80px"></div>
                 </section>
 
@@ -128,20 +168,17 @@ const App = {
         const symbol = ref("");
         const take = ref(50);
         const mode = ref("");
+        const positionSymbol = ref("");
 
-        const openPoll = usePolling(() => api.orders.open(symbol.value), 3000);
+        const positionsPoll = usePolling(
+            () => api.positions.list({ status: "Open", symbol: positionSymbol.value }),
+            3000);
         const historyPoll = usePolling(
             () => api.orders.history({ symbol: symbol.value, skip: 0, take: take.value }),
             5000);
 
-        watch([symbol, take], () => { openPoll.refresh(); historyPoll.refresh(); });
-
-        const filteredOpen = computed(() => {
-            const rows = openPoll.data.value;
-            if (!rows) return null;
-            if (!mode.value) return rows;
-            return rows.filter(o => o.mode === mode.value);
-        });
+        watch([symbol, take], () => { historyPoll.refresh(); });
+        watch(positionSymbol, () => { positionsPoll.refresh(); });
 
         const filteredHistory = computed(() => {
             const payload = historyPoll.data.value;
@@ -151,7 +188,7 @@ const App = {
             return items.filter(o => o.mode === mode.value);
         });
 
-        return { symbol, take, mode, openPoll, historyPoll, filteredOpen, filteredHistory };
+        return { symbol, take, mode, positionSymbol, positionsPoll, historyPoll, filteredHistory };
     },
 };
 
