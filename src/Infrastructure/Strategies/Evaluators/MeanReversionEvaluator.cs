@@ -16,6 +16,13 @@ public sealed class MeanReversionEvaluator : IStrategyEvaluator
         public int BbPeriod { get; set; } = 20;
         public decimal BbStdDev { get; set; } = 2m;
         public decimal OrderSize { get; set; } = 0.001m;
+
+        // Loop 11 stop fix — mean-reversion entries had no stop, leaving losers uncapped.
+        // Stop is placed BbStopMultiplier × stdDev away from entry on the lossy side
+        // (long: below entry; short: above). With BbStdDev=2 and BbStopMultiplier=1.5
+        // the stop sits ~0.75 band-width past the band edge, giving room for the bounce
+        // without letting a regime change run the position into the ground.
+        public decimal BbStopMultiplier { get; set; } = 1.5m;
     }
 
     public Task<StrategyEvaluation?> EvaluateAsync(
@@ -35,7 +42,11 @@ public sealed class MeanReversionEvaluator : IStrategyEvaluator
 
         var longSignal = rsi <= p.RsiOversold && latest.ClosePrice <= lower;
         var shortSignal = rsi >= p.RsiOverbought && latest.ClosePrice >= upper;
-        var exitSignal = rsi is >= 45m and <= 55m;
+        // Loop 11 — RSI exit band tightened from [45,55] to [48,52]. The wider band emitted
+        // exit signals on nearly every bar in chop, drowning the order pipeline; the tighter
+        // band keeps Exit semantics for "true mean" only and lets the BB-mean TP do the
+        // heavy lifting on profit realisation.
+        var exitSignal = rsi is >= 48m and <= 52m;
 
         if (!longSignal && !shortSignal && !exitSignal)
         {
@@ -57,6 +68,19 @@ public sealed class MeanReversionEvaluator : IStrategyEvaluator
             _ => null,
         };
 
+        // Loop 11 stop fix — recover stdDev from the band geometry (lower = mean - BbStdDev*std)
+        // to size the stop in the same units the bands are drawn in. Stop sits BbStopMultiplier
+        // band-widths past entry on the lossy side. Exit signals carry no stop — the exit IS
+        // the trigger, and existing positions retain their original stop.
+        var stdDev = p.BbStdDev > 0m ? (mean - lower) / p.BbStdDev : 0m;
+        var stopOffset = stdDev * p.BbStopMultiplier;
+        decimal? stopPrice = direction switch
+        {
+            StrategySignalDirection.Long when stopOffset > 0m => latest.ClosePrice - stopOffset,
+            StrategySignalDirection.Short when stopOffset > 0m => latest.ClosePrice + stopOffset,
+            _ => null,
+        };
+
         var ctx = EvaluatorParameterHelper.SerializeContext(new
         {
             type = "meanrev",
@@ -64,15 +88,17 @@ public sealed class MeanReversionEvaluator : IStrategyEvaluator
             mean,
             upper,
             lower,
+            stdDev,
             price = latest.ClosePrice,
             takeProfit,
+            stopPrice,
         });
 
         return Task.FromResult<StrategyEvaluation?>(new StrategyEvaluation(
             direction,
             p.OrderSize,
             latest.ClosePrice,
-            null,
+            stopPrice,
             ctx,
             SuggestedTakeProfit: takeProfit));
     }
