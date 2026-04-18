@@ -15,11 +15,12 @@ using Moq;
 namespace BinanceBot.Tests.Infrastructure.Positions;
 
 /// <summary>
-/// Loop 5 t90 CB-bug regression: <see cref="PositionClosedRiskHandler"/> must
-/// hand <see cref="RecordTradeOutcomeCommand"/> the true equity snapshot
-/// (VirtualBalance.Equity via <see cref="IEquitySnapshotProvider"/>) — not the
-/// realized+unrealized PnL sum that previously starved PeakEquity to ~$0.01
-/// and tripped the CB on a profitable session.
+/// Loop 5 t90 + Loop 13 boot CB-bug regression: <see cref="PositionClosedRiskHandler"/>
+/// must hand <see cref="RecordTradeOutcomeCommand"/> the realized-only equity snapshot
+/// (cash balance via <see cref="IEquitySnapshotProvider.GetRealizedEquityAsync"/>) —
+/// not the realized+unrealized PnL sum (Loop 5) and not MTM equity (Loop 12/13). The
+/// close-time snapshot must align with EquityPeakTrackerService's periodic ratchet,
+/// which is also realized-only, so peak/current are comparable.
 /// </summary>
 public class PositionClosedRiskHandlerTests
 {
@@ -40,7 +41,7 @@ public class PositionClosedRiskHandlerTests
 
         var equity = new Mock<IEquitySnapshotProvider>(MockBehavior.Strict);
         equity
-            .Setup(e => e.GetEquityAsync(It.IsAny<TradingMode>(), It.IsAny<CancellationToken>()))
+            .Setup(e => e.GetRealizedEquityAsync(It.IsAny<TradingMode>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(equityFromProvider);
         sc.AddScoped(_ => equity.Object);
 
@@ -54,9 +55,11 @@ public class PositionClosedRiskHandlerTests
     }
 
     [Fact]
-    public async Task Handle_ForwardsEquitySnapshot_NotPnlSum_ToRecordTradeOutcome()
+    public async Task Handle_ForwardsRealizedEquitySnapshot_NotMtm_ToRecordTradeOutcome()
     {
-        // Arrange: Paper $112.27 equity from VirtualBalance, +$2.27 close.
+        // Arrange: Paper $112.27 realized cash balance, +$2.27 close.
+        // (Loop 13: realized-only — open-position unrealized PnL is excluded so the
+        // close-time snapshot matches EquityPeakTrackerService's ratchet.)
         var (handler, mediator, equity) = BuildHarness(equityFromProvider: 112.27m);
         var evt = new PositionClosedEvent(
             PositionId: 42,
@@ -68,8 +71,8 @@ public class PositionClosedRiskHandlerTests
         // Act
         await handler.Handle(evt, CancellationToken.None);
 
-        // Assert: equity flowed through unchanged.
-        equity.Verify(e => e.GetEquityAsync(TradingMode.Paper, It.IsAny<CancellationToken>()), Times.Once);
+        // Assert: realized equity flowed through unchanged.
+        equity.Verify(e => e.GetRealizedEquityAsync(TradingMode.Paper, It.IsAny<CancellationToken>()), Times.Once);
         mediator.Verify(m => m.Send(
                 It.Is<RecordTradeOutcomeCommand>(c =>
                     c.Mode == TradingMode.Paper &&
