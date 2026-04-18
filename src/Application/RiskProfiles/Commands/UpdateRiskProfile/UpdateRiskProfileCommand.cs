@@ -21,9 +21,9 @@ public sealed class UpdateRiskProfileCommandValidator : AbstractValidator<Update
     {
         RuleFor(c => c.RiskPerTradePct).GreaterThan(0m).LessThanOrEqualTo(0.02m);
         RuleFor(c => c.MaxPositionSizePct).GreaterThan(0m).LessThanOrEqualTo(0.20m);
-        RuleFor(c => c.MaxDrawdown24hPct).GreaterThan(0m).LessThanOrEqualTo(0.10m);
-        RuleFor(c => c.MaxDrawdownAllTimePct).GreaterThan(0m).LessThanOrEqualTo(0.50m);
-        RuleFor(c => c.MaxConsecutiveLosses).InclusiveBetween(1, 10);
+        RuleFor(c => c.MaxDrawdown24hPct).GreaterThan(0m).LessThanOrEqualTo(0.30m);
+        RuleFor(c => c.MaxDrawdownAllTimePct).GreaterThan(0m).LessThanOrEqualTo(0.60m);
+        RuleFor(c => c.MaxConsecutiveLosses).InclusiveBetween(1, 15);
     }
 }
 

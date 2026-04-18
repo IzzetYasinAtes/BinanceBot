@@ -64,17 +64,17 @@ public sealed class RiskProfile : AggregateRoot<int>
         {
             throw new DomainException("MaxPositionSizePct must be (0, 0.20].");
         }
-        if (maxDrawdown24hPct is <= 0m or > 0.10m)
+        if (maxDrawdown24hPct is <= 0m or > 0.30m)
         {
-            throw new DomainException("MaxDrawdown24hPct must be (0, 0.10].");
+            throw new DomainException("MaxDrawdown24hPct must be (0, 0.30].");
         }
-        if (maxDrawdownAllTimePct is <= 0m or > 0.50m)
+        if (maxDrawdownAllTimePct is <= 0m or > 0.60m)
         {
-            throw new DomainException("MaxDrawdownAllTimePct must be (0, 0.50].");
+            throw new DomainException("MaxDrawdownAllTimePct must be (0, 0.60].");
         }
-        if (maxConsecutiveLosses is < 1 or > 10)
+        if (maxConsecutiveLosses is < 1 or > 15)
         {
-            throw new DomainException("MaxConsecutiveLosses must be [1, 10].");
+            throw new DomainException("MaxConsecutiveLosses must be [1, 15].");
         }
 
         RiskPerTradePct = riskPerTradePct;
