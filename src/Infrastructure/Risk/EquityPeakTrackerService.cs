@@ -31,6 +31,13 @@ namespace BinanceBot.Infrastructure.Risk;
 /// LiveMainnet is skipped because <see cref="EquitySnapshotProvider"/> always returns
 /// 0 there (ADR-0006 mainnet guard), and <c>RecordPeakEquitySnapshot</c> short-circuits
 /// on <c>currentEquity ≤ 0</c> anyway.
+///
+/// Loop 8 bug #19 update: <see cref="RiskProfile.RecordPeakEquitySnapshot"/> now also
+/// trips the drawdown circuit-breaker when the configured ceiling is breached. The
+/// tracker still does not pull that lever directly — it just persists, and the
+/// <see cref="ApplicationDbContext"/> publisher fans the
+/// <c>CircuitBreakerTrippedEvent</c> out to <c>CircuitBreakerTrippedHandler</c>
+/// (kill-switch deactivates active strategies).
 /// </summary>
 public sealed class EquityPeakTrackerService : BackgroundService
 {
@@ -111,6 +118,7 @@ public sealed class EquityPeakTrackerService : BackgroundService
             }
 
             var peakBefore = profile.PeakEquity;
+            var statusBefore = profile.CircuitBreakerStatus;
             profile.RecordPeakEquitySnapshot(equity, clock.UtcNow);
 
             if (profile.PeakEquity > peakBefore)
@@ -125,6 +133,18 @@ public sealed class EquityPeakTrackerService : BackgroundService
                 _logger.LogDebug(
                     "PEAK-TRACK mode={Mode} equity={Equity} peak={Peak} dd={DD}",
                     mode, equity, profile.PeakEquity, profile.CurrentDrawdownPct);
+                dirty++;
+            }
+
+            // Loop 8 bug #19: surface tracker-driven CB trips so operators don't have
+            // to grep across two log streams to reconstruct an intraday breach.
+            if (statusBefore == CircuitBreakerStatus.Healthy
+                && profile.CircuitBreakerStatus == CircuitBreakerStatus.Tripped)
+            {
+                _logger.LogWarning(
+                    "CB-AUDIT tripped-by-tracker mode={Mode} reason={Reason} equity={Equity} peak={Peak} dd={DD} dd24h={DD24h} ddAll={DDAll}",
+                    mode, profile.CircuitBreakerReason, equity, profile.PeakEquity,
+                    profile.CurrentDrawdownPct, profile.MaxDrawdown24hPct, profile.MaxDrawdownAllTimePct);
                 dirty++;
             }
         }

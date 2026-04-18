@@ -151,11 +151,12 @@ public sealed class RiskProfile : AggregateRoot<int>
     /// against a stale $99 peak and trips the CB at -43% when the real intraday
     /// drawdown was -71% from a peak that was never recorded.
     ///
-    /// This method is called by <see cref="Infrastructure.Risk.EquityPeakTrackerService"/>
-    /// on a periodic tick. It only ever ratchets <see cref="PeakEquity"/> upward and
-    /// rebases <see cref="CurrentDrawdownPct"/>; it does not raise events, change
-    /// <see cref="ConsecutiveLosses"/>, or trip the circuit breaker (those remain
-    /// the responsibility of <see cref="RecordTradeOutcome"/>).
+    /// Loop 7 → Loop 8 bug #19 fix: this method now also evaluates the drawdown
+    /// circuit-breaker. Previously trip evaluation lived only on
+    /// <see cref="RecordTradeOutcome"/>, so an intraday equity slide that crossed the
+    /// drawdown ceiling without a closed trade would never trip the CB. The tracker
+    /// is the only path that observes such slides, so it must own the drawdown trip.
+    /// Consecutive-losses trip remains exclusive to <see cref="RecordTradeOutcome"/>.
     /// </summary>
     public void RecordPeakEquitySnapshot(decimal currentEquity, DateTimeOffset now)
     {
@@ -175,6 +176,8 @@ public sealed class RiskProfile : AggregateRoot<int>
         }
 
         UpdatedAt = now;
+
+        TripIfDrawdownBreached(now);
     }
 
     public void RecordTradeOutcome(decimal realizedPnl, decimal equityAfter, DateTimeOffset now)
@@ -203,5 +206,46 @@ public sealed class RiskProfile : AggregateRoot<int>
 
         UpdatedAt = now;
         RaiseDomainEvent(new TradeOutcomeRecordedEvent(realizedPnl, ConsecutiveLosses));
+
+        if (CircuitBreakerStatus == CircuitBreakerStatus.Healthy
+            && ConsecutiveLosses >= MaxConsecutiveLosses)
+        {
+            TripCircuitBreaker(
+                $"consecutive_losses={ConsecutiveLosses}",
+                CurrentDrawdownPct,
+                now);
+            return;
+        }
+
+        TripIfDrawdownBreached(now);
+    }
+
+    /// <summary>
+    /// Loop 8 bug #19: evaluates whether <see cref="CurrentDrawdownPct"/> has breached
+    /// the tighter of the 24h / all-time drawdown ceilings and trips the CB if so.
+    /// Both <see cref="RecordTradeOutcome"/> and <see cref="RecordPeakEquitySnapshot"/>
+    /// route through here so trip semantics stay identical regardless of the path that
+    /// observed the breach (trade close vs. intraday equity slide).
+    /// </summary>
+    private void TripIfDrawdownBreached(DateTimeOffset now)
+    {
+        if (CircuitBreakerStatus != CircuitBreakerStatus.Healthy)
+        {
+            return;
+        }
+
+        // Use the strictest configured ceiling. 24h is normally smaller (e.g. 5%) than
+        // the all-time fuse (e.g. 25%), so 24h fires first; but we keep the all-time
+        // check too in case a profile is reconfigured with a tighter all-time fuse.
+        var ceiling24h = MaxDrawdown24hPct;
+        var ceilingAll = MaxDrawdownAllTimePct;
+        var effectiveCeiling = ceiling24h < ceilingAll ? ceiling24h : ceilingAll;
+        var breachedScope = ceiling24h < ceilingAll ? "24h" : "all_time";
+
+        if (CurrentDrawdownPct >= effectiveCeiling)
+        {
+            var reason = $"drawdown_{breachedScope}={CurrentDrawdownPct:P2}>={effectiveCeiling:P2}";
+            TripCircuitBreaker(reason, CurrentDrawdownPct, now);
+        }
     }
 }

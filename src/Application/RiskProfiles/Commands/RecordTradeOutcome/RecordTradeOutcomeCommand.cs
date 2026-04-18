@@ -45,6 +45,7 @@ public sealed class RecordTradeOutcomeCommandHandler : IRequestHandler<RecordTra
             profile.CircuitBreakerStatus,
             profile.CurrentDrawdownPct);
 
+        var statusBefore = profile.CircuitBreakerStatus;
         profile.RecordTradeOutcome(request.RealizedPnl, request.EquityAfter, _clock.UtcNow);
 
         _logger.LogInformation(
@@ -55,36 +56,30 @@ public sealed class RecordTradeOutcomeCommandHandler : IRequestHandler<RecordTra
             profile.CurrentDrawdownPct,
             profile.MaxConsecutiveLosses);
 
-        if (profile.CircuitBreakerStatus == CircuitBreakerStatus.Healthy)
+        // Loop 8 bug #19: trip evaluation (consec losses + 24h/all-time drawdown) now
+        // lives in the domain (RiskProfile.RecordTradeOutcome → TripIfDrawdownBreached).
+        // The handler stays the audit voice so the Loop 5 grep contract still works.
+        if (statusBefore == CircuitBreakerStatus.Healthy
+            && profile.CircuitBreakerStatus == CircuitBreakerStatus.Tripped)
         {
-            var tripped = false;
-            string? reason = null;
-            if (profile.ConsecutiveLosses >= profile.MaxConsecutiveLosses)
-            {
-                tripped = true;
-                reason = $"consecutive_losses={profile.ConsecutiveLosses}";
-            }
-            else if (profile.CurrentDrawdownPct >= profile.MaxDrawdownAllTimePct)
-            {
-                tripped = true;
-                reason = $"drawdown={profile.CurrentDrawdownPct:P2}";
-            }
-
-            if (tripped)
-            {
-                profile.TripCircuitBreaker(reason!, profile.CurrentDrawdownPct, _clock.UtcNow);
-                _logger.LogWarning(
-                    "CB-AUDIT tripped mode={Mode} reason={Reason} consec={Consec}/{Max} drawdown={DD}",
-                    request.Mode, reason, profile.ConsecutiveLosses, profile.MaxConsecutiveLosses, profile.CurrentDrawdownPct);
-            }
-            else
-            {
-                _logger.LogInformation(
-                    "CB-AUDIT not-tripped mode={Mode} consec={Consec}/{Max} drawdown={DD}/{DDCap}",
-                    request.Mode,
-                    profile.ConsecutiveLosses, profile.MaxConsecutiveLosses,
-                    profile.CurrentDrawdownPct, profile.MaxDrawdownAllTimePct);
-            }
+            _logger.LogWarning(
+                "CB-AUDIT tripped mode={Mode} reason={Reason} consec={Consec}/{Max} drawdown={DD} dd24h={DD24h} ddAll={DDAll}",
+                request.Mode,
+                profile.CircuitBreakerReason,
+                profile.ConsecutiveLosses, profile.MaxConsecutiveLosses,
+                profile.CurrentDrawdownPct,
+                profile.MaxDrawdown24hPct,
+                profile.MaxDrawdownAllTimePct);
+        }
+        else if (profile.CircuitBreakerStatus == CircuitBreakerStatus.Healthy)
+        {
+            _logger.LogInformation(
+                "CB-AUDIT not-tripped mode={Mode} consec={Consec}/{Max} drawdown={DD} dd24h={DD24h} ddAll={DDAll}",
+                request.Mode,
+                profile.ConsecutiveLosses, profile.MaxConsecutiveLosses,
+                profile.CurrentDrawdownPct,
+                profile.MaxDrawdown24hPct,
+                profile.MaxDrawdownAllTimePct);
         }
 
         await _db.SaveChangesAsync(ct);

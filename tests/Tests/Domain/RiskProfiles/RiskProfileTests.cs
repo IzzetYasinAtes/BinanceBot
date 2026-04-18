@@ -1,5 +1,6 @@
 using BinanceBot.Domain.Common;
 using BinanceBot.Domain.RiskProfiles;
+using BinanceBot.Domain.RiskProfiles.Events;
 using FluentAssertions;
 
 namespace BinanceBot.Tests.Domain.RiskProfiles;
@@ -78,26 +79,24 @@ public class RiskProfileTests
 
     /// <summary>
     /// Loop 7 bug #17 — <see cref="RiskProfile.RecordPeakEquitySnapshot"/> contract:
-    /// only ever ratchets PeakEquity upward, rebases drawdown, never raises events,
-    /// never increments ConsecutiveLosses, never trips the CB. Models the live equity
-    /// stream that <c>EquityPeakTrackerService</c> feeds in.
+    /// ratchets PeakEquity upward and rebases drawdown without altering
+    /// ConsecutiveLosses. Loop 8 bug #19 update: it MAY trip the CB if the rebased
+    /// drawdown breaches the configured ceiling — this test stays safely under the
+    /// 24h ceiling (5%) so the CB stays Healthy.
     /// </summary>
     [Fact]
-    public void RecordPeakEquitySnapshot_RatchetsPeak_RebasesDrawdown_NoConsecChange()
+    public void RecordPeakEquitySnapshot_BelowCeiling_KeepsCbHealthy()
     {
         var rp = RiskProfile.CreateDefault(TradingMode.Paper, T0);
 
-        // Loop 6 t30 spike: $195 unrealized peak with no closed trade.
-        rp.RecordPeakEquitySnapshot(195.25m, T0.AddMinutes(30));
-        rp.PeakEquity.Should().Be(195.25m);
-        rp.CurrentDrawdownPct.Should().Be(0m);
+        // Below-ceiling sequence: peak $100, dip to $97 → 3% dd < 5% ceiling.
+        rp.RecordPeakEquitySnapshot(100m, T0.AddMinutes(30));
+        rp.RecordPeakEquitySnapshot(97m, T0.AddMinutes(60));
+
+        rp.PeakEquity.Should().Be(100m);
+        rp.CurrentDrawdownPct.Should().BeApproximately(0.03m, 0.0001m);
         rp.ConsecutiveLosses.Should().Be(0);
         rp.CircuitBreakerStatus.Should().Be(CircuitBreakerStatus.Healthy);
-
-        // Loop 6 t90 unwind: equity falls to $56.10 — drawdown rebased vs the live peak.
-        rp.RecordPeakEquitySnapshot(56.10m, T0.AddMinutes(90));
-        rp.PeakEquity.Should().Be(195.25m);
-        rp.CurrentDrawdownPct.Should().BeApproximately(0.7128m, 0.001m);
     }
 
     [Fact]
@@ -114,15 +113,121 @@ public class RiskProfileTests
     }
 
     [Fact]
-    public void RecordPeakEquitySnapshot_RaisesNoDomainEvents()
+    public void RecordPeakEquitySnapshot_BelowCeiling_RaisesNoDomainEvents()
     {
         var rp = RiskProfile.CreateDefault(TradingMode.Paper, T0);
         rp.ClearDomainEvents();
 
-        rp.RecordPeakEquitySnapshot(150m, T0);
-        rp.RecordPeakEquitySnapshot(120m, T0.AddMinutes(1));
+        // 100 → 97 = 3% dd, well below the 5% 24h ceiling.
+        rp.RecordPeakEquitySnapshot(100m, T0);
+        rp.RecordPeakEquitySnapshot(97m, T0.AddMinutes(1));
 
         rp.DomainEvents.Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// Loop 8 bug #19 — primary regression. Live trace observed
+    /// CurrentDrawdownPct=0.2925 with MaxDrawdown24hPct=0.05 yet
+    /// CircuitBreakerStatus stayed Healthy. Trip evaluation must now run in
+    /// RecordPeakEquitySnapshot, use the tighter of the 24h / all-time ceilings,
+    /// and raise CircuitBreakerTrippedEvent.
+    /// </summary>
+    [Fact]
+    public void RecordPeakEquitySnapshot_DrawdownBreaches24hCeiling_TripsCb()
+    {
+        var rp = RiskProfile.CreateDefault(TradingMode.Paper, T0); // 24h=5%, all-time=25%
+        rp.ClearDomainEvents();
+
+        // Loop 7 t30 trace: peak $100 → equity $70.75 ⇒ 29.25% dd > 5% ceiling.
+        rp.RecordPeakEquitySnapshot(100m, T0);
+        rp.RecordPeakEquitySnapshot(70.75m, T0.AddMinutes(30));
+
+        rp.CircuitBreakerStatus.Should().Be(CircuitBreakerStatus.Tripped);
+        rp.CircuitBreakerReason.Should().NotBeNullOrWhiteSpace();
+        rp.CircuitBreakerReason.Should().Contain("24h");
+        rp.CurrentDrawdownPct.Should().BeApproximately(0.2925m, 0.0001m);
+
+        rp.DomainEvents.OfType<CircuitBreakerTrippedEvent>().Should().ContainSingle()
+            .Which.ObservedDrawdownPct.Should().BeApproximately(0.2925m, 0.0001m);
+    }
+
+    /// <summary>
+    /// Loop 8 bug #19 — defensive: if the 24h ceiling is reconfigured higher than the
+    /// all-time fuse, the all-time fuse must still trip when crossed.
+    /// </summary>
+    [Fact]
+    public void RecordPeakEquitySnapshot_AllTimeIsTighterThan24h_TripsOnAllTime()
+    {
+        var rp = RiskProfile.CreateDefault(TradingMode.Paper, T0);
+        // Reconfigure: 24h=10% (loose), all-time=8% (tighter than 24h).
+        rp.UpdateLimits(0.01m, 0.10m, 0.10m, 0.08m, 3, T0);
+        rp.ClearDomainEvents();
+
+        rp.RecordPeakEquitySnapshot(100m, T0);
+        rp.RecordPeakEquitySnapshot(91m, T0.AddMinutes(1)); // 9% dd
+
+        rp.CircuitBreakerStatus.Should().Be(CircuitBreakerStatus.Tripped);
+        rp.CircuitBreakerReason.Should().Contain("all_time");
+        rp.DomainEvents.OfType<CircuitBreakerTrippedEvent>().Should().ContainSingle();
+    }
+
+    /// <summary>
+    /// Loop 8 bug #19 — once tripped, subsequent snapshots must not re-trip
+    /// (no duplicate CircuitBreakerTrippedEvent storm into the kill-switch handler).
+    /// </summary>
+    [Fact]
+    public void RecordPeakEquitySnapshot_AlreadyTripped_DoesNotReRaiseEvent()
+    {
+        var rp = RiskProfile.CreateDefault(TradingMode.Paper, T0);
+
+        rp.RecordPeakEquitySnapshot(100m, T0);
+        rp.RecordPeakEquitySnapshot(70m, T0.AddMinutes(1)); // first trip
+        rp.ClearDomainEvents();
+
+        rp.RecordPeakEquitySnapshot(60m, T0.AddMinutes(2)); // deeper, but already tripped
+
+        rp.CircuitBreakerStatus.Should().Be(CircuitBreakerStatus.Tripped);
+        rp.DomainEvents.OfType<CircuitBreakerTrippedEvent>().Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// Loop 8 bug #19 — RecordTradeOutcome was already supposed to evaluate trip
+    /// on the all-time ceiling. The fix unifies on the tighter of the two ceilings,
+    /// so a -29% close vs a $100 peak must trip on the 24h ceiling (5%) too.
+    /// </summary>
+    [Fact]
+    public void RecordTradeOutcome_DrawdownBreaches24hCeiling_TripsCb()
+    {
+        var rp = RiskProfile.CreateDefault(TradingMode.Paper, T0);
+        rp.RecordTradeOutcome(0m, 100m, T0);          // peak=100
+        rp.ClearDomainEvents();
+
+        rp.RecordTradeOutcome(-29.25m, 70.75m, T0.AddMinutes(1));
+
+        rp.CircuitBreakerStatus.Should().Be(CircuitBreakerStatus.Tripped);
+        rp.CircuitBreakerReason.Should().Contain("24h");
+        rp.DomainEvents.OfType<CircuitBreakerTrippedEvent>().Should().ContainSingle();
+    }
+
+    /// <summary>
+    /// Loop 8 bug #19 — consecutive-losses still wins when both conditions are true,
+    /// because the consec branch runs first (kill-switch reason is more actionable).
+    /// </summary>
+    [Fact]
+    public void RecordTradeOutcome_ConsecAndDrawdownBothBreached_ReasonIsConsec()
+    {
+        var rp = RiskProfile.CreateDefault(TradingMode.Paper, T0);
+        rp.RecordTradeOutcome(0m, 100m, T0);
+        rp.RecordTradeOutcome(-1m, 99m, T0.AddMinutes(1));
+        rp.RecordTradeOutcome(-1m, 98m, T0.AddMinutes(2));
+        rp.ClearDomainEvents();
+
+        // 3rd loss + a -29% slide in one shot.
+        rp.RecordTradeOutcome(-29m, 69m, T0.AddMinutes(3));
+
+        rp.CircuitBreakerStatus.Should().Be(CircuitBreakerStatus.Tripped);
+        rp.CircuitBreakerReason.Should().StartWith("consecutive_losses=");
+        rp.DomainEvents.OfType<CircuitBreakerTrippedEvent>().Should().ContainSingle();
     }
 
     [Fact]

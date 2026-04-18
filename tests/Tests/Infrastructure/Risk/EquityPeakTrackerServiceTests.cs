@@ -145,16 +145,49 @@ public class EquityPeakTrackerServiceTests
         paper.CurrentDrawdownPct.Should().Be(0m);
     }
 
+    /// <summary>
+    /// Loop 8 bug #19 — sequel: drawdown trip evaluation is now part of
+    /// RecordPeakEquitySnapshot, so an intraday equity slide that crosses the
+    /// 24h ceiling MUST flip the CB to Tripped during a tracker tick. Prior
+    /// version of this test asserted the opposite (Loop 7 contract);
+    /// rewritten to lock in the fixed behaviour.
+    /// </summary>
     [Fact]
-    public async Task Tick_DoesNotTripCircuitBreaker_EvenOnLargeDrawdown()
+    public async Task Tick_DrawdownAcross24hCeiling_TripsCircuitBreaker()
     {
-        // Risk-management policy belongs to RecordTradeOutcome; the tracker is read-only
-        // for CB state. A 70% live drawdown must NOT change CircuitBreakerStatus here.
+        var (svc, _, db) = BuildHarness(e =>
+        {
+            // Peak ratchets to 100, then unwinds to 70.75 (29.25% dd > 5% ceiling).
+            var seq = e.SetupSequence(x =>
+                x.GetEquityAsync(TradingMode.Paper, It.IsAny<CancellationToken>()));
+            seq.ReturnsAsync(100m).ReturnsAsync(70.75m);
+            e.Setup(x => x.GetEquityAsync(TradingMode.LiveTestnet, It.IsAny<CancellationToken>()))
+                .ReturnsAsync(0m);
+        });
+
+        await svc.TickOnceAsync(CancellationToken.None);
+        await svc.TickOnceAsync(CancellationToken.None);
+
+        var paper = await db.RiskProfiles.AsNoTracking()
+            .FirstAsync(r => r.Id == (int)TradingMode.Paper);
+        paper.CircuitBreakerStatus.Should().Be(CircuitBreakerStatus.Tripped);
+        paper.CircuitBreakerReason.Should().Contain("24h");
+        paper.CurrentDrawdownPct.Should().BeApproximately(0.2925m, 0.0001m);
+    }
+
+    /// <summary>
+    /// Loop 8 bug #19 — defence-in-depth: a small dip below the live peak must NOT
+    /// trip the CB. Confirms the trip path only fires when the configured ceiling
+    /// is actually breached, not merely whenever drawdown is non-zero.
+    /// </summary>
+    [Fact]
+    public async Task Tick_SmallDrawdownBelowCeiling_KeepsCbHealthy()
+    {
         var (svc, _, db) = BuildHarness(e =>
         {
             var seq = e.SetupSequence(x =>
                 x.GetEquityAsync(TradingMode.Paper, It.IsAny<CancellationToken>()));
-            seq.ReturnsAsync(200m).ReturnsAsync(50m);
+            seq.ReturnsAsync(100m).ReturnsAsync(97m); // 3% dd < 5% ceiling
             e.Setup(x => x.GetEquityAsync(TradingMode.LiveTestnet, It.IsAny<CancellationToken>()))
                 .ReturnsAsync(0m);
         });
@@ -165,6 +198,6 @@ public class EquityPeakTrackerServiceTests
         var paper = await db.RiskProfiles.AsNoTracking()
             .FirstAsync(r => r.Id == (int)TradingMode.Paper);
         paper.CircuitBreakerStatus.Should().Be(CircuitBreakerStatus.Healthy);
-        paper.CurrentDrawdownPct.Should().BeGreaterThan(0.5m);
+        paper.CurrentDrawdownPct.Should().BeApproximately(0.03m, 0.0001m);
     }
 }
