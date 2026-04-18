@@ -51,23 +51,9 @@ Detay yok ama "bişey yok" deniyor — boş response veya UI render hatası
 - Risk per trade %1 → $1 → çok küçük order, pratik değil
 - Önerim: Profil revize — RiskPerTradePct 5%, MaxPositionPct 25%, OrderSize tabanları (BTC 0.001, BNB 0.05, XRP 50) gerçek minNotional'a uyacak
 
-## 9. GitHub Achievements (Rozet)
-**Kullanıcı listesi:** ekran görüntüsünde 4 rozet var: x2 (Pull Shark veya YOLO?), Quickdraw, Pair Extraordinaire (kalp), x3 (YOLO/Galaxy Brain)
+## 9. GitHub workflow disiplini
 
-**Stratejiler her loop'ta uygulanacak:**
-- **Pull Shark** (PR merge): main'e direkt push yerine her loop sonu PR aç + auto-merge → her loop +1
-- **YOLO** (PR review onayı olmadan merge): Pull Shark ile çakışır, dikkat
-- **Pair Extraordinaire** (Co-Authored-By): zaten her commit'te var, tek seferlik unlock
-- **Quickdraw** (issue/PR <5dk close): bot otomatik issue açıp kapatabilir
-- **Galaxy Brain** (accepted answer): Discussions kapsamında, manuel
-- **Heart On Your Sleeve** (PR review): bot review yorumu yazabilir
-- **Starstruck** (16+ star): organik, manuel
-- **Public Sponsor** (sponsor olma): manuel
-
-**Loop 3'te uygulanacak:**
-1. PR-based workflow'a geç (her loop sonu commit → branch → PR → merge)
-2. Otomatik issue + close (Quickdraw)
-3. Co-Authored-By zaten OK
+Loop sonu commit'leri PR-based workflow'a geçecek, gerçek bug observation'ları için GitHub Issues kullanılacak. Detay PM operasyonel notunda.
 
 ---
 

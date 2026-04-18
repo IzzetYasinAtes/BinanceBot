@@ -154,25 +154,8 @@ timeHms: (v) => {
 
 ## P3 Madde
 
-### #9 — GitHub Achievements
-**Mevcut rozet:** ekran görüntüsünde 4 rozet (x2 başlangıç + Quickdraw + Pair Extraordinaire + x3 başka).
-
-**Strateji (her loop'ta uygulanacak):**
-1. **Pull Shark** (PR merge) — Loop sonu commit'i artık branch + PR ile merge. Her loop +1 PR.
-2. **Pair Extraordinaire** (Co-Authored-By) — Zaten her commit'te var, kalıcı.
-3. **YOLO** (no-review merge) — Pull Shark ile çakışıyor, dikkat. Atla.
-4. **Quickdraw** (issue/PR <5dk close) — Loop sonu otomatik issue aç + 5dk içinde close.
-5. **Galaxy Brain** (Discussions accepted answer) — manuel.
-6. **Heart On Your Sleeve** (PR review yorumu) — bot kendi PR'ına review attırabilir mi? Sınırlı.
-7. **Starstruck** (16+ star) — organik manuel.
-
-**Loop 3 değişiklik:**
-- PM'in commit/push akışı `branch + PR + merge` modeline geç.
-- Auto-issue + close hook (her loop sonu).
-
-**Agent:** PM (workflow change).
-
-**Done def:** Loop 3 sonunda 1 yeni PR merged + 1 yeni issue close (Quickdraw için <5dk).
+### #9 — GitHub workflow disiplini
+PM commit/push akışı branch + PR + merge moduna geçer. Loop sonu observation'lar GitHub Issues'ta kayıt altına alınır.
 
 ---
 
