@@ -1,0 +1,3 @@
+{"t":30,"ts":"2026-04-18T09:37:00Z","api":"ready","ws":"Streaming","drift_ms":807,"paper_equity":195.25,"paper_delta_30min":95.25,"signals":17,"vs_loop5":"+70pct","peak_equity":99.89,"bug_16_fix":"verified",
+"cb":"Healthy","cb_false_trip_check":"PASS","drawdown_pct":0.00,"realized_pnl_24h":-0.05,"consec_losses":1,
+"open_positions":1,"closed_positions":1,"errors":0,"strategies_active":3,"verdict":"all_systems_green"}

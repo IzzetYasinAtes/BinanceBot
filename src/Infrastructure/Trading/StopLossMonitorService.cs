@@ -21,6 +21,14 @@ namespace BinanceBot.Infrastructure.Trading;
 /// <see cref="CloseSignalPositionCommand"/> via MediatR. The reverse-side MARKET order
 /// then exits the position through the standard fan-out pipeline.
 ///
+/// **Strategy-status agnostic (Loop 7 bug #18 lock-in).** The tick query filters only
+/// on <c>Position.Status == Open &amp;&amp; StopPrice != null</c>; it does NOT join
+/// <see cref="Domain.Strategies.Strategy"/> nor consult <c>Strategy.Status</c>. A paused
+/// strategy still has its open positions protected by stop-loss — pausing only halts
+/// new signal evaluation, never risk-management exits. The
+/// <c>PausedStrategy_PositionStillTriggersStopLoss</c> regression test in
+/// <c>StopLossMonitorServiceTests</c> guards this contract.
+///
 /// This is the temporary stand-in for proper server-side OCO/STOP_LOSS_LIMIT (deferred
 /// to ADR-0013). 30s tick is a known latency vs an event-driven trigger; spec accepts it
 /// as a Loop 5 trade-off.

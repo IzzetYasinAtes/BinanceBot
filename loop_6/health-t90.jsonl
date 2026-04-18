@@ -1,0 +1,3 @@
+{"t":90,"ts":"2026-04-18T09:46:01Z","api":"ready","ws":"Streaming","drift_ms":805,"paper_equity":56.10,"paper_delta_60min":-139.15,"signals_total":19,"signals_new_60min":2,"peak_equity":99.89,"peak_equity_check":"FROZEN_at_first_close",
+"cb":"Tripped","cb_reason":"drawdown_43.84pct","drawdown_pct":43.84,"realized_pnl_24h":-0.06,"consec_losses":2,
+"strategies":"all_paused","open_positions":1,"closed_positions":1,"errors":0,"red_flag":"bug_17_peakEquity_no_intraday_tracking","verdict":"loop_continues_for_data_collection"}

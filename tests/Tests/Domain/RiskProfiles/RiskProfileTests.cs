@@ -76,6 +76,55 @@ public class RiskProfileTests
         rp.CurrentDrawdownPct.Should().BeGreaterThanOrEqualTo(0m);
     }
 
+    /// <summary>
+    /// Loop 7 bug #17 — <see cref="RiskProfile.RecordPeakEquitySnapshot"/> contract:
+    /// only ever ratchets PeakEquity upward, rebases drawdown, never raises events,
+    /// never increments ConsecutiveLosses, never trips the CB. Models the live equity
+    /// stream that <c>EquityPeakTrackerService</c> feeds in.
+    /// </summary>
+    [Fact]
+    public void RecordPeakEquitySnapshot_RatchetsPeak_RebasesDrawdown_NoConsecChange()
+    {
+        var rp = RiskProfile.CreateDefault(TradingMode.Paper, T0);
+
+        // Loop 6 t30 spike: $195 unrealized peak with no closed trade.
+        rp.RecordPeakEquitySnapshot(195.25m, T0.AddMinutes(30));
+        rp.PeakEquity.Should().Be(195.25m);
+        rp.CurrentDrawdownPct.Should().Be(0m);
+        rp.ConsecutiveLosses.Should().Be(0);
+        rp.CircuitBreakerStatus.Should().Be(CircuitBreakerStatus.Healthy);
+
+        // Loop 6 t90 unwind: equity falls to $56.10 — drawdown rebased vs the live peak.
+        rp.RecordPeakEquitySnapshot(56.10m, T0.AddMinutes(90));
+        rp.PeakEquity.Should().Be(195.25m);
+        rp.CurrentDrawdownPct.Should().BeApproximately(0.7128m, 0.001m);
+    }
+
+    [Fact]
+    public void RecordPeakEquitySnapshot_NonPositiveEquity_IsIgnored()
+    {
+        var rp = RiskProfile.CreateDefault(TradingMode.Paper, T0);
+        rp.RecordPeakEquitySnapshot(100m, T0);
+
+        rp.RecordPeakEquitySnapshot(0m, T0.AddMinutes(1));
+        rp.RecordPeakEquitySnapshot(-5m, T0.AddMinutes(2));
+
+        rp.PeakEquity.Should().Be(100m);
+        rp.CurrentDrawdownPct.Should().Be(0m);
+    }
+
+    [Fact]
+    public void RecordPeakEquitySnapshot_RaisesNoDomainEvents()
+    {
+        var rp = RiskProfile.CreateDefault(TradingMode.Paper, T0);
+        rp.ClearDomainEvents();
+
+        rp.RecordPeakEquitySnapshot(150m, T0);
+        rp.RecordPeakEquitySnapshot(120m, T0.AddMinutes(1));
+
+        rp.DomainEvents.Should().BeEmpty();
+    }
+
     [Fact]
     public void RecordTradeOutcome_ConsecutiveLosses_IncrementOnLoss_ResetOnWin()
     {

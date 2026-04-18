@@ -144,6 +144,39 @@ public sealed class RiskProfile : AggregateRoot<int>
         RaiseDomainEvent(new CircuitBreakerResetEvent(adminNote.Trim(), now));
     }
 
+    /// <summary>
+    /// Loop 6 → Loop 7 bug #17 fix: PeakEquity must follow the live equity stream
+    /// (cash + unrealized PnL), not just realized closes. Otherwise an intraday spike
+    /// like Loop 6 t30 ($195 unrealized peak → t90 $56 close) computes drawdown
+    /// against a stale $99 peak and trips the CB at -43% when the real intraday
+    /// drawdown was -71% from a peak that was never recorded.
+    ///
+    /// This method is called by <see cref="Infrastructure.Risk.EquityPeakTrackerService"/>
+    /// on a periodic tick. It only ever ratchets <see cref="PeakEquity"/> upward and
+    /// rebases <see cref="CurrentDrawdownPct"/>; it does not raise events, change
+    /// <see cref="ConsecutiveLosses"/>, or trip the circuit breaker (those remain
+    /// the responsibility of <see cref="RecordTradeOutcome"/>).
+    /// </summary>
+    public void RecordPeakEquitySnapshot(decimal currentEquity, DateTimeOffset now)
+    {
+        if (currentEquity <= 0m)
+        {
+            return;
+        }
+
+        if (currentEquity > PeakEquity)
+        {
+            PeakEquity = currentEquity;
+            CurrentDrawdownPct = 0m;
+        }
+        else if (PeakEquity > 0m)
+        {
+            CurrentDrawdownPct = (PeakEquity - currentEquity) / PeakEquity;
+        }
+
+        UpdatedAt = now;
+    }
+
     public void RecordTradeOutcome(decimal realizedPnl, decimal equityAfter, DateTimeOffset now)
     {
         if (realizedPnl < 0m)
