@@ -83,10 +83,15 @@ public sealed class StopLossMonitorService : BackgroundService
         await using var scope = _scopeFactory.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<IApplicationDbContext>();
         var mediator = scope.ServiceProvider.GetRequiredService<IMediator>();
+        var clock = scope.ServiceProvider.GetRequiredService<IClock>();
 
+        // ADR-0014 §14.5: query also covers positions whose only exit trigger is the
+        // pattern-based time stop (StopPrice can be null for those — in practice
+        // PatternScalpingEvaluator emits both, but the contract stays defensive).
         var openPositions = await db.Positions
             .AsNoTracking()
-            .Where(p => p.Status == PositionStatus.Open && p.StopPrice != null)
+            .Where(p => p.Status == PositionStatus.Open
+                && (p.StopPrice != null || p.MaxHoldDuration != null))
             .ToListAsync(ct);
 
         if (openPositions.Count == 0)
@@ -104,6 +109,51 @@ public sealed class StopLossMonitorService : BackgroundService
 
         foreach (var pos in openPositions)
         {
+            // ADR-0014 §14.5: time-stop branch — runs BEFORE the price-driven stop check
+            // so a stale position is closed on age regardless of mark direction.
+            // Mainnet still skipped per ADR-0006 (see below).
+            if (pos.MaxHoldDuration is TimeSpan dur)
+            {
+                var ageElapsed = clock.UtcNow - pos.OpenedAt;
+                if (ageElapsed > dur)
+                {
+                    if (pos.Mode == TradingMode.LiveMainnet)
+                    {
+                        _logger.LogDebug(
+                            "TIME-STOP skipped (mainnet blocked) pos={PosId} age={AgeMin}m max={MaxMin}m",
+                            pos.Id, (int)ageElapsed.TotalMinutes, (int)dur.TotalMinutes);
+                        continue;
+                    }
+
+                    var tsCid = $"timestop-{pos.Id}-{clock.UtcNow.ToUnixTimeSeconds()}";
+                    var tsReason = $"time_stop_max_hold_{(int)ageElapsed.TotalMinutes}min";
+                    var tsResult = await mediator.Send(
+                        new CloseSignalPositionCommand(
+                            pos.Symbol.Value,
+                            pos.StrategyId,
+                            pos.Mode,
+                            tsReason,
+                            tsCid),
+                        ct);
+
+                    if (tsResult.IsSuccess)
+                    {
+                        _logger.LogWarning(
+                            "TIME-STOP triggered pos={PosId} mode={Mode} age={AgeMin}m max={MaxMin}m cid={Cid}",
+                            pos.Id, pos.Mode,
+                            (int)ageElapsed.TotalMinutes, (int)dur.TotalMinutes,
+                            tsResult.Value.CloseClientOrderId);
+                    }
+                    else if (tsResult.Status != ResultStatus.NotFound)
+                    {
+                        _logger.LogError(
+                            "TIME-STOP close failed pos={PosId} mode={Mode}: {Errors}",
+                            pos.Id, pos.Mode, string.Join(";", tsResult.Errors));
+                    }
+                    continue;  // bypass price-stop check, position is closing
+                }
+            }
+
             if (pos.StopPrice is not decimal stop)
             {
                 continue;
