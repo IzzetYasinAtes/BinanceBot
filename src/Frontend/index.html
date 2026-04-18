@@ -24,12 +24,63 @@ import { Sidebar, ErrorBanner, usePolling } from "/js/ui.js";
 const SYMBOLS = ["BTCUSDT", "BNBUSDT", "XRPUSDT"];
 const EMPTY_MODE = { startingBalance: 0, currentBalance: 0, equity: 0, resetCount: 0, startedAt: null, blockedReason: null };
 
+// Sticky 1m %change ticker bar (BTC/BNB/XRP). Polling 10sn — 3 sembol = 3 hafif fetch.
+const MarketTickerBar = {
+    props: { symbols: { type: Array, required: true } },
+    template: `
+        <div class="ticker-bar" style="position:sticky;top:0;z-index:50;display:flex;gap:14px;align-items:center;
+                                       padding:8px 14px;background:var(--bg-1,#0b0f14);
+                                       border-bottom:1px solid var(--border,#1c2530);
+                                       font-family:inherit;min-height:40px;">
+            <span style="color:var(--fg-3);font-size:11px;letter-spacing:0.08em;text-transform:uppercase;">1m</span>
+            <div v-for="t in tickers" :key="t.symbol"
+                 style="display:flex;gap:8px;align-items:baseline;font-size:13px;">
+                <strong style="color:var(--fg-1);">{{ t.base }}</strong>
+                <span class="tabular-nums" style="color:var(--fg-2);">
+                    {{ t.price !== null ? fmt.price(t.price) : '—' }}
+                </span>
+                <span class="tabular-nums" :class="t.cls"
+                      style="font-weight:600;min-width:64px;text-align:right;">
+                    {{ t.pctLabel }}
+                </span>
+            </div>
+        </div>
+    `,
+    setup(props) {
+        // Her sembol için ayrı polling — usePolling pattern (10sn).
+        const polls = props.symbols.map(sym => ({
+            symbol: sym,
+            poll: usePolling(() => api.klines(sym, "1m", 2), 10000),
+        }));
+
+        const tickers = computed(() => polls.map(({ symbol, poll }) => {
+            const bars = poll.data.value;
+            const base = symbol.replace(/USDT$/i, "");
+            if (!Array.isArray(bars) || bars.length < 2) {
+                return { symbol, base, price: null, pctLabel: "—", cls: "metric-neutral" };
+            }
+            const prev = Number(bars[0].close);
+            const last = Number(bars[1].close);
+            if (!isFinite(prev) || prev === 0 || !isFinite(last)) {
+                return { symbol, base, price: last, pctLabel: "—", cls: "metric-neutral" };
+            }
+            const pct = ((last - prev) / prev) * 100;
+            const sign = pct > 0 ? "+" : "";
+            const cls = pct > 0 ? "metric-good" : pct < 0 ? "metric-bad" : "metric-neutral";
+            return { symbol, base, price: last, pctLabel: `${sign}${pct.toFixed(2)}%`, cls };
+        }));
+
+        return { tickers, fmt };
+    },
+};
+
 const App = {
-    components: { Sidebar, ErrorBanner },
+    components: { Sidebar, ErrorBanner, MarketTickerBar },
     template: `
         <div class="app">
             <Sidebar active="dashboard" />
             <main>
+                <MarketTickerBar :symbols="symbolList" />
                 <ErrorBanner :error="anyError" />
 
                 <section class="block">
@@ -318,6 +369,7 @@ const App = {
         }
 
         return {
+            symbolList: SYMBOLS,
             summary: summaryPoll.data,
             pnl: pnlPoll.data,
             signals: signalsPoll.data,
