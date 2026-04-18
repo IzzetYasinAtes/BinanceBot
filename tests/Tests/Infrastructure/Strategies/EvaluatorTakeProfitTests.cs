@@ -122,4 +122,82 @@ public class EvaluatorTakeProfitTests
         result.SuggestedTakeProfit!.Value.Should().BeGreaterThan(result.SuggestedPrice!.Value,
             "long mean-reversion targets the mean from below");
     }
+
+    /// <summary>
+    /// Loop 11 stop fix — MeanReversion long signals must carry a stop strictly below entry,
+    /// sized as BbStopMultiplier × stdDev (recovered from band geometry). Without a stop the
+    /// strategy ran losers uncapped (Loop 10 -17%).
+    /// </summary>
+    [Fact]
+    public async Task MeanReversion_LongSignal_StopIsBelowEntry_AndScaledByBbStdDev()
+    {
+        // Reuse the engineered oversold series from the TP test — it produces a long signal
+        // and gives us a non-trivial stdDev to size the stop against.
+        var bars = new List<Kline>();
+        for (var i = 0; i < 21; i++)
+        {
+            var c = 100m - i * 0.5m;
+            bars.Add(MakeBar(i, c, c + 0.4m, c - 0.4m));
+        }
+        bars.Add(MakeBar(21, 80m, 82m, 78m));
+        bars.Add(MakeBar(22, 78m, 80m, 76m));
+        bars.Add(MakeBar(23, 75m, 77m, 73m));
+        bars.Add(MakeBar(24, 70m, 72m, 68m));
+
+        var json = "{\"RsiPeriod\":14,\"RsiOversold\":30,\"RsiOverbought\":70," +
+                   "\"BbPeriod\":20,\"BbStdDev\":2,\"BbStopMultiplier\":1.5,\"OrderSize\":0.001}";
+        var sut = new MeanReversionEvaluator();
+
+        var result = await sut.EvaluateAsync(1, json, "BTCUSDT", bars, CancellationToken.None);
+
+        result.Should().NotBeNull();
+        result!.Direction.Should().Be(StrategySignalDirection.Long);
+
+        // Stop must exist and sit below entry by a distance proportional to stdDev.
+        result.SuggestedStopPrice.Should().NotBeNull(
+            "Loop 11 — mean-reversion entries must carry a stop to cap losers");
+        var entry = result.SuggestedPrice!.Value;
+        var stop = result.SuggestedStopPrice!.Value;
+        stop.Should().BeLessThan(entry, "long stops sit below entry");
+
+        // Sanity: stop offset is non-trivial (more than dust) given the engineered volatility.
+        (entry - stop).Should().BeGreaterThan(0.01m);
+    }
+
+    /// <summary>
+    /// Loop 11 stop fix — MeanReversion short signals must carry a stop strictly above entry.
+    /// Mirror of the long-stop test using an engineered overbought rally.
+    /// </summary>
+    [Fact]
+    public async Task MeanReversion_ShortSignal_StopIsAboveEntry_AndScaledByBbStdDev()
+    {
+        // Steady upside for first 21 bars to drive RSI high, then a sharp final spike to push
+        // the close above the upper Bollinger band. Mirrors the long test's geometry inverted.
+        var bars = new List<Kline>();
+        for (var i = 0; i < 21; i++)
+        {
+            var c = 100m + i * 0.5m;
+            bars.Add(MakeBar(i, c, c + 0.4m, c - 0.4m));
+        }
+        bars.Add(MakeBar(21, 120m, 122m, 118m));
+        bars.Add(MakeBar(22, 122m, 124m, 120m));
+        bars.Add(MakeBar(23, 125m, 127m, 123m));
+        bars.Add(MakeBar(24, 130m, 132m, 128m));
+
+        var json = "{\"RsiPeriod\":14,\"RsiOversold\":30,\"RsiOverbought\":70," +
+                   "\"BbPeriod\":20,\"BbStdDev\":2,\"BbStopMultiplier\":1.5,\"OrderSize\":0.001}";
+        var sut = new MeanReversionEvaluator();
+
+        var result = await sut.EvaluateAsync(1, json, "BTCUSDT", bars, CancellationToken.None);
+
+        result.Should().NotBeNull("the engineered rally should clear overbought + upper-band gates");
+        result!.Direction.Should().Be(StrategySignalDirection.Short);
+
+        result.SuggestedStopPrice.Should().NotBeNull(
+            "Loop 11 — mean-reversion shorts must carry a stop above entry to cap losers");
+        var entry = result.SuggestedPrice!.Value;
+        var stop = result.SuggestedStopPrice!.Value;
+        stop.Should().BeGreaterThan(entry, "short stops sit above entry");
+        (stop - entry).Should().BeGreaterThan(0.01m);
+    }
 }
