@@ -20,14 +20,21 @@ export const fmt = {
     timeIso: (v) => {
         if (!v) return "-";
         try {
-            return new Date(v).toISOString().replace("T", " ").substring(0, 19);
+            return new Date(v).toLocaleString("tr-TR", {
+                timeZone: "Europe/Istanbul",
+                year: "numeric", month: "2-digit", day: "2-digit",
+                hour: "2-digit", minute: "2-digit", second: "2-digit",
+                hour12: false,
+            }).replace(",", "");
         } catch { return String(v); }
     },
     timeHms: (v) => {
         if (!v) return "-";
         try {
-            const d = new Date(v);
-            return d.toISOString().substring(11, 19);
+            return new Date(v).toLocaleTimeString("tr-TR", {
+                timeZone: "Europe/Istanbul",
+                hour12: false,
+            });
         } catch { return String(v); }
     },
     sign: (v) => {

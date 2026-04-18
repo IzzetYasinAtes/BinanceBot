@@ -1,3 +1,5 @@
+using System.Collections.Concurrent;
+using System.Reflection;
 using Ardalis.Result;
 using FluentValidation;
 using MediatR;
@@ -7,6 +9,8 @@ namespace BinanceBot.Application.Behaviors;
 public sealed class ValidationBehavior<TRequest, TResponse> : IPipelineBehavior<TRequest, TResponse>
     where TRequest : IRequest<TResponse>
 {
+    private static readonly ConcurrentDictionary<Type, MethodInfo> InvalidMethodCache = new();
+
     private readonly IEnumerable<IValidator<TRequest>> _validators;
 
     public ValidationBehavior(IEnumerable<IValidator<TRequest>> validators)
@@ -38,33 +42,51 @@ public sealed class ValidationBehavior<TRequest, TResponse> : IPipelineBehavior<
             return await next();
         }
 
+        var errors = failures
+            .Select(f => new ValidationError(f.PropertyName, f.ErrorMessage, f.ErrorCode, ValidationSeverity.Error))
+            .ToList();
+
         var responseType = typeof(TResponse);
         if (responseType.IsGenericType && responseType.GetGenericTypeDefinition() == typeof(Result<>))
         {
-            var payloadType = responseType.GetGenericArguments()[0];
-            var invalidMethod = typeof(Result)
-                .GetMethods()
-                .Single(m => m.Name == nameof(Result.Invalid)
-                    && m.IsGenericMethodDefinition
-                    && m.GetParameters().Length == 1
-                    && m.GetParameters()[0].ParameterType == typeof(List<ValidationError>))
-                .MakeGenericMethod(payloadType);
-
-            var errors = failures
-                .Select(f => new ValidationError(f.PropertyName, f.ErrorMessage, f.ErrorCode, ValidationSeverity.Error))
-                .ToList();
-
+            // Ardalis.Result 10.x: Result<T>.Invalid(IEnumerable<ValidationError>) — non-generic Result.Invalid<T>(...) artik yok.
+            var invalidMethod = InvalidMethodCache.GetOrAdd(responseType, ResolveInvalidMethod);
             return (TResponse)invalidMethod.Invoke(null, new object[] { errors })!;
         }
 
         if (responseType == typeof(Result))
         {
-            var errors = failures
-                .Select(f => new ValidationError(f.PropertyName, f.ErrorMessage, f.ErrorCode, ValidationSeverity.Error))
-                .ToList();
             return (TResponse)(object)Result.Invalid(errors);
         }
 
         throw new ValidationException(failures);
+    }
+
+    private static MethodInfo ResolveInvalidMethod(Type closedResultType)
+    {
+        // Sirasiyla denenecek imzalar (en spesifikten en geneline).
+        Type[][] candidateSignatures =
+        {
+            new[] { typeof(IEnumerable<ValidationError>) },
+            new[] { typeof(ValidationError[]) },
+        };
+
+        foreach (var signature in candidateSignatures)
+        {
+            var method = closedResultType.GetMethod(
+                nameof(Result.Invalid),
+                BindingFlags.Public | BindingFlags.Static,
+                binder: null,
+                types: signature,
+                modifiers: null);
+
+            if (method is not null)
+            {
+                return method;
+            }
+        }
+
+        throw new InvalidOperationException(
+            $"Ardalis.Result type '{closedResultType.FullName}' uzerinde uygun bir Invalid(...) overload'u bulunamadi.");
     }
 }
