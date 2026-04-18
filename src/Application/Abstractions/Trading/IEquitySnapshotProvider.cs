@@ -3,16 +3,38 @@ using BinanceBot.Domain.Common;
 namespace BinanceBot.Application.Abstractions.Trading;
 
 /// <summary>
-/// Mode-aware equity snapshot used by sizing (ADR-0011 §11.3).
+/// Mode-aware equity snapshot used by sizing and risk tracking (ADR-0011 §11.3).
 ///
-///   - Paper       : VirtualBalance.Equity (or CurrentBalance fallback) for the Paper row.
-///   - LiveTestnet : not yet wired to Binance account sync — returns 0 (skip sizing).
-///   - LiveMainnet : ADR-0006 mainnet guard — always returns 0 (no real orders allowed).
+/// Two flavours:
+///
+/// <see cref="GetEquityAsync"/> — mark-to-market equity (cash + unrealized PnL).
+///   Consumers: sizing (<c>StrategySignalToOrderHandler</c>), close-time snapshot
+///   (<c>PositionClosedRiskHandler</c>). They need the live valuation to decide
+///   notional / record realized peak at trade exit.
+///
+/// <see cref="GetRealizedEquityAsync"/> — realized-only equity (cash balance after
+///   all closed trades, ignores open-position unrealized PnL). Loop 12 reform:
+///   <c>EquityPeakTrackerService</c> consumes this so intraday unrealized swings
+///   no longer ratchet PeakEquity and false-trip the drawdown circuit-breaker.
+///   See loops/loop_11/summary.md for the failure trace this addresses.
+///
+/// Mode rules (apply to both methods):
+///   - Paper       : VirtualBalance row for the Paper account.
+///   - LiveTestnet : not yet wired to Binance account sync — returns 0 (skip).
+///   - LiveMainnet : ADR-0006 mainnet guard — always returns 0.
 ///
 /// Returning 0 is a soft skip signal: the caller should treat it as
-/// "do not size for this mode this time".
+/// "do not size / do not ratchet for this mode this time".
 /// </summary>
 public interface IEquitySnapshotProvider
 {
+    /// <summary>Mark-to-market equity (cash + unrealized PnL).</summary>
     Task<decimal> GetEquityAsync(TradingMode mode, CancellationToken ct);
+
+    /// <summary>
+    /// Realized-only equity (cash balance after closed trades, no unrealized
+    /// PnL contribution). Loop 12 — used by <c>EquityPeakTrackerService</c>
+    /// to ratchet PeakEquity on realized growth only.
+    /// </summary>
+    Task<decimal> GetRealizedEquityAsync(TradingMode mode, CancellationToken ct);
 }
