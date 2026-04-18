@@ -50,8 +50,10 @@ public sealed class OpenOrUpdatePositionCommandHandler
         {
             if (open is null)
             {
+                // Admin-driven open path has no risk-stop hint (ADR-0012 §12.4 — stops travel
+                // through the signal/order pipeline; manual opens stay un-stopped on purpose).
                 var created = Position.Open(symbolVo, positionSide, request.Quantity, request.Price,
-                    request.StrategyId, request.Mode, _clock.UtcNow);
+                    stopPrice: null, request.StrategyId, request.Mode, _clock.UtcNow);
                 _db.Positions.Add(created);
                 await _db.SaveChangesAsync(ct);
                 return Result.Success(created.Id);

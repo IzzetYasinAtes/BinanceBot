@@ -30,13 +30,21 @@ public sealed class PaperFillSimulator : IPaperFillSimulator
         _options = options.Value;
     }
 
-    public PaperFillOutcome Simulate(
+    public async Task<PaperFillOutcome> SimulateAsync(
         Order order,
         Instrument instrument,
         BookTicker bookTicker,
         OrderBookSnapshot? depthSnapshot,
-        DateTimeOffset now)
+        DateTimeOffset now,
+        CancellationToken cancellationToken)
     {
+        // ADR-0012 §12.9: synthetic latency to approximate mainnet MARKET round-trip
+        // (REST + matching ≈ 80-120ms). Skipped when configured to 0 (test paths).
+        if (_options.SimulatedLatencyMs > 0)
+        {
+            await Task.Delay(_options.SimulatedLatencyMs, cancellationToken);
+        }
+
         // ---- STEP 1: Filter validation -------------------------------------------------
         var filterFailure = ValidateFilters(order, instrument);
         if (filterFailure is not null)

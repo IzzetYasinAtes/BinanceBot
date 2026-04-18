@@ -150,6 +150,9 @@ public sealed class StrategySignalToOrderHandler : INotificationHandler<Strategy
                 continue;
             }
 
+            // ADR-0012 §12.4: forward evaluator-suggested stop into the Order so the eventual
+            // Position carries it. The parameter is ignored for MARKET execution itself but
+            // preserved on the Order aggregate for downstream stop-monitor wiring.
             var cmd = new PlaceOrderCommand(
                 cid,
                 notification.Symbol,
@@ -158,7 +161,7 @@ public sealed class StrategySignalToOrderHandler : INotificationHandler<Strategy
                 TimeInForce.Ioc.ToString(),
                 sizingResult.Quantity,
                 null,
-                null,
+                notification.SuggestedStopPrice,
                 notification.StrategyId,
                 mode);
 

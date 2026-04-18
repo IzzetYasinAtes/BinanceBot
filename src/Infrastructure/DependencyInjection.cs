@@ -169,6 +169,10 @@ public static class DependencyInjection
             BinanceBot.Infrastructure.RiskProfiles.CircuitBreakerTrippedHandler>();
         services.AddHostedService<MarkToMarketWorker>();
 
+        // ADR-0012 §12.3: client-side stop monitor (30s tick), mode-agnostic (mainnet
+        // skipped defensively).
+        services.AddHostedService<StopLossMonitorService>();
+
         return services;
     }
 }

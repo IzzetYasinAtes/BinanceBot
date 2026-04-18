@@ -14,4 +14,11 @@ public sealed record PaperFillOptions
     /// Default 5 bps (0.0005) — see paper-fill-research.md.
     /// </summary>
     public decimal FixedSlippagePct { get; init; } = 0.0005m;
+
+    /// <summary>
+    /// Synthetic fill latency in milliseconds applied at the head of <c>SimulateAsync</c>
+    /// (ADR-0012 §12.9). Approximates the round-trip + matching delay of a mainnet MARKET
+    /// (~80-120ms). Tests should set this to 0 to keep suite times tight.
+    /// </summary>
+    public int SimulatedLatencyMs { get; init; } = 100;
 }

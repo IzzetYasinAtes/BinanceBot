@@ -29,6 +29,12 @@ public sealed class PositionClosedRiskHandler : INotificationHandler<PositionClo
         var db = scope.ServiceProvider.GetRequiredService<IApplicationDbContext>();
         var mediator = scope.ServiceProvider.GetRequiredService<IMediator>();
 
+        // ADR-0012 §12.10: confirms the PositionClosedEvent dispatch chain reached this
+        // handler — needed for Loop 5 t30 CB-bug audit (was the chain even firing?).
+        _logger.LogInformation(
+            "CB-AUDIT PositionClosed handler entered pos={PosId} mode={Mode} pnl={Pnl} reason={Reason}",
+            notification.PositionId, notification.Mode, notification.RealizedPnl, notification.Reason);
+
         var totalRealised = await db.Positions
             .AsNoTracking()
             .Where(p => p.Mode == notification.Mode && p.Status == PositionStatus.Closed)

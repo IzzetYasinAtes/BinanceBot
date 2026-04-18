@@ -4,6 +4,7 @@ using BinanceBot.Domain.Common;
 using BinanceBot.Domain.RiskProfiles;
 using MediatR;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 
 namespace BinanceBot.Application.RiskProfiles.Commands.RecordTradeOutcome;
 
@@ -16,11 +17,16 @@ public sealed class RecordTradeOutcomeCommandHandler : IRequestHandler<RecordTra
 {
     private readonly IApplicationDbContext _db;
     private readonly IClock _clock;
+    private readonly ILogger<RecordTradeOutcomeCommandHandler> _logger;
 
-    public RecordTradeOutcomeCommandHandler(IApplicationDbContext db, IClock clock)
+    public RecordTradeOutcomeCommandHandler(
+        IApplicationDbContext db,
+        IClock clock,
+        ILogger<RecordTradeOutcomeCommandHandler> logger)
     {
         _db = db;
         _clock = clock;
+        _logger = logger;
     }
 
     public async Task<Result> Handle(RecordTradeOutcomeCommand request, CancellationToken ct)
@@ -29,7 +35,25 @@ public sealed class RecordTradeOutcomeCommandHandler : IRequestHandler<RecordTra
         var profile = await _db.RiskProfiles.FirstOrDefaultAsync(r => r.Id == profileId, ct);
         if (profile is null) return Result.NotFound("Risk profile missing.");
 
+        // ADR-0012 §12.10: structured before/after audit so Loop 5 t30 grep can pinpoint
+        // CB-trip root cause (handler not entered? consec didn't move? threshold not crossed?).
+        _logger.LogInformation(
+            "CB-AUDIT mode={Mode} pnl={Pnl} consecBefore={Before} statusBefore={StatusBefore} ddBefore={DDBefore}",
+            request.Mode,
+            request.RealizedPnl,
+            profile.ConsecutiveLosses,
+            profile.CircuitBreakerStatus,
+            profile.CurrentDrawdownPct);
+
         profile.RecordTradeOutcome(request.RealizedPnl, request.EquityAfter, _clock.UtcNow);
+
+        _logger.LogInformation(
+            "CB-AUDIT mode={Mode} consecAfter={After} statusAfter={StatusAfter} ddAfter={DDAfter} maxLosses={MaxLosses}",
+            request.Mode,
+            profile.ConsecutiveLosses,
+            profile.CircuitBreakerStatus,
+            profile.CurrentDrawdownPct,
+            profile.MaxConsecutiveLosses);
 
         if (profile.CircuitBreakerStatus == CircuitBreakerStatus.Healthy)
         {
@@ -49,6 +73,17 @@ public sealed class RecordTradeOutcomeCommandHandler : IRequestHandler<RecordTra
             if (tripped)
             {
                 profile.TripCircuitBreaker(reason!, profile.CurrentDrawdownPct, _clock.UtcNow);
+                _logger.LogWarning(
+                    "CB-AUDIT tripped mode={Mode} reason={Reason} consec={Consec}/{Max} drawdown={DD}",
+                    request.Mode, reason, profile.ConsecutiveLosses, profile.MaxConsecutiveLosses, profile.CurrentDrawdownPct);
+            }
+            else
+            {
+                _logger.LogInformation(
+                    "CB-AUDIT not-tripped mode={Mode} consec={Consec}/{Max} drawdown={DD}/{DDCap}",
+                    request.Mode,
+                    profile.ConsecutiveLosses, profile.MaxConsecutiveLosses,
+                    profile.CurrentDrawdownPct, profile.MaxDrawdownAllTimePct);
             }
         }
 

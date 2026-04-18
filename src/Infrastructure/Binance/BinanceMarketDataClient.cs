@@ -151,6 +151,49 @@ public sealed class BinanceMarketDataClient : IBinanceMarketData
         return klines;
     }
 
+    public async Task<IReadOnlyList<Ticker24hDto>> GetTicker24hAsync(
+        IReadOnlyCollection<string> symbols,
+        CancellationToken cancellationToken)
+    {
+        if (symbols.Count == 0)
+        {
+            return Array.Empty<Ticker24hDto>();
+        }
+
+        // Binance accepts both single-symbol (?symbol=BTCUSDT) and array (?symbols=["BTCUSDT","BNBUSDT"]).
+        // We always use the array form for batching — weight=2 per symbol regardless.
+        var joined = "[" + string.Join(",", symbols.Select(s => $"\"{s.ToUpperInvariant()}\"")) + "]";
+        var url = "/api/v3/ticker/24hr?symbols=" + Uri.EscapeDataString(joined);
+
+        using var response = await _http.GetAsync(url, cancellationToken);
+        response.EnsureSuccessStatusCode();
+
+        using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+        using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
+
+        if (doc.RootElement.ValueKind != JsonValueKind.Array)
+        {
+            _logger.LogWarning("Ticker24h response not an array; returning empty list");
+            return Array.Empty<Ticker24hDto>();
+        }
+
+        var list = new List<Ticker24hDto>(symbols.Count);
+        foreach (var item in doc.RootElement.EnumerateArray())
+        {
+            list.Add(new Ticker24hDto(
+                Symbol: item.GetProperty("symbol").GetString()!,
+                LastPrice: ParseDecimal(item.GetProperty("lastPrice").GetString()),
+                PriceChangePct: ParseDecimal(item.GetProperty("priceChangePercent").GetString()),
+                HighPrice: ParseDecimal(item.GetProperty("highPrice").GetString()),
+                LowPrice: ParseDecimal(item.GetProperty("lowPrice").GetString()),
+                QuoteVolume: ParseDecimal(item.GetProperty("quoteVolume").GetString()),
+                CloseTime: DateTimeOffset.FromUnixTimeMilliseconds(item.GetProperty("closeTime").GetInt64())));
+        }
+
+        _logger.LogInformation("Ticker24h fetched for {Count} symbols", list.Count);
+        return list;
+    }
+
     public async Task<OrderBookSnapshotDto> GetOrderBookSnapshotAsync(
         string symbol,
         int limit,

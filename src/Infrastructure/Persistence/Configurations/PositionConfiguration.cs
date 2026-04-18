@@ -26,6 +26,8 @@ public sealed class PositionConfiguration : IEntityTypeConfiguration<Position>
         builder.Property(p => p.AverageEntryPrice).HasPrecision(28, 10);
         builder.Property(p => p.ExitPrice).HasPrecision(28, 10);
         builder.Property(p => p.MarkPrice).HasPrecision(28, 10);
+        // ADR-0012 §12.4: Position.StopPrice — nullable, decimal(18,8) per spec.
+        builder.Property(p => p.StopPrice).HasColumnType("decimal(18,8)");
         builder.Property(p => p.UnrealizedPnl).HasPrecision(28, 10);
         builder.Property(p => p.RealizedPnl).HasPrecision(28, 10);
 

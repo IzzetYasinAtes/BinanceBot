@@ -29,8 +29,8 @@ public sealed class MeanReversionEvaluator : IStrategyEvaluator
             return Task.FromResult<StrategyEvaluation?>(null);
         }
 
-        var rsi = Rsi(closedBars, p.RsiPeriod);
-        var (mean, upper, lower) = BollingerBands(closedBars, p.BbPeriod, p.BbStdDev);
+        var rsi = Indicators.Rsi(closedBars, p.RsiPeriod);
+        var (mean, upper, lower) = Indicators.BollingerBands(closedBars, p.BbPeriod, p.BbStdDev);
         var latest = closedBars[^1];
 
         var longSignal = rsi <= p.RsiOversold && latest.ClosePrice <= lower;
@@ -50,7 +50,10 @@ public sealed class MeanReversionEvaluator : IStrategyEvaluator
         var ctx = EvaluatorParameterHelper.SerializeContext(new
         {
             type = "meanrev",
-            rsi, mean, upper, lower,
+            rsi,
+            mean,
+            upper,
+            lower,
             price = latest.ClosePrice,
         });
 
@@ -60,43 +63,5 @@ public sealed class MeanReversionEvaluator : IStrategyEvaluator
             latest.ClosePrice,
             null,
             ctx));
-    }
-
-    private static decimal Rsi(IReadOnlyList<Kline> bars, int period)
-    {
-        if (bars.Count < period + 1) return 50m;
-        decimal gainSum = 0m, lossSum = 0m;
-        var start = bars.Count - period;
-        for (var i = start; i < bars.Count; i++)
-        {
-            var diff = bars[i].ClosePrice - bars[i - 1].ClosePrice;
-            if (diff >= 0m) gainSum += diff;
-            else lossSum -= diff;
-        }
-        var avgGain = gainSum / period;
-        var avgLoss = lossSum / period;
-        if (avgLoss == 0m) return 100m;
-        var rs = avgGain / avgLoss;
-        return 100m - (100m / (1m + rs));
-    }
-
-    private static (decimal mean, decimal upper, decimal lower) BollingerBands(
-        IReadOnlyList<Kline> bars, int period, decimal stdDevMultiplier)
-    {
-        if (bars.Count < period) return (bars[^1].ClosePrice, bars[^1].ClosePrice, bars[^1].ClosePrice);
-        decimal sum = 0m;
-        var start = bars.Count - period;
-        for (var i = start; i < bars.Count; i++) sum += bars[i].ClosePrice;
-        var mean = sum / period;
-
-        decimal sqSum = 0m;
-        for (var i = start; i < bars.Count; i++)
-        {
-            var d = bars[i].ClosePrice - mean;
-            sqSum += d * d;
-        }
-        var variance = sqSum / period;
-        var stdDev = (decimal)Math.Sqrt((double)variance);
-        return (mean, mean + stdDevMultiplier * stdDev, mean - stdDevMultiplier * stdDev);
     }
 }

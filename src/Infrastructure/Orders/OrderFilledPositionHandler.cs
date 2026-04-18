@@ -71,8 +71,10 @@ public sealed class OrderFilledPositionHandler : INotificationHandler<OrderFille
             if (openPosition is null)
             {
                 var newSide = order.Side == OrderSide.Buy ? PositionSide.Long : PositionSide.Short;
+                // ADR-0012 §12.4: forward Order.StopPrice into Position so StopLossMonitorService
+                // can soft-trigger an exit when mark price crosses the level.
                 var pos = Position.Open(order.Symbol, newSide, fillQty, fillPrice,
-                    order.StrategyId, order.Mode, now);
+                    order.StopPrice, order.StrategyId, order.Mode, now);
                 db.Positions.Add(pos);
                 _logger.LogInformation(
                     "Position opened from fill {Cid} side={Side} qty={Qty} price={Price}",
@@ -104,8 +106,9 @@ public sealed class OrderFilledPositionHandler : INotificationHandler<OrderFille
                         var flipSide = order.Side == OrderSide.Buy
                             ? PositionSide.Long
                             : PositionSide.Short;
+                        // The flip uses the same incoming stop hint as the closing entry order.
                         var flip = Position.Open(order.Symbol, flipSide, leftover, fillPrice,
-                            order.StrategyId, order.Mode, now);
+                            order.StopPrice, order.StrategyId, order.Mode, now);
                         db.Positions.Add(flip);
                         _logger.LogInformation(
                             "Position {Pos} flipped from leftover qty={Qty}",

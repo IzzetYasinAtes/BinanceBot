@@ -13,6 +13,15 @@ public sealed class Position : AggregateRoot<long>
     public decimal AverageEntryPrice { get; private set; }
     public decimal? ExitPrice { get; private set; }
     public decimal MarkPrice { get; private set; }
+
+    /// <summary>
+    /// Optional risk-management stop level captured at open time (ADR-0012 §12.4).
+    /// Persisted alongside the aggregate so <see cref="Infrastructure.Trading.StopLossMonitorService"/>
+    /// can soft-trigger an exit when mark price crosses this threshold without depending on
+    /// any in-process cache.
+    /// </summary>
+    public decimal? StopPrice { get; private set; }
+
     public decimal UnrealizedPnl { get; private set; }
     public decimal RealizedPnl { get; private set; }
     public long? StrategyId { get; private set; }
@@ -28,6 +37,7 @@ public sealed class Position : AggregateRoot<long>
         PositionSide side,
         decimal quantity,
         decimal entryPrice,
+        decimal? stopPrice,
         long? strategyId,
         TradingMode mode,
         DateTimeOffset now)
@@ -40,6 +50,10 @@ public sealed class Position : AggregateRoot<long>
         {
             throw new DomainException("Entry price must be positive.");
         }
+        if (stopPrice is decimal s && s <= 0m)
+        {
+            throw new DomainException("Stop price must be positive when set.");
+        }
 
         var position = new Position
         {
@@ -49,6 +63,7 @@ public sealed class Position : AggregateRoot<long>
             Quantity = quantity,
             AverageEntryPrice = entryPrice,
             MarkPrice = entryPrice,
+            StopPrice = stopPrice,
             StrategyId = strategyId,
             Mode = mode,
             OpenedAt = now,

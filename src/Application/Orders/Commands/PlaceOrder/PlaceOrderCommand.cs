@@ -288,7 +288,8 @@ public sealed class PlaceOrderCommandHandler
             .OrderByDescending(s => s.CapturedAt)
             .FirstOrDefaultAsync(ct);
 
-        var outcome = _paperFills.Simulate(order, instrument, bookTicker, depth, _clock.UtcNow);
+        var outcome = await _paperFills.SimulateAsync(
+            order, instrument, bookTicker, depth, _clock.UtcNow, ct);
 
         _logger.LogInformation(
             "Paper fill {Cid} filled={Filled} qty={Qty} avg={Avg} cashDelta={Cash}",
