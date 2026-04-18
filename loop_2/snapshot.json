@@ -1,0 +1,48 @@
+{
+  "loop": 2,
+  "started_utc": "2026-04-17T20:59:42Z",
+  "ended_utc": "2026-04-18T01:05:00Z",
+  "duration_h": 4.1,
+  "balances": {
+    "Paper": {
+      "starting": 100.00,
+      "ending": 98.93,
+      "peak": 178.70,
+      "trough": 98.93,
+      "net_pct": -1.07,
+      "drawdown_peak_to_trough_pct": -44.7
+    },
+    "LiveTestnet": {"status": "no_credentials"},
+    "LiveMainnet": {"status": "blocked_adr_0006"}
+  },
+  "strategies_active": ["BTC-Trend-Fast", "BNB-MeanRev", "XRP-Grid"],
+  "signals": {
+    "total_emitted_estimate": 408,
+    "dominant": "BNB-MeanRev (~70%)",
+    "BTC-Trend-Fast_count_estimate": 60,
+    "XRP-Grid_count_estimate": "unknown_low",
+    "retro_signal_spike_at_boot": "11 signals at 21:00:02 (loop 3 backlog #10)"
+  },
+  "errors": 0,
+  "warnings": "mainnet_blocked (expected per ADR-0006)",
+  "circuit_breaker": "Healthy (did not trip despite -44% drawdown)",
+  "risk_profile_drift": {
+    "currentDrawdownPct_reported": 0.0,
+    "actual_drawdown_pct": -44.7,
+    "realizedPnl24h_reported": 0.0,
+    "peakEquity_reported": 0.0,
+    "note": "risk tracking broken — loop 3 backlog #7"
+  },
+  "snapshot_endpoint_errors": {
+    "/api/orders/history": "500 InvalidOperationException Sequence contains no matching element",
+    "/api/strategies/signals/latest": "500 same",
+    "note": "loop 3 backlog #11"
+  },
+  "health_checks": {
+    "t30_paper": 103.35,
+    "t90_paper": 178.70,
+    "t150_paper": 177.62,
+    "t210_paper": 100.98,
+    "t240_paper": 98.93
+  }
+}

@@ -1,0 +1,18 @@
+System.InvalidOperationException: Sequence contains no matching element
+   at System.Linq.ThrowHelper.ThrowNoMatchException()
+   at System.Linq.Enumerable.Single[TSource](IEnumerable`1 source, Func`2 predicate)
+   at BinanceBot.Application.Behaviors.ValidationBehavior`2.Handle(TRequest request, RequestHandlerDelegate`1 next, CancellationToken cancellationToken) in D:\repos\BinanceBot\src\Application\Behaviors\ValidationBehavior.cs:line 45
+   at BinanceBot.Application.Behaviors.LoggingBehavior`2.Handle(TRequest request, RequestHandlerDelegate`1 next, CancellationToken cancellationToken) in D:\repos\BinanceBot\src\Application\Behaviors\LoggingBehavior.cs:line 28
+   at BinanceBot.Api.Endpoints.StrategyEndpoints.<>c.<<MapStrategyEndpoints>b__3_1>d.MoveNext() in D:\repos\BinanceBot\src\Api\Endpoints\StrategyEndpoints.cs:line 29
+--- End of stack trace from previous location ---
+   at Microsoft.AspNetCore.Http.RequestDelegateFactory.ExecuteTaskResult[T](Task`1 task, HttpContext httpContext)
+   at Microsoft.AspNetCore.Routing.EndpointMiddleware.<Invoke>g__AwaitRequestTask|7_0(Endpoint endpoint, Task requestTask, ILogger logger)
+   at BinanceBot.Api.Infrastructure.CorrelationIdMiddleware.Invoke(HttpContext context) in D:\repos\BinanceBot\src\Api\Infrastructure\CorrelationIdMiddleware.cs:line 29
+   at Serilog.AspNetCore.RequestLoggingMiddleware.Invoke(HttpContext httpContext)
+   at Microsoft.AspNetCore.Diagnostics.DeveloperExceptionPageMiddlewareImpl.Invoke(HttpContext context)
+
+HEADERS
+=======
+Accept: */*
+Host: localhost:5188
+User-Agent: curl/8.18.0
