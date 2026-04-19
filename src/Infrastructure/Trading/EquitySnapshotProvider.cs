@@ -12,21 +12,21 @@ namespace BinanceBot.Infrastructure.Trading;
 /// Loop 12 reform: split into two reads.
 ///   - <see cref="GetEquityAsync"/> returns mark-to-market equity (Equity
 ///     column, falls back to CurrentBalance when unset). Used by sizing.
-///   - <see cref="GetRealizedEquityAsync"/> returns realized notional equity:
-///     cash + cost-basis of currently open positions, ignoring any
-///     open-position unrealized PnL. Used by <c>EquityPeakTrackerService</c>
-///     to stop intraday spikes from inflating PeakEquity (Loop 6/7/9/10/11 trace).
+///   - <see cref="GetRealizedEquityAsync"/> returns realized PnL-based equity:
+///     <c>StartingBalance + sum(closed position RealizedPnl)</c>. Used by
+///     <c>EquityPeakTrackerService</c> so PeakEquity only ratchets up on
+///     real, settled gains (Loop 6/7/9/10/11/14/15/16 trace).
 ///
-/// Loop 14/15 fix: <see cref="GetRealizedEquityAsync"/> previously returned
-/// only <c>VirtualBalance.CurrentBalance</c> (cash). When an order fills, cash
-/// drops by the cost basis (it is "locked" inside the open position) but no
-/// realized loss has occurred — the position can still close at break-even.
-/// Cash-only therefore manufactured a fake drawdown the moment any position
-/// opened (Loop 14 t30: $100 cash -> BUY $39.97 -> $60.03 cash -> 40% DD ->
-/// CB Tripped sahte). The correct realized notional equity adds the
-/// cost-basis of every still-open position back to cash. Unrealized PnL is
-/// still excluded (Loop 12 invariant): cost-basis uses
-/// <see cref="Position.AverageEntryPrice"/>, never <c>MarkPrice</c>.
+/// Loop 17 reform: cash + open cost-basis (Loop 14/15) drifted upward across
+/// loops because partial fills, fee accruals, and AddFill averaging let the
+/// "cost basis" computation race the "cash" mutation. Loop 15 cash+cost
+/// reached $178, Loop 16 hit $263 — both wildly above the $100 baseline,
+/// inflating PeakEquity and arming a permanent fake drawdown. The PnL-based
+/// formulation is timing-immune: <c>StartingBalance</c> is constant per
+/// iteration, and <c>RealizedPnl</c> is only written on <c>Position.Close</c>
+/// (single atomic write, no intermediate state). Open positions, mark price,
+/// fees-in-flight, and partial fills all become irrelevant to the peak
+/// tracker — exactly the property the circuit breaker needs.
 /// </summary>
 public sealed class EquitySnapshotProvider : IEquitySnapshotProvider
 {
@@ -74,17 +74,20 @@ public sealed class EquitySnapshotProvider : IEquitySnapshotProvider
             return 0m;
         }
 
-        // Loop 14/15: cash + cost-basis of open positions. Cash is mutated
-        // only by VirtualBalance.ApplyFill (realized delta + locks cost basis
-        // when a position opens). Adding cost-basis back reconstructs the
-        // notional capital available before the lock — i.e. realized equity.
-        // AverageEntryPrice (NOT MarkPrice) keeps unrealized PnL out, which
-        // is the Loop 12 invariant the peak tracker depends on.
-        var openPositionsCostBasis = await _db.Positions
+        // Loop 17: PnL-based tracking. Baseline (StartingBalance, constant per
+        // iteration) + cumulative realized PnL from closed positions.
+        // Open-position mark/cost-basis fluctuations are intentionally
+        // excluded — only fully closed trades move the equity proxy. This
+        // is timing-immune: RealizedPnl is written exactly once on Close,
+        // so no race with cash mutations or partial fills can inflate the
+        // value. PeakEquity therefore can never exceed StartingBalance + true
+        // realized gains, eliminating the Loop 14/15/16 inflation drift
+        // ($100 -> $178 -> $263 baseline regression).
+        var realizedSum = await _db.Positions
             .AsNoTracking()
-            .Where(p => p.Mode == mode && p.Status == PositionStatus.Open)
-            .SumAsync(p => p.AverageEntryPrice * p.Quantity, ct);
+            .Where(p => p.Mode == mode && p.Status == PositionStatus.Closed)
+            .SumAsync(p => p.RealizedPnl, ct);
 
-        return balance.CurrentBalance + openPositionsCostBasis;
+        return balance.StartingBalance + realizedSum;
     }
 }
