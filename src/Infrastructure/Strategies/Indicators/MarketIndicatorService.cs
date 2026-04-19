@@ -2,9 +2,11 @@ using System.Collections.Concurrent;
 using BinanceBot.Application.Abstractions.Binance;
 using BinanceBot.Application.Strategies.Indicators;
 using BinanceBot.Domain.MarketData;
+using BinanceBot.Domain.SystemEvents.Events;
 using BinanceBot.Domain.ValueObjects;
 using BinanceBot.Infrastructure.Binance;
 using BinanceBot.Infrastructure.Strategies.Evaluators;
+using MediatR;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -233,9 +235,56 @@ public sealed class MarketIndicatorService : IMarketIndicatorService, IHostedSer
 
             await WarmupOneAsync(marketData, symbol, KlineInterval.OneMinute, OneMinuteBufferCapacity, ct);
             await WarmupOneAsync(marketData, symbol, KlineInterval.OneHour, OneHourBufferCapacity, ct);
+
+            // ADR-0016 §16.9.6 — emit per-symbol warmup completion marker.
+            await MaybePublishWarmupAsync(symbol, ct);
         }
 
         _logger.LogInformation("MarketIndicator warmup completed: {Count} symbol(s)", symbols.Length);
+    }
+
+    /// <summary>
+    /// ADR-0016 §16.9.6 — once both intervals warmed, publish
+    /// <see cref="IndicatorWarmupCompletedEvent"/> so the SystemEvents pipe records
+    /// readiness. Tolerant of concurrent callers via double-check on symbol state.
+    /// </summary>
+    private async Task MaybePublishWarmupAsync(string symbol, CancellationToken ct)
+    {
+        if (!_state.TryGetValue(symbol, out var state))
+        {
+            return;
+        }
+
+        int oneMinCount;
+        int oneHourCount;
+        lock (state.SyncRoot)
+        {
+            if (state.WarmupEventPublished)
+            {
+                return;
+            }
+            oneMinCount = state.OneMinute.Count;
+            oneHourCount = state.OneHour.Count;
+            if (oneMinCount < OneMinuteBufferCapacity || oneHourCount < OneHourBufferCapacity / 2)
+            {
+                return;
+            }
+            state.WarmupEventPublished = true;
+        }
+
+        try
+        {
+            await using var scope = _scopeFactory.CreateAsyncScope();
+            var publisher = scope.ServiceProvider.GetRequiredService<IPublisher>();
+            await publisher.Publish(
+                new IndicatorWarmupCompletedEvent(symbol, oneMinCount, oneHourCount),
+                ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "IndicatorWarmupCompleted publish failed symbol={Symbol}", symbol);
+        }
     }
 
     private async Task WarmupOneAsync(
@@ -365,5 +414,9 @@ public sealed class MarketIndicatorService : IMarketIndicatorService, IHostedSer
         public object SyncRoot { get; } = new();
         public IndicatorRollingBuffer OneMinute { get; } = new(OneMinuteBufferCapacity);
         public IndicatorRollingBuffer OneHour { get; } = new(OneHourBufferCapacity);
+
+        // ADR-0016 §16.9.6 — one-shot latch: when warmup budget crosses threshold
+        // we publish IndicatorWarmupCompletedEvent exactly once per symbol.
+        public bool WarmupEventPublished { get; set; }
     }
 }

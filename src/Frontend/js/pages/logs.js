@@ -60,9 +60,33 @@ const App = {
                     <div v-if="!events" class="col gap-3">
                         <div v-for="i in 6" :key="i" class="skeleton" style="height:40px"></div>
                     </div>
-                    <div v-else-if="events.length === 0" class="empty-state">
-                        <span class="emoji">·</span>
-                        Bu filtreyle olay yok.
+                    <div v-else-if="events.length === 0" class="empty-illust">
+                        <svg width="120" height="92" viewBox="0 0 120 92" fill="none" xmlns="http://www.w3.org/2000/svg">
+                            <defs>
+                                <linearGradient id="logsGrad" x1="0" y1="0" x2="1" y2="1">
+                                    <stop offset="0%" stop-color="#06b6d4" stop-opacity="0.35" />
+                                    <stop offset="100%" stop-color="#6366f1" stop-opacity="0.18" />
+                                </linearGradient>
+                            </defs>
+                            <rect x="12" y="14" width="96" height="68" rx="8" fill="url(#logsGrad)" opacity="0.35" />
+                            <rect x="22" y="24" width="60" height="5" rx="2.5" fill="#64748b" opacity="0.6" />
+                            <rect x="22" y="34" width="44" height="5" rx="2.5" fill="#64748b" opacity="0.45" />
+                            <rect x="22" y="44" width="72" height="5" rx="2.5" fill="#64748b" opacity="0.35" />
+                            <rect x="22" y="54" width="52" height="5" rx="2.5" fill="#64748b" opacity="0.25" />
+                            <rect x="22" y="64" width="66" height="5" rx="2.5" fill="#64748b" opacity="0.15" />
+                            <circle cx="86" cy="26" r="3" fill="#06b6d4" opacity="0.9" />
+                            <circle cx="86" cy="26" r="6" fill="#06b6d4" opacity="0.25" />
+                        </svg>
+                        <div class="title">{{ level ? 'Bu filtreyle olay bulunamadı' : 'Henüz sistem olayı yok' }}</div>
+                        <div class="sub">
+                            {{ level
+                                ? 'Filtreyi temizleyerek tüm olay akışını görebilirsin.'
+                                : 'API çalışıyor ve olaylar kaydediliyor. Bot bir şey yaptığında (sinyal, emir, hata) burada akış olarak görünecek.' }}
+                        </div>
+                        <div class="hint-row">
+                            <span class="pulse-dot"></span>
+                            <span>Akış dinleniyor · her 4 sn yenileniyor</span>
+                        </div>
                     </div>
                     <div v-else class="timeline">
                         <div v-for="e in events" :key="e.id" class="tl-item fade-in">

@@ -4,6 +4,7 @@ using BinanceBot.Application.Strategies.Evaluation;
 using BinanceBot.Domain.MarketData;
 using BinanceBot.Domain.MarketData.Events;
 using BinanceBot.Domain.Strategies;
+using BinanceBot.Domain.SystemEvents.Events;
 using BinanceBot.Domain.ValueObjects;
 using MediatR;
 using Microsoft.EntityFrameworkCore;
@@ -97,7 +98,26 @@ public sealed class StrategyEvaluationHandler : INotificationHandler<KlineClosed
                 continue;
             }
 
-            if (eval is null) continue;
+            if (eval is null)
+            {
+                // ADR-0016 §16.9.6 — skip telemetry. Handler throttles per-(strategy,
+                // minute) so this fire-per-bar call does not spam the SystemEvents
+                // table. Publish is best-effort; failure must not block the loop.
+                try
+                {
+                    await mediator.Publish(
+                        new StrategySignalSkippedEvent(
+                            strategy.Id, notification.Symbol,
+                            "evaluator_skip", notification.OpenTime),
+                        cancellationToken);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogDebug(ex,
+                        "StrategySignalSkippedEvent publish failed strategy={Id}", strategy.Id);
+                }
+                continue;
+            }
 
             var emit = new EmitStrategySignalCommand(
                 strategy.Id,

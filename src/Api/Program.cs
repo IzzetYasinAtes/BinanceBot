@@ -3,8 +3,10 @@ using BinanceBot.Api.Endpoints;
 using BinanceBot.Api.Infrastructure;
 using BinanceBot.Application;
 using BinanceBot.Application.Abstractions;
+using BinanceBot.Domain.SystemEvents.Events;
 using BinanceBot.Infrastructure;
 using BinanceBot.Infrastructure.Persistence;
+using MediatR;
 using Microsoft.Extensions.FileProviders;
 using Serilog;
 
@@ -28,7 +30,10 @@ static string? ResolveFrontendRoot()
                 return full;
             }
         }
-        catch { }
+        catch (Exception ex)
+        {
+            Log.Warning(ex, "Frontend root probe failed for {Candidate}", c);
+        }
     }
     return null;
 }
@@ -92,6 +97,11 @@ app.MapBalanceEndpoints();
 app.MapPortfolioEndpoints();
 
 await DatabaseInitializer.MigrateAsync(app.Services, CancellationToken.None);
+
+// ADR-0016 §16.9.6 — AppStarted/AppStopping publish is handled by
+// AppLifecycleHostedService (IHostedService.StartAsync/StopAsync) so the
+// shutdown path runs under the framework's async drain with no .Wait() /
+// .GetAwaiter().GetResult() (CLAUDE.md rule 9).
 
 app.Run();
 

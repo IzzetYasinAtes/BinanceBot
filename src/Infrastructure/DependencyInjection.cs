@@ -4,6 +4,8 @@ using BinanceBot.Application.Abstractions.Trading;
 using BinanceBot.Application.Strategies.Evaluation;
 using BinanceBot.Application.Strategies.Indicators;
 using BinanceBot.Application.System.Queries.GetSystemStatus;
+using BinanceBot.Application.SystemEvents;
+using BinanceBot.Infrastructure.SystemEvents;
 using BinanceBot.Infrastructure.Binance;
 using BinanceBot.Infrastructure.Binance.Handlers;
 using BinanceBot.Infrastructure.Binance.Streams;
@@ -177,6 +179,41 @@ public static class DependencyInjection
         services.AddTransient<MediatR.INotificationHandler<BinanceBot.Domain.RiskProfiles.Events.CircuitBreakerTrippedEvent>,
             BinanceBot.Infrastructure.RiskProfiles.CircuitBreakerTrippedHandler>();
         services.AddHostedService<MarkToMarketWorker>();
+
+        // ADR-0016 §16.9 — SystemEvents persistence pipe. Publisher scoped (shares
+        // DbContext lifetime). MediatR scan yalnızca Application assembly'sini
+        // tarar (bkz. Application/DependencyInjection.cs), Infrastructure
+        // handler'ları explicit kaydedilir.
+        services.AddScoped<ISystemEventPublisher, SystemEventPublisher>();
+        services.AddHostedService<AppLifecycleHostedService>();
+        services.AddTransient<MediatR.INotificationHandler<BinanceBot.Domain.SystemEvents.Events.AppStartedEvent>,
+            BinanceBot.Infrastructure.SystemEvents.Handlers.AppStartedSystemEventHandler>();
+        services.AddTransient<MediatR.INotificationHandler<BinanceBot.Domain.SystemEvents.Events.AppStoppingEvent>,
+            BinanceBot.Infrastructure.SystemEvents.Handlers.AppStoppingSystemEventHandler>();
+        services.AddTransient<MediatR.INotificationHandler<BinanceBot.Domain.SystemEvents.Events.IndicatorWarmupCompletedEvent>,
+            BinanceBot.Infrastructure.SystemEvents.Handlers.IndicatorWarmupCompletedSystemEventHandler>();
+        services.AddTransient<MediatR.INotificationHandler<BinanceBot.Domain.SystemEvents.Events.WsConnectionStateChangedEvent>,
+            BinanceBot.Infrastructure.SystemEvents.Handlers.WsConnectionStateChangedSystemEventHandler>();
+        services.AddTransient<MediatR.INotificationHandler<BinanceBot.Domain.Strategies.Events.StrategyActivatedEvent>,
+            BinanceBot.Infrastructure.SystemEvents.Handlers.StrategyActivatedSystemEventHandler>();
+        services.AddTransient<MediatR.INotificationHandler<BinanceBot.Domain.Strategies.Events.StrategyDeactivatedEvent>,
+            BinanceBot.Infrastructure.SystemEvents.Handlers.StrategyDeactivatedSystemEventHandler>();
+        services.AddTransient<MediatR.INotificationHandler<BinanceBot.Domain.Strategies.Events.StrategySignalEmittedEvent>,
+            BinanceBot.Infrastructure.SystemEvents.Handlers.StrategySignalEmittedSystemEventHandler>();
+        services.AddTransient<MediatR.INotificationHandler<BinanceBot.Domain.SystemEvents.Events.StrategySignalSkippedEvent>,
+            BinanceBot.Infrastructure.SystemEvents.Handlers.StrategySignalSkippedSystemEventHandler>();
+        services.AddTransient<MediatR.INotificationHandler<BinanceBot.Domain.Orders.Events.OrderPlacedEvent>,
+            BinanceBot.Infrastructure.SystemEvents.Handlers.OrderPlacedSystemEventHandler>();
+        services.AddTransient<MediatR.INotificationHandler<BinanceBot.Domain.Orders.Events.OrderFilledEvent>,
+            BinanceBot.Infrastructure.SystemEvents.Handlers.OrderFilledSystemEventHandler>();
+        services.AddTransient<MediatR.INotificationHandler<BinanceBot.Domain.Orders.Events.OrderCancelledEvent>,
+            BinanceBot.Infrastructure.SystemEvents.Handlers.OrderCancelledSystemEventHandler>();
+        services.AddTransient<MediatR.INotificationHandler<BinanceBot.Domain.Positions.Events.PositionOpenedEvent>,
+            BinanceBot.Infrastructure.SystemEvents.Handlers.PositionOpenedSystemEventHandler>();
+        services.AddTransient<MediatR.INotificationHandler<BinanceBot.Domain.Positions.Events.PositionClosedEvent>,
+            BinanceBot.Infrastructure.SystemEvents.Handlers.PositionClosedSystemEventHandler>();
+        services.AddTransient<MediatR.INotificationHandler<BinanceBot.Domain.RiskProfiles.Events.CircuitBreakerTrippedEvent>,
+            BinanceBot.Infrastructure.SystemEvents.Handlers.CircuitBreakerTrippedSystemEventHandler>();
 
         // ADR-0012 §12.3: client-side stop monitor (30s tick), mode-agnostic (mainnet
         // skipped defensively).
