@@ -2,6 +2,7 @@ using BinanceBot.Application.Abstractions;
 using BinanceBot.Application.Abstractions.Binance;
 using BinanceBot.Application.Abstractions.Trading;
 using BinanceBot.Application.Strategies.Evaluation;
+using BinanceBot.Application.Strategies.Indicators;
 using BinanceBot.Application.System.Queries.GetSystemStatus;
 using BinanceBot.Infrastructure.Binance;
 using BinanceBot.Infrastructure.Binance.Handlers;
@@ -11,10 +12,9 @@ using BinanceBot.Infrastructure.Monitoring;
 using BinanceBot.Infrastructure.Orders;
 using BinanceBot.Infrastructure.Persistence;
 using BinanceBot.Infrastructure.Positions;
-using BinanceBot.Application.Strategies.Patterns;
 using BinanceBot.Infrastructure.Strategies;
 using BinanceBot.Infrastructure.Strategies.Evaluators;
-using BinanceBot.Infrastructure.Strategies.Patterns.Detectors;
+using BinanceBot.Infrastructure.Strategies.Indicators;
 using BinanceBot.Infrastructure.Risk;
 using BinanceBot.Infrastructure.Time;
 using BinanceBot.Infrastructure.Trading;
@@ -145,26 +145,16 @@ public static class DependencyInjection
         services.AddHostedService<BookTickerIngestionWorker>();
         services.AddHostedService<DepthSnapshotWorker>();
 
-        // ADR-0014 §14.7: 14 pattern detectors — declared in descending Weight so the
-        // PatternScalpingEvaluator's debug logs read in priority order. Each detector is
-        // a self-contained pure-function — no DB, no I/O — and may be added/removed
-        // freely (open/closed: new pattern = new class + 1 DI line).
-        services.AddSingleton<IPatternDetector, DoubleBottomDetector>();
-        services.AddSingleton<IPatternDetector, DoubleTopDetector>();
-        services.AddSingleton<IPatternDetector, ThreeWhiteSoldiersDetector>();
-        services.AddSingleton<IPatternDetector, ThreeBlackCrowsDetector>();
-        services.AddSingleton<IPatternDetector, MorningStarDetector>();
-        services.AddSingleton<IPatternDetector, EveningStarDetector>();
-        services.AddSingleton<IPatternDetector, BullFlagDetector>();
-        services.AddSingleton<IPatternDetector, BearFlagDetector>();
-        services.AddSingleton<IPatternDetector, AscendingTriangleDetector>();
-        services.AddSingleton<IPatternDetector, DescendingTriangleDetector>();
-        services.AddSingleton<IPatternDetector, HammerDetector>();
-        services.AddSingleton<IPatternDetector, ShootingStarDetector>();
-        services.AddSingleton<IPatternDetector, BullishEngulfingDetector>();
-        services.AddSingleton<IPatternDetector, BearishEngulfingDetector>();
+        // ADR-0015 §15.5 — VWAP-EMA hybrid surface. MarketIndicatorService is a
+        // hosted singleton (IHostedService) that owns the rolling 1m/1h buffers and
+        // drains the shared kline Channel; the evaluator is a stateless consumer of
+        // its snapshot API. PatternScalpingEvaluator + 14 detectors removed (ADR-0014
+        // superseded).
+        services.AddSingleton<MarketIndicatorService>();
+        services.AddSingleton<IMarketIndicatorService>(sp => sp.GetRequiredService<MarketIndicatorService>());
+        services.AddHostedService(sp => sp.GetRequiredService<MarketIndicatorService>());
 
-        services.AddSingleton<IStrategyEvaluator, PatternScalpingEvaluator>();
+        services.AddSingleton<IStrategyEvaluator, VwapEmaStrategyEvaluator>();
         services.AddSingleton<StrategyEvaluatorRegistry>();
 
         services.AddOptions<StrategySeedOptions>()

@@ -1,15 +1,15 @@
-import { ref, onBeforeUnmount } from "vue";
+import { ref, computed, onBeforeUnmount } from "vue";
 import { api, ApiError } from "./api.js";
 
 const NAV_ITEMS = [
-    { id: "dashboard",  href: "/index.html",      label: "Genel Bakış",    ic: "\u25A3" },
-    { id: "positions",  href: "/positions.html",  label: "Portföy",        ic: "\u25A0" },
-    { id: "orders",     href: "/orders.html",     label: "İşlemler",       ic: "\u2630" },
-    { id: "strategies", href: "/strategies.html", label: "Sinyaller",      ic: "\u25B2" },
-    { id: "risk",       href: "/risk.html",       label: "Risk",           ic: "\u25CF" },
-    { id: "klines",     href: "/klines.html",     label: "Canlı Grafik",   ic: "\u25EB" },
-    { id: "orderbook",  href: "/orderbook.html",  label: "Derinlik",       ic: "\u25A4" },
-    { id: "logs",       href: "/logs.html",       label: "Loglar",         ic: "\u2630" },
+    { id: "dashboard",  href: "/index.html",      label: "Ana Panel",        ic: "\u25A3" },
+    { id: "positions",  href: "/positions.html",  label: "Pozisyonlar",      ic: "\u25A0" },
+    { id: "orders",     href: "/orders.html",     label: "Emir Geçmişi",     ic: "\u2630" },
+    { id: "strategies", href: "/strategies.html", label: "Stratejiler",      ic: "\u25B2" },
+    { id: "risk",       href: "/risk.html",       label: "Risk",             ic: "\u25CF" },
+    { id: "klines",     href: "/klines.html",     label: "Mum Grafikleri",   ic: "\u25EB" },
+    { id: "orderbook",  href: "/orderbook.html",  label: "Emir Defteri",     ic: "\u25A4" },
+    { id: "logs",       href: "/logs.html",       label: "Sistem Olayları",  ic: "\u2630" },
 ];
 
 export const Sidebar = {
@@ -68,17 +68,19 @@ export const ErrorBanner = {
     props: {
         error: { type: Object, default: null },
     },
-    computed: {
-        message() {
-            if (!this.error) return "";
-            if (this.error instanceof ApiError) {
-                const detail = typeof this.error.detail === "string"
-                    ? this.error.detail
-                    : JSON.stringify(this.error.detail);
-                return `${this.error.status} ${this.error.message} — ${detail}`;
+    setup(props) {
+        const message = computed(() => {
+            const e = props.error;
+            if (!e) return "";
+            if (e instanceof ApiError) {
+                const detail = typeof e.detail === "string"
+                    ? e.detail
+                    : JSON.stringify(e.detail);
+                return `${e.status} ${e.message} — ${detail}`;
             }
-            return this.error.message || String(this.error);
-        },
+            return e.message || String(e);
+        });
+        return { message };
     },
 };
 

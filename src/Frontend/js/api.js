@@ -143,4 +143,16 @@ export const api = {
         list: (q = {}) => request("/api/backtests/", { query: q }),
         result: (id) => request(`/api/backtests/${id}`),
     },
+
+    /** Orderbook alias — /api/depth ile aynı endpoint. */
+    orderbook: {
+        snapshot: (symbol, depth = 20) =>
+            request("/api/depth", { query: { symbol, depth } }),
+    },
+
+    /** Sistem olayları alias — /api/logs/tail ile aynı endpoint. */
+    systemEvents: {
+        tail: (since, level, limit = 80) =>
+            request("/api/logs/tail", { query: { since, level, limit } }),
+    },
 };
