@@ -73,6 +73,23 @@ public sealed class VirtualBalance : AggregateRoot<int>
     /// <summary>
     /// Paper-only. Realized delta (can be +/-) adjusts cash balance.
     /// Commission/slippage impact already baked into realizedDelta by caller.
+    ///
+    /// Loop 18 fix (cash invariance): the previous implementation clamped
+    /// <see cref="CurrentBalance"/> at 0 whenever a fill drove it negative,
+    /// which silently destroyed information whenever multiple paper positions
+    /// were open concurrently — Pos1 BUY (-100) clamped to 0, then Pos1 SELL
+    /// (+99.5) credited from 0 instead of -100, producing a phantom +100 gain
+    /// or, with a different ordering, a phantom -100 loss. Over 34 closed
+    /// positions Loop 17 ended at $0 cash with only -$0.71 net realized PnL.
+    ///
+    /// PaperFillSimulator emits a quote-currency cash delta per fill that is
+    /// mathematically consistent: open + close round-trips sum to the realized
+    /// PnL. Allowing the running balance to dip negative (it represents
+    /// cash-out-while-positions-open, not real spot equity) restores the
+    /// invariance <c>final = starting + sum(realizedPnl)</c>. Defense against
+    /// over-leveraging is the responsibility of upstream sizing + position-cap
+    /// gates (RiskProfile.MaxOpenPositions, MaxPositionSizePct) — not a
+    /// domain-level clamp that swallows accounting deltas.
     /// </summary>
     public void ApplyFill(decimal realizedDelta, DateTimeOffset now)
     {
@@ -83,10 +100,6 @@ public sealed class VirtualBalance : AggregateRoot<int>
         }
 
         CurrentBalance += realizedDelta;
-        if (CurrentBalance < 0m)
-        {
-            CurrentBalance = 0m;
-        }
         Equity = CurrentBalance;
         UpdatedAt = now;
 
