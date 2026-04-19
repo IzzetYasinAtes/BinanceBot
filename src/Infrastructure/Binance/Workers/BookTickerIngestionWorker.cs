@@ -27,7 +27,9 @@ public sealed class BookTickerIngestionWorker : BackgroundService
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        await foreach (var payload in _stream.BookTickerUpdates(stoppingToken))
+        // Loop 23 blocker fix (BLOCKER-2): dedicated subscriber channel.
+        var reader = _stream.SubscribeBookTickers();
+        await foreach (var payload in reader.ReadAllAsync(stoppingToken))
         {
             try
             {

@@ -53,5 +53,36 @@
       "2026-04-19T10:22:43.9524421Z claimed by tester",
       "2026-04-19T10:27:40.4880278Z released by tester -\u003E Done"
     ]
+  },
+  "loop-23-test": {
+    "TaskId": "loop-23-test",
+    "Status": "InProgress",
+    "Owner": "tester",
+    "CreatedUtc": "2026-04-19T20:42:06.5934328Z",
+    "UpdatedUtc": "2026-04-19T20:42:06.5934328Z",
+    "History": [
+      "2026-04-19T20:42:06.5934328Z claimed by tester"
+    ]
+  },
+  "loop-23-review": {
+    "TaskId": "loop-23-review",
+    "Status": "InProgress",
+    "Owner": "reviewer",
+    "CreatedUtc": "2026-04-19T20:42:35.0713434Z",
+    "UpdatedUtc": "2026-04-19T20:42:35.0713434Z",
+    "History": [
+      "2026-04-19T20:42:35.0713434Z claimed by reviewer"
+    ]
+  },
+  "loop-23-blocker-fix": {
+    "TaskId": "loop-23-blocker-fix",
+    "Status": "Done",
+    "Owner": null,
+    "CreatedUtc": "2026-04-19T20:55:42.1200124Z",
+    "UpdatedUtc": "2026-04-19T21:01:10.2766451Z",
+    "History": [
+      "2026-04-19T20:55:42.1200124Z claimed by backend-dev",
+      "2026-04-19T21:01:10.2766451Z released by backend-dev -\u003E Done"
+    ]
   }
 }

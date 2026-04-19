@@ -1,7 +1,13 @@
 namespace BinanceBot.Domain.MarketData;
 
+/// <summary>
+/// ADR-0018 §18.6: <see cref="ThirtySeconds"/> enum value added for the
+/// MicroScalper strategy. Binance code <c>30s</c> is valid for both WS
+/// <c>@kline_30s</c> streams and REST <c>/api/v3/klines?interval=30s</c>.
+/// </summary>
 public enum KlineInterval
 {
+    ThirtySeconds = 0,
     OneMinute = 1,
     ThreeMinutes = 3,
     FiveMinutes = 5,
@@ -16,6 +22,7 @@ public static class KlineIntervalExtensions
 {
     public static string ToBinanceCode(this KlineInterval interval) => interval switch
     {
+        KlineInterval.ThirtySeconds => "30s",
         KlineInterval.OneMinute => "1m",
         KlineInterval.ThreeMinutes => "3m",
         KlineInterval.FiveMinutes => "5m",
@@ -29,6 +36,7 @@ public static class KlineIntervalExtensions
 
     public static KlineInterval FromBinanceCode(string code) => code switch
     {
+        "30s" => KlineInterval.ThirtySeconds,
         "1m" => KlineInterval.OneMinute,
         "3m" => KlineInterval.ThreeMinutes,
         "5m" => KlineInterval.FiveMinutes,

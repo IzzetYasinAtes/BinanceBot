@@ -15,22 +15,25 @@ using Microsoft.Extensions.Options;
 namespace BinanceBot.Infrastructure.Strategies.Indicators;
 
 /// <summary>
-/// ADR-0015 §15.6 + §15.7. Maintains per-symbol rolling buffers of closed 1m and 1h
-/// bars, computes <see cref="MarketIndicatorSnapshot"/> on demand for the evaluator.
+/// ADR-0015 §15.6 + §15.7 + ADR-0018 §18.11. Maintains per-symbol rolling buffers
+/// of closed 1m, 1h, and 30s bars; computes <see cref="MarketIndicatorSnapshot"/>
+/// (eski VwapEma path) ve <see cref="MicroScalperIndicatorSnapshot"/> (Loop 23+
+/// MicroScalper path) on demand for the evaluators.
 ///
 /// Lifecycle:
-///   1. On host start, warm up 1m (1440 bars) and 1h (60 bars) per symbol via REST
-///      <c>GET /api/v3/klines</c>. Per-symbol failures are logged and skipped — the
-///      service is best-effort and never fail-fasts the host.
+///   1. On host start, warm up 1m (1440 bars), 1h (60 bars) ve 30s (50 bars)
+///      per symbol via REST <c>GET /api/v3/klines</c>. Per-symbol failures are
+///      logged and skipped — the service is best-effort and never fail-fasts
+///      the host.
 ///   2. Consume the shared <see cref="IBinanceMarketStream"/> kline channel and
 ///      upsert closed bars into the appropriate buffer.
 ///
 /// Thread model:
 ///   - Writes (REST warmup + WS consumer) are serialised per (symbol, interval) by
 ///     a lightweight lock around <see cref="IndicatorRollingBuffer"/>.
-///   - Reads (<see cref="TryGetSnapshot"/>) take the same lock, copy the buffer
-///     contents and compute indicators — latency is O(bars) which is dominated by
-///     the 1440-bar VWAP sum (&lt;1ms in practice).
+///   - Reads (<see cref="TryGetSnapshot"/>, <see cref="TryGetMicroScalperSnapshot"/>)
+///     take the same lock, copy the buffer contents and compute indicators — latency
+///     is O(bars) which is dominated by the 1440-bar VWAP sum (&lt;1ms in practice).
 /// </summary>
 public sealed class MarketIndicatorService : IMarketIndicatorService, IHostedService
 {
@@ -38,6 +41,13 @@ public sealed class MarketIndicatorService : IMarketIndicatorService, IHostedSer
     // (buffer sizing); strategy-level parameters live in evaluator JSON.
     internal const int OneMinuteBufferCapacity = 1440; // rolling 24h VWAP window
     internal const int OneHourBufferCapacity = 60;     // 21-period EMA needs ~50 bars warm
+
+    // ADR-0018 §18.11 — 30sn bar buffer. MicroScalper için en fazla gerekli lookback:
+    //   - EMA20 warm: ~40 bar (2× period, ema stabilize)
+    //   - VolumeSMA20: 20 bar
+    //   - VWAP 15-bar rolling: 15 bar
+    // 50 bar safety. Binance REST limit endpoint 1 sayfa yeter (=< 1000).
+    internal const int ThirtySecondBufferCapacity = 50;
 
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly IBinanceMarketStream _stream;
@@ -149,6 +159,61 @@ public sealed class MarketIndicatorService : IMarketIndicatorService, IHostedSer
     }
 
     /// <summary>
+    /// ADR-0018 §18.11 — 30sn bar bazında MicroScalper snapshot'ını üretir.
+    /// Warmup: 15-bar VWAP + 20-bar EMA + 20-bar volume SMA → en az 21 bar.
+    /// Hiç bar yoksa veya warmup tamamlanmadıysa <c>null</c>.
+    /// </summary>
+    public MicroScalperIndicatorSnapshot? TryGetMicroScalperSnapshot(string symbol)
+    {
+        if (string.IsNullOrWhiteSpace(symbol))
+        {
+            return null;
+        }
+
+        if (!_state.TryGetValue(symbol, out var state))
+        {
+            return null;
+        }
+
+        lock (state.SyncRoot)
+        {
+            var thirtyBars = state.ThirtySecond.Snapshot();
+
+            // ADR-0018 §18.11 — 30s warmup eşiği: EMA20 + VolumeSMA20 hesaplanabilir
+            // olmalı + önceki EMA değeri için +1 bar gerekli. 21 bar minimumu safe.
+            if (thirtyBars.Count < 21)
+            {
+                return null;
+            }
+
+            // VWAP rolling 15-bar: toplam bar 21 olsa bile VWAP yalnızca son 15 bar'dan
+            // hesaplanır (ADR-0018 §18.7 VwapWindowBars=15).
+            var klines30s = ToKlineList(thirtyBars);
+            var vwapWindow = klines30s.Count <= 15
+                ? klines30s
+                : (IReadOnlyList<Kline>)klines30s.GetRange(klines30s.Count - 15, 15);
+
+            var vwap = Evaluators.Indicators.Vwap(vwapWindow);
+            var volumeSma20 = Evaluators.Indicators.VolumeSma(klines30s, 20);
+            var ema20Now = Evaluators.Indicators.Ema(klines30s, period: 20, endIndex: klines30s.Count - 1);
+            var ema20Prev = Evaluators.Indicators.Ema(klines30s, period: 20, endIndex: klines30s.Count - 2);
+
+            var lastBar = klines30s[^1];
+            var prevBar = klines30s[^2];
+
+            return new MicroScalperIndicatorSnapshot(
+                Vwap: vwap,
+                PrevBarClose: prevBar.ClosePrice,
+                LastBarClose: lastBar.ClosePrice,
+                LastBarVolume: lastBar.Volume,
+                VolumeSma20: volumeSma20,
+                Ema20Now: ema20Now,
+                Ema20Prev: ema20Prev,
+                AsOf: lastBar.CloseTime);
+        }
+    }
+
+    /// <summary>
     /// Test-friendly injection path — infrastructure tests seed the buffers directly
     /// without starting the hosted service. Returns <c>true</c> when the symbol is
     /// known (added via <c>Symbols</c> config) and the bar was upserted.
@@ -162,11 +227,24 @@ public sealed class MarketIndicatorService : IMarketIndicatorService, IHostedSer
 
         lock (state.SyncRoot)
         {
-            var buf = interval == KlineInterval.OneMinute ? state.OneMinute : state.OneHour;
+            var buf = SelectBuffer(state, interval);
+            if (buf is null)
+            {
+                return false;
+            }
             buf.Upsert(bar);
         }
         return true;
     }
+
+    private static IndicatorRollingBuffer? SelectBuffer(SymbolState state, KlineInterval interval) =>
+        interval switch
+        {
+            KlineInterval.OneMinute => state.OneMinute,
+            KlineInterval.OneHour => state.OneHour,
+            KlineInterval.ThirtySeconds => state.ThirtySecond,
+            _ => null,
+        };
 
     private async Task RunAsync(CancellationToken ct)
     {
@@ -182,7 +260,12 @@ public sealed class MarketIndicatorService : IMarketIndicatorService, IHostedSer
 
         try
         {
-            await foreach (var payload in _stream.KlineUpdates(ct).WithCancellation(ct))
+            // Loop 23 blocker fix (BLOCKER-2): dedicated subscriber channel so
+            // this service shares no reader with KlineIngestionWorker (previous
+            // single-channel design raced — one of the two consumers missed each
+            // envelope and the 30s buffer never reached the 21-bar threshold).
+            var reader = _stream.SubscribeKlines();
+            await foreach (var payload in reader.ReadAllAsync(ct).WithCancellation(ct))
             {
                 if (!payload.IsClosed)
                 {
@@ -190,7 +273,8 @@ public sealed class MarketIndicatorService : IMarketIndicatorService, IHostedSer
                 }
 
                 if (payload.Interval != KlineInterval.OneMinute
-                    && payload.Interval != KlineInterval.OneHour)
+                    && payload.Interval != KlineInterval.OneHour
+                    && payload.Interval != KlineInterval.ThirtySeconds)
                 {
                     continue;
                 }
@@ -202,9 +286,8 @@ public sealed class MarketIndicatorService : IMarketIndicatorService, IHostedSer
 
                 lock (state.SyncRoot)
                 {
-                    var buf = payload.Interval == KlineInterval.OneMinute
-                        ? state.OneMinute
-                        : state.OneHour;
+                    var buf = SelectBuffer(state, payload.Interval);
+                    if (buf is null) continue;
                     buf.Upsert(payload);
                 }
             }
@@ -235,6 +318,16 @@ public sealed class MarketIndicatorService : IMarketIndicatorService, IHostedSer
 
             await WarmupOneAsync(marketData, symbol, KlineInterval.OneMinute, OneMinuteBufferCapacity, ct);
             await WarmupOneAsync(marketData, symbol, KlineInterval.OneHour, OneHourBufferCapacity, ct);
+            // Loop 23 blocker fix (BLOCKER-1): Binance REST /api/v3/klines does NOT
+            // support interval=30s (only WS streams do). Calling it returns 400.
+            // 30s buffer fills from the live WS consumer loop below; MicroScalper
+            // evaluator skip-returns while TryGetMicroScalperSnapshot is null
+            // (~10 min until 21-bar threshold, accepted trade-off).
+            _logger.LogInformation(
+                "MarketIndicator warmup {Symbol} {Interval}: REST backfill skipped (Binance " +
+                "does not support 30s on REST); WS stream will accumulate bars (~10 min to reach " +
+                "21-bar threshold)",
+                symbol, KlineInterval.ThirtySeconds);
 
             // ADR-0016 §16.9.6 — emit per-symbol warmup completion marker.
             await MaybePublishWarmupAsync(symbol, ct);
@@ -347,7 +440,14 @@ public sealed class MarketIndicatorService : IMarketIndicatorService, IHostedSer
 
             lock (state.SyncRoot)
             {
-                var buf = interval == KlineInterval.OneMinute ? state.OneMinute : state.OneHour;
+                var buf = SelectBuffer(state, interval);
+                if (buf is null)
+                {
+                    _logger.LogWarning(
+                        "Unsupported warmup interval {Interval} for {Symbol}; skipped",
+                        interval, symbol);
+                    return;
+                }
                 foreach (var bar in bars)
                 {
                     var payload = new WsKlinePayload(
@@ -414,6 +514,8 @@ public sealed class MarketIndicatorService : IMarketIndicatorService, IHostedSer
         public object SyncRoot { get; } = new();
         public IndicatorRollingBuffer OneMinute { get; } = new(OneMinuteBufferCapacity);
         public IndicatorRollingBuffer OneHour { get; } = new(OneHourBufferCapacity);
+        // ADR-0018 §18.11 — 30sn bar buffer for MicroScalper path.
+        public IndicatorRollingBuffer ThirtySecond { get; } = new(ThirtySecondBufferCapacity);
 
         // ADR-0016 §16.9.6 — one-shot latch: when warmup budget crosses threshold
         // we publish IndicatorWarmupCompletedEvent exactly once per symbol.

@@ -10,13 +10,16 @@ namespace BinanceBot.Infrastructure.Trading.Paper;
 
 /// <summary>
 /// Deterministic paper-fill engine (ADR-0008 §8.4 + docs/research/paper-fill-research.md).
-/// VIP0 0.1% taker commission, BUY commission in base, SELL commission in quote.
+/// VIP0 0.1% taker commission (ADR-0018 §18.12 BNB-discount toggle ile %0.075),
+/// BUY commission in base, SELL commission in quote.
 /// MARKET orders walk depth asks (BUY) / bids (SELL) — with bookTicker single-level fallback.
 /// Per ADR-0011 §11.5 a fixed proportional slippage is applied per fill leg.
+///
+/// ADR-0018 §18.12 — fee hesabı <see cref="PaperFeeSimulator"/> üzerinden alınır.
+/// Testnet'in <c>commission=0</c> dönüşü nedeniyle internal sim zorunludur.
 /// </summary>
 public sealed class PaperFillSimulator : IPaperFillSimulator
 {
-    private const decimal TakerFeeRate = 0.001m; // VIP0 0.1%, no BNB discount (V1)
     private static long _virtualTradeCounter;
 
     private readonly ILogger<PaperFillSimulator> _logger;
@@ -160,10 +163,14 @@ public sealed class PaperFillSimulator : IPaperFillSimulator
         }
 
         // ---- STEP 5: Commission + RegisterFill ---------------------------------------
+        // ADR-0018 §18.12 — BNB discount toggle is honoured via PaperFeeSimulator.
+        // BUY commission is in base asset, SELL in quote, but the simulated rate
+        // (0.10% or 0.075%) is identical; the asset/denomination is purely bookkeeping.
         decimal realizedCash = 0m;
         foreach (var f in fills)
         {
-            var (commission, commissionAsset) = ComputeCommission(order.Side, f.Price, f.Quantity, instrument);
+            var (commission, commissionAsset) = ComputeCommission(
+                order.Side, f.Price, f.Quantity, instrument, _options.UseBnbFeeDiscount);
 
             var tradeId = Interlocked.Increment(ref _virtualTradeCounter);
             order.RegisterFill(tradeId, f.Price, f.Quantity, commission, commissionAsset, now);
@@ -200,17 +207,28 @@ public sealed class PaperFillSimulator : IPaperFillSimulator
     }
 
     private static (decimal Commission, string Asset) ComputeCommission(
-        OrderSide side, decimal price, decimal quantity, Instrument instrument)
+        OrderSide side,
+        decimal price,
+        decimal quantity,
+        Instrument instrument,
+        bool bnbDiscount)
     {
+        // ADR-0018 §18.12 — commission uses the shared PaperFeeSimulator which
+        // honours the BNB discount toggle (0.10% → 0.075%). Side-specific asset
+        // denomination (BUY: base, SELL: quote) is kept so the OrderFill ledger
+        // stays consistent with mainnet fill report shape.
+        var notional = price * quantity;
         if (side == OrderSide.Buy)
         {
-            // Commission in base asset
-            var commission = quantity * TakerFeeRate;
-            return (commission, instrument.BaseAsset);
+            // Commission in base asset — we charge the fee against the notional
+            // then express the quantity equivalent (commission / price).
+            var quoteFee = PaperFeeSimulator.CalculateCommission(notional, bnbDiscount);
+            var baseCommission = price > 0m ? quoteFee / price : 0m;
+            return (baseCommission, instrument.BaseAsset);
         }
         else
         {
-            var commission = price * quantity * TakerFeeRate;
+            var commission = PaperFeeSimulator.CalculateCommission(notional, bnbDiscount);
             return (commission, instrument.QuoteAsset);
         }
     }

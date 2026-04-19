@@ -45,7 +45,6 @@
     --accent-glow: rgba(99, 102, 241, 0.35);
 
     /* Gradients */
-    --grad-hero: linear-gradient(135deg, #1e293b 0%, #0f172a 55%, #0a0e1a 100%);
     --grad-card: linear-gradient(160deg, rgba(99, 102, 241, 0.08), rgba(6, 182, 212, 0.04) 60%, transparent);
     --grad-good: linear-gradient(135deg, rgba(16, 185, 129, 0.22), rgba(16, 185, 129, 0.04));
     --grad-bad: linear-gradient(135deg, rgba(239, 68, 68, 0.22), rgba(239, 68, 68, 0.04));
@@ -321,111 +320,33 @@ main {
 }
 
 /* ============================================================
- * HERO CARD — big KPI
+ * PORTFOLIO GRID — 7 KPI kartı + snowball chart yan yana
+ * Loop 23: hero kaldırıldı, portföy KPI'leri normal kart grid'inde.
  * ============================================================ */
 
-.hero {
-    background: var(--grad-hero);
-    border: 1px solid var(--border-1);
-    border-radius: var(--r-xl);
-    padding: var(--sp-3) var(--sp-5);
-    position: relative;
-    overflow: hidden;
-    margin-bottom: var(--sp-6);
-    box-shadow: var(--shadow-2);
-}
-
-.hero::before {
-    content: "";
-    position: absolute;
-    inset: 0;
-    background: radial-gradient(circle at 85% 20%, rgba(99, 102, 241, 0.22), transparent 50%);
-    pointer-events: none;
-}
-
-/* Yavaş kayan gradient shine — hero'ya canlılık. */
-.hero::after {
-    content: "";
-    position: absolute;
-    inset: -2px;
-    background: linear-gradient(115deg,
-        transparent 25%,
-        rgba(99, 102, 241, 0.07) 45%,
-        rgba(6, 182, 212, 0.09) 55%,
-        transparent 75%);
-    background-size: 250% 100%;
-    animation: heroShine 9s linear infinite;
-    pointer-events: none;
-}
-@keyframes heroShine {
-    0%   { background-position: 200% 0; }
-    100% { background-position: -100% 0; }
-}
-
-.hero-grid {
-    position: relative;
-    z-index: 1;
+.portfolio-grid {
     display: grid;
-    grid-template-columns: 1.4fr 1fr 1fr;
-    gap: var(--sp-6);
-    align-items: center;
-}
-@media (max-width: 860px) {
-    .hero-grid { grid-template-columns: 1fr; }
+    grid-template-columns: minmax(0, 1fr) 340px;
+    gap: var(--sp-4);
+    align-items: stretch;
 }
 
-.hero-label {
-    font-size: 11.5px;
-    font-weight: 600;
-    color: var(--fg-3);
-    text-transform: uppercase;
-    letter-spacing: 0.12em;
-    margin-bottom: var(--sp-1);
+.portfolio-kpis {
+    /* 7 kart, responsive: 4 → 3 → 2 → 1 */
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
 }
 
-.hero-value {
-    font-size: 23px;
-    font-weight: 700;
-    letter-spacing: -0.02em;
-    font-variant-numeric: tabular-nums;
-    line-height: 1.1;
+@media (max-width: 1180px) {
+    .portfolio-grid {
+        grid-template-columns: 1fr;
+    }
 }
 
-.hero-value .animated-number { font-size: inherit; }
-
-.hero-sub {
-    margin-top: 4px;
-    font-size: 11px;
-    color: var(--fg-3);
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    flex-wrap: wrap;
+.portfolio-kpis .card-value {
+    font-size: 22px;
+    line-height: 1.15;
 }
-
-.hero-sub .badge { font-size: 10.5px; padding: 2px 7px; }
-
-.hero-side {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-}
-
-.hero-side .val {
-    font-size: 23px;
-    font-weight: 700;
-    font-variant-numeric: tabular-nums;
-    letter-spacing: -0.02em;
-    color: var(--fg-0);
-    line-height: 1.1;
-}
-
-.hero-side .val .animated-number { font-size: inherit; }
-
-.hero-side .muted { font-size: 11px; }
-
-.hero-side .val.cash-zero { color: var(--warn); }
-.hero-side .cash-limit-badge { margin-top: 4px; }
+.portfolio-kpis .card-value .animated-number { font-size: inherit; }
 
 /* ============================================================
  * CARD — generic card + grid
@@ -1447,3 +1368,307 @@ main {
 .text-right { text-align: right; }
 .text-center { text-align: center; }
 .hidden { display: none !important; }
+
+/* ============================================================
+ * LIVE TRADE FEED — son kapalı işlemler, üstten kayar
+ * ============================================================ */
+
+.live-trade-feed {
+    display: flex;
+    flex-direction: column;
+}
+
+.live-trade-list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--sp-2);
+    position: relative;
+}
+
+.live-trade-row {
+    display: grid;
+    grid-template-columns: minmax(140px, 1.2fr) minmax(220px, 1.6fr) minmax(110px, 0.9fr) minmax(120px, 1fr);
+    gap: var(--sp-3);
+    align-items: center;
+    padding: var(--sp-3) var(--sp-4);
+    background: var(--bg-card);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+    border: 1px solid var(--border-1);
+    border-radius: var(--r-md);
+    transition: background var(--t-fast), border-color var(--t-fast), transform var(--t-fast);
+}
+
+.live-trade-row:hover {
+    background: var(--bg-card-hover);
+    border-color: rgba(99, 102, 241, 0.35);
+    transform: translateX(2px);
+}
+
+.ltr-left {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-3);
+    min-width: 0;
+}
+
+.ltr-sym {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+}
+
+.ltr-sym-name {
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--fg-0);
+    letter-spacing: -0.01em;
+}
+
+.ltr-sym .badge {
+    font-size: 10px;
+    padding: 1px 7px;
+    width: fit-content;
+}
+
+.ltr-prices {
+    display: grid;
+    grid-template-columns: 1fr 20px 1fr;
+    align-items: center;
+    gap: var(--sp-2);
+}
+
+.ltr-price-col {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+}
+
+.ltr-k {
+    font-size: 10.5px;
+    color: var(--fg-4);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+}
+
+.ltr-v {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--fg-1);
+    font-variant-numeric: tabular-nums;
+}
+
+.ltr-arrow {
+    text-align: center;
+    color: var(--fg-4);
+    font-size: 14px;
+    font-weight: 700;
+}
+
+.ltr-pnl {
+    font-size: 16px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.01em;
+    text-align: right;
+}
+
+.ltr-meta {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 2px;
+    font-size: 12px;
+    color: var(--fg-3);
+    min-width: 0;
+}
+
+.ltr-duration {
+    font-size: 12.5px;
+    color: var(--fg-2);
+    font-weight: 600;
+}
+
+@media (max-width: 720px) {
+    .live-trade-row {
+        grid-template-columns: 1fr 1fr;
+        grid-template-rows: auto auto;
+        gap: var(--sp-2) var(--sp-3);
+    }
+    .ltr-prices { grid-column: 1 / -1; }
+    .ltr-meta { align-items: flex-end; }
+}
+
+/* Transition-group animasyonu — yeni trade üstten kayarak girer */
+.trade-slide-enter-active {
+    transition: all 380ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.trade-slide-leave-active {
+    transition: all 250ms cubic-bezier(0.4, 0, 0.2, 1);
+    position: absolute;
+    width: 100%;
+}
+.trade-slide-enter-from {
+    opacity: 0;
+    transform: translateY(-22px) scale(0.98);
+    box-shadow: 0 0 0 1px rgba(99, 102, 241, 0.4),
+                0 8px 24px rgba(99, 102, 241, 0.2);
+}
+.trade-slide-leave-to {
+    opacity: 0;
+    transform: translateY(14px);
+}
+.trade-slide-move {
+    transition: transform 380ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* ============================================================
+ * TRADE COUNTER — saat-başı hedef vs gerçek
+ * ============================================================ */
+
+.trade-counter {
+    background: var(--bg-card);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+    border: 1px solid var(--border-1);
+    border-radius: var(--r-lg);
+    padding: var(--sp-4) var(--sp-5);
+    display: flex;
+    flex-direction: column;
+    gap: var(--sp-3);
+}
+
+.tc-top {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: var(--sp-4);
+    flex-wrap: wrap;
+}
+
+.tc-current {
+    font-size: 36px;
+    font-weight: 800;
+    font-variant-numeric: tabular-nums;
+    color: var(--fg-0);
+    letter-spacing: -0.03em;
+    line-height: 1;
+    display: flex;
+    align-items: baseline;
+    gap: var(--sp-2);
+}
+
+.tc-current .animated-number {
+    font-size: inherit;
+}
+
+.tc-of {
+    font-size: 20px;
+    font-weight: 600;
+    color: var(--fg-3);
+    letter-spacing: -0.02em;
+}
+
+.tc-state {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 4px;
+}
+
+.tc-bar {
+    position: relative;
+    height: 10px;
+    background: rgba(255, 255, 255, 0.05);
+    border-radius: 999px;
+    overflow: hidden;
+    border: 1px solid var(--border-0);
+}
+
+.tc-bar-fill {
+    height: 100%;
+    border-radius: 999px;
+    transition: width 600ms cubic-bezier(0.4, 0, 0.2, 1), background 300ms;
+    background: linear-gradient(90deg, var(--accent), var(--accent-3));
+    position: relative;
+    z-index: 1;
+}
+
+.tc-bar-fill.good { background: linear-gradient(90deg, var(--good), var(--good-2)); }
+.tc-bar-fill.warn { background: linear-gradient(90deg, var(--warn), var(--warn-2)); }
+.tc-bar-fill.bad  { background: linear-gradient(90deg, var(--bad),  var(--bad-2)); }
+
+/* Hedef çizgisi (%100 konumunda — bar kenarı) */
+.tc-bar-target {
+    position: absolute;
+    top: -3px;
+    bottom: -3px;
+    right: 0;
+    width: 2px;
+    background: rgba(255, 255, 255, 0.35);
+    z-index: 2;
+    pointer-events: none;
+}
+
+.tc-foot {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: var(--sp-3);
+    flex-wrap: wrap;
+}
+
+/* ============================================================
+ * SNOWBALL CHART — kartopu mini area chart
+ * ============================================================ */
+
+.snowball-card {
+    display: flex;
+    flex-direction: column;
+    gap: var(--sp-3);
+    min-height: 100%;
+}
+
+.snowball-svg-wrap {
+    position: relative;
+    flex: 1 1 auto;
+    min-height: 140px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.snowball-svg {
+    width: 100%;
+    height: 140px;
+    display: block;
+}
+
+.snowball-empty {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+}
+
+.snowball-foot {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: var(--sp-3);
+    border-top: 1px solid var(--border-0);
+    padding-top: var(--sp-3);
+}
+
+.snowball-foot .kv .k {
+    font-size: 10.5px;
+}
+.snowball-foot .kv .v {
+    font-size: 13px;
+}
+
+.snowball-good { border-color: rgba(16, 185, 129, 0.25); }
+.snowball-bad  { border-color: rgba(239, 68, 68, 0.25); }
