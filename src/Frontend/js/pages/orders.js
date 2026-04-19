@@ -4,6 +4,7 @@ import { createApp, ref, computed } from "vue";
 import { api } from "../api.js";
 import { fmt } from "../format.js";
 import { Sidebar, ErrorBanner, usePolling } from "../ui.js";
+import { SymbolLogo } from "../components/symbolLogo.js";
 
 const STATUS_FILTERS = [
     { id: "all",       label: "Tümü" },
@@ -14,7 +15,7 @@ const STATUS_FILTERS = [
 ];
 
 const App = {
-    components: { Sidebar, ErrorBanner },
+    components: { Sidebar, ErrorBanner, SymbolLogo },
     template: `
         <div class="app">
             <Sidebar active="orders" />
@@ -50,7 +51,7 @@ const App = {
                     <div v-for="o in visible" :key="o.clientOrderId" class="trade-card fade-in">
                         <div class="t-head">
                             <div class="trade-sym">
-                                <span class="sym-dot">{{ fmt.baseAsset(o.symbol).slice(0,3) }}</span>
+                                <SymbolLogo :symbol="o.symbol" :size="28" />
                                 <span>{{ o.symbol }}</span>
                             </div>
                             <div class="row gap-2">

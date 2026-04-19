@@ -4,15 +4,18 @@
 import { ref, onMounted, onBeforeUnmount } from "vue";
 import { api } from "../api.js";
 import { fmt } from "../format.js";
+import { SymbolLogo } from "./symbolLogo.js";
 
 const DEFAULT_SYMBOLS = ["BTCUSDT", "ETHUSDT", "BNBUSDT", "XRPUSDT", "SOLUSDT", "DOGEUSDT"];
 
 export const PriceTicker = {
+    components: { SymbolLogo },
     template: `
         <div class="price-ticker" v-if="items.length > 0">
             <div class="price-ticker-track">
                 <div class="price-ticker-group" v-for="g in 2" :key="g">
                     <div v-for="(t, i) in items" :key="g + '-' + i" class="price-ticker-item">
+                        <SymbolLogo :symbol="t.rawSymbol" :size="18" />
                         <span class="pt-sym">{{ t.sym }}</span>
                         <span class="pt-price tabular-nums">{{ fmt.price(t.price) }}</span>
                         <span class="pt-pct tabular-nums" :class="t.pct >= 0 ? 'up' : 'down'">
@@ -57,7 +60,12 @@ export const PriceTicker = {
                 r.change24hPct ?? r.changePct24h ?? r.priceChangePercent ?? r.changePct ?? 0
             );
             if (!sym || !isFinite(price)) return null;
-            return { sym: prettySymbol(sym), price, pct: isFinite(pct) ? pct : 0 };
+            return {
+                rawSymbol: sym,
+                sym: prettySymbol(sym),
+                price,
+                pct: isFinite(pct) ? pct : 0,
+            };
         }
 
         function prettySymbol(s) {

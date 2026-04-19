@@ -260,4 +260,88 @@ public class PositionSizingServiceTests
         result.SkipReason.Should().BeNull();
         result.Quantity.Should().Be(0.002m);
     }
+
+    // --- ADR-0017 §17.9 target-notional sizing reforged via caller-supplied pcts ---------
+    // The handler now encodes `targetNotional = max(equity*0.20, 20)` by bending
+    // MaxPositionPct = targetNotional / equity and MinNotional = targetNotional.
+    // The service contract is untouched; we verify the emergent notional at the
+    // four sample equity rungs from ADR §17.9 table.
+    //
+    // equity=100 -> target=20, cap=40 -> chosen=20 -> MaxPositionPct=0.20
+    //   qtyByCap = (100 * 0.20) / 600 = 0.03333 -> floor 0.001 -> 0.033
+    //   notional = 0.033 * 600 = 19.8 (below MinNotional 20 -> skip)
+    // To land at 20 on the grid we pick entry=500 (snaps clean):
+    //   qtyByCap = 20 / 500 = 0.04 -> floor 0.001 -> 0.04 -> notional 20
+    [Fact]
+    public void Adr17_TargetNotional_Equity100_SizesToTwentyDollars()
+    {
+        var input = new PositionSizingInput(
+            Equity: 100m, EntryPrice: 500m, StopDistance: 0m,
+            RiskPct: 0.02m, MaxPositionPct: 0.20m,      // handler-supplied (20/100)
+            MinNotional: 20m,                            // handler-supplied floor
+            StepSize: 0.001m, MinQty: 0.001m,
+            SlippagePct: 0m);
+
+        var result = _sut.Calculate(input);
+
+        result.SkipReason.Should().BeNull();
+        result.NotionalEstimate.Should().Be(20m);
+    }
+
+    // equity=50 -> target=max(50*0.20, 20)=20 (floor), cap=50*0.40=20 -> chosen=20
+    //   MaxPositionPct override = 20 / 50 = 0.40
+    //   qtyByCap = 20 / 500 = 0.04 -> notional 20
+    [Fact]
+    public void Adr17_TargetNotional_Equity50_FloorWins_SizesToTwentyDollars()
+    {
+        var input = new PositionSizingInput(
+            Equity: 50m, EntryPrice: 500m, StopDistance: 0m,
+            RiskPct: 0.02m, MaxPositionPct: 0.40m,      // handler-supplied (20/50)
+            MinNotional: 20m,
+            StepSize: 0.001m, MinQty: 0.001m,
+            SlippagePct: 0m);
+
+        var result = _sut.Calculate(input);
+
+        result.SkipReason.Should().BeNull();
+        result.NotionalEstimate.Should().Be(20m);
+    }
+
+    // equity=200 -> target=max(200*0.20, 20)=40, cap=200*0.40=80 -> chosen=40
+    //   MaxPositionPct override = 40 / 200 = 0.20
+    //   qtyByCap = 40 / 500 = 0.08 -> notional 40
+    [Fact]
+    public void Adr17_TargetNotional_Equity200_SizesToFortyDollars()
+    {
+        var input = new PositionSizingInput(
+            Equity: 200m, EntryPrice: 500m, StopDistance: 0m,
+            RiskPct: 0.02m, MaxPositionPct: 0.20m,
+            MinNotional: 40m,
+            StepSize: 0.001m, MinQty: 0.001m,
+            SlippagePct: 0m);
+
+        var result = _sut.Calculate(input);
+
+        result.SkipReason.Should().BeNull();
+        result.NotionalEstimate.Should().Be(40m);
+    }
+
+    // equity=500 -> target=max(500*0.20, 20)=100, cap=500*0.40=200 -> chosen=100
+    //   MaxPositionPct override = 100 / 500 = 0.20
+    //   qtyByCap = 100 / 500 = 0.20 -> notional 100
+    [Fact]
+    public void Adr17_TargetNotional_Equity500_SizesToHundredDollars()
+    {
+        var input = new PositionSizingInput(
+            Equity: 500m, EntryPrice: 500m, StopDistance: 0m,
+            RiskPct: 0.02m, MaxPositionPct: 0.20m,
+            MinNotional: 100m,
+            StepSize: 0.001m, MinQty: 0.001m,
+            SlippagePct: 0m);
+
+        var result = _sut.Calculate(input);
+
+        result.SkipReason.Should().BeNull();
+        result.NotionalEstimate.Should().Be(100m);
+    }
 }

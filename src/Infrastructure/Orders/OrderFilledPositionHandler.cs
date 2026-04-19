@@ -67,12 +67,16 @@ public sealed class OrderFilledPositionHandler : INotificationHandler<OrderFille
                 p.Mode == order.Mode &&
                 p.Status == PositionStatus.Open, cancellationToken);
 
-        // ADR-0014 §14.5 + decision-pattern-reform.md C9 (option B): the pattern
-        // evaluator's MaxHoldBars travels in StrategySignal.ContextJson (the Order
-        // schema doesn't carry it). Look up the most recent signal for the same
-        // (symbol, strategy) within a 5-minute freshness window and decode the
-        // optional <c>maxHoldBars</c> field. Older / non-pattern strategies leave
-        // it null — Position.MaxHoldDuration stays null and time stop is inert.
+        // ADR-0014 §14.5 + ADR-0017 §17.7 + decision-pattern-reform.md C9 (option B):
+        // the evaluator's max-hold budget travels in StrategySignal.ContextJson (the
+        // Order schema doesn't carry it). Look up the most recent signal for the same
+        // (symbol, strategy) within a 5-minute freshness window and decode one of:
+        //   - <c>maxHoldMinutes</c> (ADR-0016 VWAP-EMA V2 — preferred)
+        //   - <c>maxHoldBars</c>    (ADR-0014 pattern scalping — 1 bar = 1 minute)
+        // Both alternatives are accepted so the handler is forward- and backward-
+        // compatible across the pattern -> VWAP-EMA transition (Loop 21 regression).
+        // When neither key is present Position.MaxHoldDuration stays null and the
+        // time stop branch of the monitor is inert.
         TimeSpan? maxHoldDuration = null;
         if (order.StrategyId is long sid)
         {
@@ -89,18 +93,33 @@ public sealed class OrderFilledPositionHandler : INotificationHandler<OrderFille
                 try
                 {
                     using var doc = JsonDocument.Parse(lastSignal.ContextJson);
-                    if (doc.RootElement.TryGetProperty("maxHoldBars", out var mhb)
-                        && mhb.ValueKind == JsonValueKind.Number
-                        && mhb.TryGetInt32(out var bars)
-                        && bars > 0)
+                    int? holdMinutes = null;
+
+                    // Prefer maxHoldMinutes (VWAP-EMA V2), fall back to maxHoldBars
+                    // (pattern strategies). BinanceBot 1m bars -> 1 bar = 1 minute.
+                    if (doc.RootElement.TryGetProperty("maxHoldMinutes", out var mhMin)
+                        && mhMin.ValueKind == JsonValueKind.Number
+                        && mhMin.TryGetInt32(out var minutesFromJson)
+                        && minutesFromJson > 0)
                     {
-                        // BinanceBot 1m bars — 1 bar = 1 minute.
-                        maxHoldDuration = TimeSpan.FromMinutes(bars);
+                        holdMinutes = minutesFromJson;
+                    }
+                    else if (doc.RootElement.TryGetProperty("maxHoldBars", out var mhb)
+                        && mhb.ValueKind == JsonValueKind.Number
+                        && mhb.TryGetInt32(out var barsFromJson)
+                        && barsFromJson > 0)
+                    {
+                        holdMinutes = barsFromJson;
+                    }
+
+                    if (holdMinutes is int m && m > 0)
+                    {
+                        maxHoldDuration = TimeSpan.FromMinutes(m);
                     }
                 }
                 catch (JsonException)
                 {
-                    // Non-pattern strategies' ContextJson is opaque — silent.
+                    // Non-structured ContextJson — time stop stays inert.
                 }
             }
         }

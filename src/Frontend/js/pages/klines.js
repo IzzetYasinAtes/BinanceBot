@@ -5,6 +5,7 @@ import { createChart, CrosshairMode } from "lightweight-charts";
 import { api } from "../api.js";
 import { fmt } from "../format.js";
 import { Sidebar, ErrorBanner } from "../ui.js";
+import { SymbolLogo } from "../components/symbolLogo.js";
 
 const SYMBOLS = ["BTCUSDT", "ETHUSDT", "BNBUSDT", "XRPUSDT"];
 const INTERVALS = [
@@ -40,7 +41,7 @@ function mapVolumes(bars) {
 }
 
 const App = {
-    components: { Sidebar, ErrorBanner },
+    components: { Sidebar, ErrorBanner, SymbolLogo },
     template: `
         <div class="app">
             <Sidebar active="klines" />
@@ -58,7 +59,8 @@ const App = {
                             <button v-for="s in symbols" :key="s"
                                     class="chip" :class="{ active: symbol === s }"
                                     @click="symbol = s">
-                                {{ fmt.baseAsset(s) }}
+                                <SymbolLogo :symbol="s" :size="18" />
+                                <span>{{ fmt.baseAsset(s) }}</span>
                             </button>
                         </div>
                         <div class="chip-group">

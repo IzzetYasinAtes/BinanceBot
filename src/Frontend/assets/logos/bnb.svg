@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <defs>
+    <linearGradient id="bnbGrad" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#f3ba2f"/>
+      <stop offset="100%" stop-color="#d99a19"/>
+    </linearGradient>
+  </defs>
+  <circle cx="16" cy="16" r="15" fill="url(#bnbGrad)"/>
+  <g fill="#fff">
+    <path d="M12.116 14.404L16 10.52l3.886 3.886 2.26-2.26L16 6l-6.144 6.144z"/>
+    <path d="M6 16l2.26-2.26L10.52 16l-2.26 2.26z"/>
+    <path d="M12.116 17.596L16 21.48l3.886-3.886 2.26 2.258L16 26l-6.144-6.144-.003-.003z"/>
+    <path d="M21.48 16l2.26-2.26L26 16l-2.26 2.26z"/>
+    <path d="M18.294 15.998L16 13.702l-1.697 1.697-.195.195-.402.402-.004.004 2.298 2.298 2.294-2.296z"/>
+  </g>
+</svg>
