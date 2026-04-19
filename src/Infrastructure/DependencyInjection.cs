@@ -157,6 +157,9 @@ public static class DependencyInjection
         services.AddHostedService(sp => sp.GetRequiredService<MarketIndicatorService>());
 
         services.AddSingleton<IStrategyEvaluator, VwapEmaStrategyEvaluator>();
+        // ADR-0018 §18.11 — MicroScalper evaluator registered alongside the deprecated
+        // VwapEma evaluator; registry dispatches by StrategyType enum value.
+        services.AddSingleton<IStrategyEvaluator, MicroScalperVwapEma30sEvaluator>();
         services.AddSingleton<StrategyEvaluatorRegistry>();
 
         services.AddOptions<StrategySeedOptions>()

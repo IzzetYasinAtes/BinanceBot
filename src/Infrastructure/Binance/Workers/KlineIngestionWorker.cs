@@ -23,7 +23,10 @@ public sealed class KlineIngestionWorker : BackgroundService
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        await foreach (var payload in _stream.KlineUpdates(stoppingToken))
+        // Loop 23 blocker fix (BLOCKER-2): dedicated subscriber channel so this
+        // worker and MarketIndicatorService both receive every kline envelope.
+        var reader = _stream.SubscribeKlines();
+        await foreach (var payload in reader.ReadAllAsync(stoppingToken))
         {
             try
             {

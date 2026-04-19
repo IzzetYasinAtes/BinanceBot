@@ -212,6 +212,18 @@ public sealed class KlineBackfillWorker : IHostedService
             return;
         }
 
+        // Loop 23 blocker fix (BLOCKER-1): Binance REST /api/v3/klines does NOT
+        // accept interval=30s (400 Bad Request). Guard defensively even if config
+        // regresses — 30s bars come from WS streams only.
+        if (interval == KlineInterval.ThirtySeconds)
+        {
+            _logger.LogInformation(
+                "Kline backfill {Symbol} 30s: REST skipped (Binance does not support 30s on " +
+                "REST); WS stream will populate bars",
+                symbol);
+            return;
+        }
+
         await using var scope = _scopeFactory.CreateAsyncScope();
         var marketData = scope.ServiceProvider.GetRequiredService<IBinanceMarketData>();
         var persister = scope.ServiceProvider.GetRequiredService<IKlinePersister>();

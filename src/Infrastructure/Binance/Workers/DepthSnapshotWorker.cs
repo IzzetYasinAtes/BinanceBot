@@ -37,7 +37,9 @@ public sealed class DepthSnapshotWorker : BackgroundService
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        await foreach (var diff in _stream.DepthUpdates(stoppingToken))
+        // Loop 23 blocker fix (BLOCKER-2): dedicated subscriber channel.
+        var reader = _stream.SubscribeDepth();
+        await foreach (var diff in reader.ReadAllAsync(stoppingToken))
         {
             try
             {

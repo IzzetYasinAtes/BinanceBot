@@ -192,10 +192,25 @@ public sealed class StrategySignalToOrderHandler : INotificationHandler<Strategy
             // floor equal to that target (lifted by the exchange NOTIONAL filter).
             // PositionSizingService is untouched (cleanup deferred to Loop 23 — the
             // proper fix is a dedicated TargetNotional field on the sizing input).
-            var userMinNotional = SnowballSizing.CalcMinNotional(equity); // max(equity*0.20, 20)
+            // ADR-0017 §17.9 + Loop 22 hotfix-2 — LOT_SIZE floor rounding compensation.
+            // Sizing service floors qty to stepSize; BNB 0.001 step at $625 price
+            // drops notional below the $20 target. Two separate concerns:
+            //   targetNotional: what qty calculation should aim for (user target + buffer)
+            //   effectiveMinNotional: floor check threshold (user target, buffer not counted)
+            // This way floor rounding lands between target and target+buffer,
+            // but the min-notional skip check uses the strict target.
+            var userTarget = SnowballSizing.CalcMinNotional(equity); // max(equity*0.20, 20)
             var hardCap = equity * risk.MaxPositionSizePct;
-            var chosenNotional = Math.Min(userMinNotional, hardCap);
-            var effectiveMinNotional = Math.Max(chosenNotional, instrument.MinNotional);
+            var lotSizeBufferUsd = instrument.StepSize > 0m
+                ? instrument.StepSize * entry
+                : 0m;
+            var targetForSizing = Math.Min(userTarget + lotSizeBufferUsd, hardCap);
+            // Floor check uses userTarget (strict), instrument MinNotional lifts if higher.
+            var effectiveMinNotional = Math.Max(
+                Math.Min(userTarget, hardCap),
+                instrument.MinNotional);
+            var chosenNotional = targetForSizing; // for logging + MaxPositionPct
+            _ = chosenNotional;
             var effectiveMaxPositionPct = equity > 0m
                 ? chosenNotional / equity
                 : risk.MaxPositionSizePct;

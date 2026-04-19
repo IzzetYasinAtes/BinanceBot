@@ -518,12 +518,11 @@ public class StrategySignalToOrderHandlerTests
     }
 
     /// <summary>
-    /// ADR-0017 §17.9: the handler must hand the sizing service a
-    /// <c>MaxPositionPct</c> that maps the target notional to exactly 20% of
-    /// equity (with a $20 floor when equity &lt; 100). For equity=$100 that
-    /// collapses to MaxPositionPct=0.20 and MinNotional=$20 — the cap branch of
-    /// <c>PositionSizingService</c> then sizes to the target, not the legacy
-    /// $40 hard-cap.
+    /// ADR-0017 §17.9 + ADR-0018 §18.10: the handler must hand the sizing service
+    /// a <c>MaxPositionPct</c> that maps the target notional to <c>max(equity × 1%, $5.10)</c>.
+    /// For equity=$100 that collapses to MinNotional=$5.10 (floor) and
+    /// MaxPositionPct ≈ 0.054 — the cap branch of <c>PositionSizingService</c>
+    /// then sizes to the target, not the legacy $40 hard-cap.
     /// </summary>
     [Fact]
     public async Task Long_PassesTargetNotionalAsMaxPositionPctAndMinNotional_ToSizingService()
@@ -534,7 +533,7 @@ public class StrategySignalToOrderHandlerTests
         PositionSizingInput? captured = null;
         sizing.Setup(s => s.Calculate(It.IsAny<PositionSizingInput>()))
             .Callback<PositionSizingInput>(i => captured = i)
-            .Returns(new PositionSizingResult(Quantity: SizedQty, NotionalEstimate: 20m, SkipReason: null));
+            .Returns(new PositionSizingResult(Quantity: SizedQty, NotionalEstimate: 5.10m, SkipReason: null));
 
         mediator.Setup(m => m.Send(It.IsAny<PlaceOrderCommand>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(Result.Success(new PlacedOrderDto("x", "BTCUSDT", "Filled", SizedQty, null, TradingMode.Paper)));
@@ -547,17 +546,18 @@ public class StrategySignalToOrderHandlerTests
             CancellationToken.None);
 
         captured.Should().NotBeNull();
-        // equity=100 -> target=max(100*0.20, 20)=20, cap=100*0.40=40, notional=min(20,40)=20
-        //   MaxPositionPct override = 20 / 100 = 0.20
-        //   MinNotional            = max(20, instrument.MinNotional=5) = 20
-        captured!.MaxPositionPct.Should().Be(0.20m);
-        captured.MinNotional.Should().Be(20m);
+        // ADR-0018 §18.10 — userTarget = max(100*0.01, 5.10) = 5.10 (floor),
+        // hardCap = 100*0.40 = 40, buffer = 0.00001*29500 = 0.295 ≈ 0.30
+        //   targetForSizing = min(5.10+0.30, 40) = 5.40  → MaxPositionPct = 5.40/100 = 0.054
+        //   effectiveMinNotional = max(min(5.10, 40), instrument.MinNotional=5) = 5.10
+        captured!.MaxPositionPct.Should().BeApproximately(0.054m, 0.001m);
+        captured.MinNotional.Should().Be(5.10m);
     }
 
     /// <summary>
-    /// ADR-0017 §17.9: equity=$50 -> target=max(50*0.20, 20)=$20 (floor),
-    /// cap=50*0.40=$20 -> chosen=$20 -> MaxPositionPct=20/50=0.40.
-    /// Floor wins when equity is tiny.
+    /// ADR-0018 §18.10: equity=$50 → target=max(50*0.01, 5.10)=$5.10 (floor),
+    /// cap=50*0.40=$20 → chosen=$5.10 (+0.30 buffer = $5.40 for sizing) →
+    /// MaxPositionPct ≈ 0.108. Floor wins when equity is tiny.
     /// </summary>
     [Fact]
     public async Task Long_SizingOverride_Equity50_FloorWins()
@@ -568,7 +568,7 @@ public class StrategySignalToOrderHandlerTests
         PositionSizingInput? captured = null;
         sizing.Setup(s => s.Calculate(It.IsAny<PositionSizingInput>()))
             .Callback<PositionSizingInput>(i => captured = i)
-            .Returns(new PositionSizingResult(SizedQty, 20m, null));
+            .Returns(new PositionSizingResult(SizedQty, 5.10m, null));
 
         mediator.Setup(m => m.Send(It.IsAny<PlaceOrderCommand>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(Result.Success(new PlacedOrderDto("x", "BTCUSDT", "Filled", SizedQty, null, TradingMode.Paper)));
@@ -580,13 +580,15 @@ public class StrategySignalToOrderHandlerTests
             1, "BTCUSDT", StrategySignalDirection.Long, DateTimeOffset.UtcNow, 29500m),
             CancellationToken.None);
 
-        captured!.MinNotional.Should().Be(20m);
-        captured.MaxPositionPct.Should().Be(0.40m); // 20 / 50
+        captured!.MinNotional.Should().Be(5.10m);
+        // target=5.10+0.30=5.40 → 5.40/50 = 0.108
+        captured.MaxPositionPct.Should().BeApproximately(0.108m, 0.001m);
     }
 
     /// <summary>
-    /// ADR-0017 §17.9: equity=$200 -> target=max(200*0.20,20)=$40, cap=200*0.40=$80
-    /// -> chosen=$40 -> MaxPositionPct=40/200=0.20. Snowball growth.
+    /// ADR-0018 §18.10: equity=$200 → target=max(200*0.01, 5.10)=$5.10 (floor),
+    /// cap=200*0.40=$80 → chosen=$5.10 → MaxPositionPct ≈ 0.027. Still in the
+    /// floor branch — snowball growth kicks in at equity=$510.
     /// </summary>
     [Fact]
     public async Task Long_SizingOverride_Equity200_PctFraction()
@@ -597,7 +599,7 @@ public class StrategySignalToOrderHandlerTests
         PositionSizingInput? captured = null;
         sizing.Setup(s => s.Calculate(It.IsAny<PositionSizingInput>()))
             .Callback<PositionSizingInput>(i => captured = i)
-            .Returns(new PositionSizingResult(SizedQty, 40m, null));
+            .Returns(new PositionSizingResult(SizedQty, 5.10m, null));
 
         mediator.Setup(m => m.Send(It.IsAny<PlaceOrderCommand>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(Result.Success(new PlacedOrderDto("x", "BTCUSDT", "Filled", SizedQty, null, TradingMode.Paper)));
@@ -609,24 +611,26 @@ public class StrategySignalToOrderHandlerTests
             1, "BTCUSDT", StrategySignalDirection.Long, DateTimeOffset.UtcNow, 29500m),
             CancellationToken.None);
 
-        captured!.MinNotional.Should().Be(40m);
-        captured.MaxPositionPct.Should().Be(0.20m);
+        captured!.MinNotional.Should().Be(5.10m);
+        // target=5.10+0.30=5.40 → 5.40/200 = 0.027
+        captured.MaxPositionPct.Should().BeApproximately(0.027m, 0.001m);
     }
 
     /// <summary>
-    /// ADR-0017 §17.9: equity=$500 -> target=max(500*0.20,20)=$100, cap=500*0.40=$200
-    /// -> chosen=$100. MinNotional=100, MaxPositionPct=100/500=0.20.
+    /// ADR-0018 §18.10: equity=$5000 → target=max(5000*0.01, 5.10)=$50 (pct branch
+    /// active), cap=5000*0.40=$2000 → chosen=$50 → MaxPositionPct ≈ 0.010.
+    /// Full snowball growth at mature equity.
     /// </summary>
     [Fact]
-    public async Task Long_SizingOverride_Equity500_KeepsPctAtTwentyPercent()
+    public async Task Long_SizingOverride_Equity5000_KeepsPctAtOnePercent()
     {
-        var (scopeFactory, mediator, sizing, _, db) = BuildHarness(equity: 500m);
+        var (scopeFactory, mediator, sizing, _, db) = BuildHarness(equity: 5000m);
         RaiseHardCapToLoop14Default(db);
 
         PositionSizingInput? captured = null;
         sizing.Setup(s => s.Calculate(It.IsAny<PositionSizingInput>()))
             .Callback<PositionSizingInput>(i => captured = i)
-            .Returns(new PositionSizingResult(SizedQty, 100m, null));
+            .Returns(new PositionSizingResult(SizedQty, 50m, null));
 
         mediator.Setup(m => m.Send(It.IsAny<PlaceOrderCommand>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(Result.Success(new PlacedOrderDto("x", "BTCUSDT", "Filled", SizedQty, null, TradingMode.Paper)));
@@ -638,7 +642,8 @@ public class StrategySignalToOrderHandlerTests
             1, "BTCUSDT", StrategySignalDirection.Long, DateTimeOffset.UtcNow, 29500m),
             CancellationToken.None);
 
-        captured!.MinNotional.Should().Be(100m);
-        captured.MaxPositionPct.Should().Be(0.20m);
+        captured!.MinNotional.Should().Be(50m);
+        // target=50+0.30=50.30 → 50.30/5000 = 0.01006
+        captured.MaxPositionPct.Should().BeApproximately(0.01006m, 0.001m);
     }
 }

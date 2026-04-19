@@ -46,14 +46,11 @@ public sealed record PortfolioSummaryDto(
 public sealed class GetPortfolioSummaryQueryHandler
     : IRequestHandler<GetPortfolioSummaryQuery, Result<PortfolioSummaryDto>>
 {
-    /// <summary>
-    /// Paper fee assumption mirrors PaperFillSimulator (0.10% taker). Live modes
-    /// will eventually surface the real OrderFill.Commission column once account
-    /// sync ships; today we still derive a uniform proxy from CumulativeQuoteQty
-    /// to keep the dashboard consistent across modes.
-    /// </summary>
-    private const decimal CommissionRate = 0.001m;
-
+    // ADR-0018 + Loop 23 review fix — Commission metriği artık `Orders.Commission`
+    // sütunundan SUM ediliyor. PaperFeeSimulator BNB discount durumuna göre
+    // (0.075% veya 0.10%) her fill'de gerçek commission yazıyor, o yüzden
+    // hardcoded 0.10% proxy kaldırıldı. Reviewer BLOCKER: BNB discount aktifken
+    // UI %33 yanlış gösteriyordu.
     private readonly IApplicationDbContext _db;
     private readonly IClock _clock;
 
@@ -129,14 +126,15 @@ public sealed class GetPortfolioSummaryQueryHandler
                      && p.ClosedAt >= todayStart)
             .SumAsync(p => (decimal?)p.RealizedPnl, ct) ?? 0m;
 
-        // Commission proxy — uniform 0.10% on every executed quote-quantity for
-        // the mode. Paper fills already include this in RealizedPnl, so we
-        // surface it as a transparency metric, not a second deduction.
-        var executedQuote = await _db.Orders
-            .AsNoTracking()
-            .Where(o => o.Mode == mode && o.CumulativeQuoteQty > 0m)
-            .SumAsync(o => (decimal?)o.CumulativeQuoteQty, ct) ?? 0m;
-        var totalCommission = executedQuote * CommissionRate;
+        // Commission total — sum from OrderFills.Commission joined with Orders by
+        // mode. PaperFeeSimulator writes the real per-fill commission (BNB
+        // discount 0.075% or standard 0.10%) so SUM surfaces the actual cost.
+        var totalCommission = await (
+            from f in _db.OrderFills.AsNoTracking()
+            join o in _db.Orders.AsNoTracking() on f.OrderId equals o.Id
+            where o.Mode == mode
+            select (decimal?)f.Commission
+        ).SumAsync(ct) ?? 0m;
 
         var netPnl = realizedAllTime + unrealizedTotal;
         var netPct = balance.StartingBalance > 0m

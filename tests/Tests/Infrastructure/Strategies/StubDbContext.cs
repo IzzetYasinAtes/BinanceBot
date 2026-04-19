@@ -91,9 +91,15 @@ internal sealed class StubDbContext : DbContext, IApplicationDbContext
             b.Ignore(x => x.DomainEvents);
         });
 
+        // Loop 23 ADR-0018 — Portfolio commission SUM reads from OrderFills,
+        // so the Portfolio query test harness needs the DbSet mapped.
+        modelBuilder.Entity<OrderFill>(b =>
+        {
+            b.HasKey(x => x.Id);
+        });
+
         modelBuilder.Ignore<Kline>();
         modelBuilder.Ignore<OrderBookSnapshot>();
-        modelBuilder.Ignore<OrderFill>();
         modelBuilder.Ignore<Strategy>();
         modelBuilder.Ignore<StrategySignal>();
         modelBuilder.Ignore<BacktestRun>();

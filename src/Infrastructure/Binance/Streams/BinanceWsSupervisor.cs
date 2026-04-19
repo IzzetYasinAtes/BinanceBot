@@ -238,21 +238,21 @@ public sealed class BinanceWsSupervisor : BackgroundService, IWsReadinessProbe
                 {
                     if (BinanceStreamParser.TryParseKline(data, receivedAt, out var kline))
                     {
-                        _bus.KlineWriter.TryWrite(kline);
+                        _bus.PublishKline(kline);
                     }
                 }
                 else if (streamName.Contains("@bookTicker", StringComparison.OrdinalIgnoreCase))
                 {
                     if (BinanceStreamParser.TryParseBookTicker(data, receivedAt, out var bt))
                     {
-                        _bus.BookTickerWriter.TryWrite(bt);
+                        _bus.PublishBookTicker(bt);
                     }
                 }
                 else if (streamName.Contains("@depth", StringComparison.OrdinalIgnoreCase))
                 {
                     if (BinanceStreamParser.TryParseDepthDiff(data, receivedAt, out var depth))
                     {
-                        _bus.DepthWriter.TryWrite(depth);
+                        _bus.PublishDepth(depth);
                     }
                 }
             }

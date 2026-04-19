@@ -1,7 +1,8 @@
-// Ana Panel — Hero KPI + sembol carousel + son işlemler + hızlı metrikler.
-// Polling: portfolio/summary + positions + strategies/signals/latest.
+// Ana Panel — Portföy Durumu (7 kart) + canlı trade feed + saat-başı sayaç
+// + kartopu mini chart + sembol carousel + son işlemler.
+// Loop 23: hero tamamen kaldırıldı, 3 portföy KPI'si normal kart grid'ine taşındı.
 
-import { createApp, computed } from "vue";
+import { createApp, computed, ref, watch } from "vue";
 import { api } from "../api.js";
 import { fmt } from "../format.js";
 import { Sidebar, ErrorBanner, usePolling } from "../ui.js";
@@ -9,12 +10,20 @@ import { SymbolCarousel } from "../components/symbolCarousel.js";
 import { AnimatedNumber } from "../components/animatedNumber.js";
 import { PriceTicker } from "../components/priceTicker.js";
 import { SymbolLogo } from "../components/symbolLogo.js";
+import { LiveTradeFeed } from "../components/liveTradeFeed.js";
+import { TradeCounter } from "../components/tradeCounter.js";
+import { SnowballChart } from "../components/snowballChart.js";
 
 const SYMBOLS = ["BTCUSDT", "ETHUSDT", "BNBUSDT", "XRPUSDT"];
 const TICKER_SYMBOLS = ["BTCUSDT", "ETHUSDT", "BNBUSDT", "XRPUSDT", "SOLUSDT", "DOGEUSDT"];
+const HOURLY_TRADE_TARGET = 150;
+const EQUITY_HISTORY_MAX = 120; // ~10 dk @ 5s polling
 
 const App = {
-    components: { Sidebar, ErrorBanner, SymbolCarousel, AnimatedNumber, PriceTicker, SymbolLogo },
+    components: {
+        Sidebar, ErrorBanner, SymbolCarousel, AnimatedNumber, PriceTicker, SymbolLogo,
+        LiveTradeFeed, TradeCounter, SnowballChart,
+    },
     template: `
         <div class="app">
             <Sidebar active="dashboard" />
@@ -28,110 +37,141 @@ const App = {
 
                 <ErrorBanner :error="summaryPoll.error.value" />
 
-                <!-- HERO: toplam net K/Z -->
-                <section class="hero fade-in" v-if="summary">
-                    <div class="hero-grid">
-                        <div>
-                            <div class="hero-label">Toplam Net Kâr / Zarar</div>
-                            <div class="hero-value" :class="pnlClass(summary.netPnl)">
-                                <AnimatedNumber
-                                    :value="summary.netPnl"
-                                    :decimals="2"
-                                    prefix="$"
-                                    :signed="summary.netPnl !== 0"
-                                    :duration-ms="800" />
-                            </div>
-                            <div class="hero-sub">
-                                <span class="badge" :class="pctBadge(summary.netPnl)">
-                                    {{ fmt.pctFracSigned(summary.netPnlPct) }}
-                                </span>
-                                <span>başlangıç bakiyesi {{ fmt.money(summary.startingBalance) }}</span>
-                            </div>
-                        </div>
-
-                        <div class="hero-side">
-                            <div class="hero-label">Mevcut Bakiye</div>
-                            <template v-if="cashClamped">
-                                <div class="val cash-zero">Kullanılabilir: $0.00</div>
-                                <div class="cash-limit-badge">
-                                    <span class="badge bad" :title="cashTooltip">Limit aşıldı</span>
+                <!-- PORTFÖY DURUMU — 7 KPI kartı + mini snowball chart -->
+                <section class="block">
+                    <h2 class="section-title">Portföy Durumu</h2>
+                    <div class="portfolio-grid">
+                        <div class="kpi-grid portfolio-kpis">
+                            <!-- 1. Toplam Net K/Z -->
+                            <div class="card card-static">
+                                <div class="card-head">
+                                    <h3 class="card-title">Toplam Net K/Z</h3>
                                 </div>
-                                <div class="muted small mt-2">{{ cashTooltip }}</div>
-                            </template>
-                            <template v-else>
-                                <div class="val">
+                                <div class="card-value" :class="pnlClass(summary?.netPnl)">
                                     <AnimatedNumber
-                                        :value="summary.currentCash"
+                                        v-if="summary"
+                                        :value="summary.netPnl"
+                                        :decimals="2"
+                                        prefix="$"
+                                        :signed="summary.netPnl !== 0"
+                                        :duration-ms="800" />
+                                    <span v-else>—</span>
+                                </div>
+                                <div class="card-hint" v-if="summary">
+                                    <span class="badge" :class="pctBadge(summary.netPnl)">
+                                        {{ fmt.pctFracSigned(summary.netPnlPct) }}
+                                    </span>
+                                    <span class="muted" style="margin-left:6px;">
+                                        başlangıç {{ fmt.money(summary.startingBalance) }}
+                                    </span>
+                                </div>
+                            </div>
+
+                            <!-- 2. Mevcut Bakiye -->
+                            <div class="card card-static">
+                                <div class="card-head">
+                                    <h3 class="card-title">Mevcut Bakiye</h3>
+                                </div>
+                                <template v-if="cashClamped">
+                                    <div class="card-value metric-warn">$0.00</div>
+                                    <div class="card-hint">
+                                        <span class="badge bad" :title="cashTooltip">Limit aşıldı</span>
+                                    </div>
+                                </template>
+                                <template v-else>
+                                    <div class="card-value">
+                                        <AnimatedNumber
+                                            v-if="summary"
+                                            :value="summary.currentCash"
+                                            :decimals="2"
+                                            prefix="$"
+                                            :duration-ms="800" />
+                                        <span v-else>—</span>
+                                    </div>
+                                    <div class="card-hint">Gerçekleşmiş nakit</div>
+                                </template>
+                            </div>
+
+                            <!-- 3. Gerçek Özkaynak -->
+                            <div class="card card-static">
+                                <div class="card-head">
+                                    <h3 class="card-title">Gerçek Özkaynak</h3>
+                                </div>
+                                <div class="card-value">
+                                    <AnimatedNumber
+                                        v-if="summary"
+                                        :value="summary.trueEquity"
                                         :decimals="2"
                                         prefix="$"
                                         :duration-ms="800" />
+                                    <span v-else>—</span>
                                 </div>
-                                <div class="muted small mt-2">Gerçekleşmiş (nakit)</div>
-                            </template>
+                                <div class="card-hint" v-if="summary">
+                                    Açık pozisyon {{ fmt.money(summary.openPositionsValue) }}
+                                </div>
+                            </div>
+
+                            <!-- 4. İşlem Sayısı -->
+                            <div class="card card-static">
+                                <div class="card-head">
+                                    <h3 class="card-title">İşlem Sayısı</h3>
+                                </div>
+                                <div class="card-value">{{ summary ? fmt.int(summary.closedTradeCount) : '—' }}</div>
+                                <div class="card-hint">
+                                    <span class="metric-good">{{ summary?.winningTrades ?? 0 }} kazanan</span>
+                                    · <span class="metric-bad">{{ summary?.losingTrades ?? 0 }} kaybeden</span>
+                                </div>
+                            </div>
+
+                            <!-- 5. Kazanma Oranı -->
+                            <div class="card card-static">
+                                <div class="card-head">
+                                    <h3 class="card-title">Kazanma Oranı</h3>
+                                </div>
+                                <div class="card-value" :class="winRateClass">
+                                    {{ summary ? fmt.pct(summary.winRate) : '—' }}
+                                </div>
+                                <div class="card-hint">Tüm kapalı işlemler</div>
+                            </div>
+
+                            <!-- 6. Ödenen Komisyon -->
+                            <div class="card card-static">
+                                <div class="card-head">
+                                    <h3 class="card-title">Ödenen Komisyon</h3>
+                                </div>
+                                <div class="card-value metric-warn">
+                                    {{ summary ? fmt.money(summary.totalCommissionPaid) : '—' }}
+                                </div>
+                                <div class="card-hint">0.10% taker — paper</div>
+                            </div>
+
+                            <!-- 7. Açık Pozisyon -->
+                            <div class="card card-static">
+                                <div class="card-head">
+                                    <h3 class="card-title">Açık Pozisyon</h3>
+                                </div>
+                                <div class="card-value">{{ summary ? fmt.int(summary.openPositionCount) : '—' }}</div>
+                                <div class="card-hint">
+                                    MTM {{ summary ? fmt.money(summary.openPositionsValue) : '—' }}
+                                </div>
+                            </div>
                         </div>
 
-                        <div class="hero-side">
-                            <div class="hero-label">Gerçek Özkaynak</div>
-                            <div class="val">
-                                <AnimatedNumber
-                                    :value="summary.trueEquity"
-                                    :decimals="2"
-                                    prefix="$"
-                                    :duration-ms="800" />
-                            </div>
-                            <div class="muted small mt-2">
-                                Açık pozisyon değeri {{ fmt.money(summary.openPositionsValue) }}
-                            </div>
-                        </div>
+                        <!-- Kartopu mini chart — 7 kartın yanında -->
+                        <SnowballChart
+                            :equity-history="equityHistory"
+                            :starting-balance="summary?.startingBalance ?? 100"
+                            :current="summary?.trueEquity" />
                     </div>
                 </section>
-                <section class="hero" v-else>
-                    <div class="skeleton" style="height:120px"></div>
-                </section>
 
-                <!-- HIZLI METRİKLER (4 lü kart) -->
+                <!-- SAAT-BAŞI İŞLEM SAYACI — hedef 150/sa -->
                 <section class="block">
-                    <h2 class="section-title">Hızlı Metrikler</h2>
-                    <div class="kpi-grid">
-                        <div class="card card-static">
-                            <div class="card-head">
-                                <h3 class="card-title">İşlem Sayısı</h3>
-                            </div>
-                            <div class="card-value">{{ summary ? fmt.int(summary.closedTradeCount) : '—' }}</div>
-                            <div class="card-hint">
-                                <span class="metric-good">{{ summary?.winningTrades ?? 0 }} kazanan</span>
-                                · <span class="metric-bad">{{ summary?.losingTrades ?? 0 }} kaybeden</span>
-                            </div>
-                        </div>
-
-                        <div class="card card-static">
-                            <div class="card-head">
-                                <h3 class="card-title">Kazanma Oranı</h3>
-                            </div>
-                            <div class="card-value" :class="winRateClass">
-                                {{ summary ? fmt.pct(summary.winRate) : '—' }}
-                            </div>
-                            <div class="card-hint">Tüm kapalı işlemler üzerinden</div>
-                        </div>
-
-                        <div class="card card-static">
-                            <div class="card-head">
-                                <h3 class="card-title">Ödenen Komisyon</h3>
-                            </div>
-                            <div class="card-value metric-warn">
-                                {{ summary ? fmt.money(summary.totalCommissionPaid) : '—' }}
-                            </div>
-                            <div class="card-hint">0.10% taker — paper modeli</div>
-                        </div>
-
-                        <div class="card card-static">
-                            <div class="card-head">
-                                <h3 class="card-title">Açık Pozisyon</h3>
-                            </div>
-                            <div class="card-value">{{ summary ? fmt.int(summary.openPositionCount) : '—' }}</div>
-                            <div class="card-hint">Canlı MTM değeri yukarıda</div>
-                        </div>
-                    </div>
+                    <h2 class="section-title">Saat-Başı İşlem Hacmi</h2>
+                    <TradeCounter
+                        :actual-count="tradesLastHour"
+                        :target-count="hourlyTarget"
+                        :total-closed="summary?.closedTradeCount ?? 0" />
                 </section>
 
                 <!-- SEMBOL CAROUSEL -->
@@ -143,10 +183,10 @@ const App = {
                     <SymbolCarousel :symbols="symbols" :interval-ms="10000" :on-select="goKlines" />
                 </section>
 
-                <!-- SON İŞLEMLER (kart grid) -->
+                <!-- CANLI TRADE FEED — son kapalı işlemler, üstten kayar -->
                 <section class="block">
                     <h2 class="section-title">
-                        Son İşlemler
+                        Canlı İşlem Akışı
                         <a href="/positions.html" class="btn btn-ghost btn-sm">Tümünü gör →</a>
                     </h2>
 
@@ -155,7 +195,7 @@ const App = {
                     </div>
 
                     <div v-else-if="!closedPositions" class="card-grid">
-                        <div v-for="i in 3" :key="i" class="skeleton" style="height:180px; border-radius:16px"></div>
+                        <div v-for="i in 3" :key="i" class="skeleton" style="height:92px; border-radius:12px"></div>
                     </div>
 
                     <div v-else-if="closedPositions.length === 0" class="empty-illust">
@@ -182,49 +222,7 @@ const App = {
                         </div>
                     </div>
 
-                    <div v-else class="card-grid">
-                        <div v-for="p in recentClosed" :key="p.id" class="trade-card fade-in">
-                            <div class="t-head">
-                                <div class="trade-sym">
-                                    <SymbolLogo :symbol="p.symbol" :size="28" />
-                                    <span>{{ p.symbol }}</span>
-                                </div>
-                                <span class="badge" :class="p.side === 'Long' ? 'up' : 'down'">
-                                    {{ p.side === 'Long' ? 'LONG' : 'SHORT' }}
-                                </span>
-                            </div>
-                            <div class="t-body">
-                                <div class="kv">
-                                    <div class="k">Miktar</div>
-                                    <div class="v">{{ fmt.num4(p.quantity) }}</div>
-                                </div>
-                                <div class="kv">
-                                    <div class="k">Giriş</div>
-                                    <div class="v">{{ fmt.price(p.averageEntryPrice) }}</div>
-                                </div>
-                                <div class="kv">
-                                    <div class="k">Çıkış</div>
-                                    <div class="v">{{ p.exitPrice ? fmt.price(p.exitPrice) : '—' }}</div>
-                                </div>
-                                <div class="kv">
-                                    <div class="k">Süre</div>
-                                    <div class="v">{{ fmt.duration(p.openedAt, p.closedAt) }}</div>
-                                </div>
-                            </div>
-                            <div class="t-foot">
-                                <div class="kv">
-                                    <div class="k">Net K/Z</div>
-                                    <div class="pnl-big" :class="pnlClass(p.realizedPnl)">
-                                        {{ fmt.moneySigned(p.realizedPnl) }}
-                                    </div>
-                                </div>
-                                <div class="col" style="align-items:flex-end; gap:2px;">
-                                    <span class="badge closed">KAPALI</span>
-                                    <span class="muted tiny">{{ fmt.dateShort(p.closedAt) }}</span>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
+                    <LiveTradeFeed v-else :trades="recentClosed" />
                 </section>
 
             </main>
@@ -232,7 +230,7 @@ const App = {
     `,
     setup() {
         const summaryPoll = usePolling(() => api.portfolio.summary(), 5000);
-        const closedPoll  = usePolling(() => api.positions.list({ status: "Closed" }), 15000);
+        const closedPoll  = usePolling(() => api.positions.list({ status: "Closed" }), 5000);
 
         const summary = computed(() => summaryPoll.data.value);
         const closedPositions = computed(() => {
@@ -247,8 +245,35 @@ const App = {
                 const tb = new Date(a.closedAt || a.updatedAt || 0).getTime();
                 return ta - tb;
             });
-            return arr.slice(0, 6);
+            return arr.slice(0, 12);
         });
+
+        // Saat-başı closed trade sayımı — son 60 dk içinde kapanan pozisyonlar.
+        const tradesLastHour = computed(() => {
+            const arr = closedPositions.value;
+            if (!Array.isArray(arr) || arr.length === 0) return 0;
+            const threshold = Date.now() - 60 * 60 * 1000;
+            let n = 0;
+            for (const p of arr) {
+                const t = new Date(p.closedAt || p.updatedAt || 0).getTime();
+                if (isFinite(t) && t >= threshold) n++;
+            }
+            return n;
+        });
+
+        // Equity history — in-memory snapshot (backend endpoint olmayabilir, polling üzerinden build).
+        const equityHistory = ref([]);
+        watch(
+            () => summary.value?.trueEquity,
+            (eq) => {
+                if (typeof eq !== "number" || !isFinite(eq)) return;
+                equityHistory.value.push({ ts: Date.now(), equity: eq });
+                if (equityHistory.value.length > EQUITY_HISTORY_MAX) {
+                    equityHistory.value = equityHistory.value.slice(-EQUITY_HISTORY_MAX);
+                }
+            },
+            { immediate: true },
+        );
 
         const winRateClass = computed(() => {
             const wr = summary.value?.winRate;
@@ -286,6 +311,8 @@ const App = {
         return {
             summaryPoll, closedPoll,
             summary, closedPositions, recentClosed,
+            tradesLastHour, hourlyTarget: HOURLY_TRADE_TARGET,
+            equityHistory,
             winRateClass, pnlClass, pctBadge, goKlines,
             cashClamped, cashTooltip,
             symbols: SYMBOLS, tickerSymbols: TICKER_SYMBOLS, fmt,
