@@ -70,6 +70,10 @@ public class StrategySignalToOrderHandlerTests
         var equityProvider = new Mock<IEquitySnapshotProvider>();
         equityProvider.Setup(e => e.GetEquityAsync(It.IsAny<TradingMode>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(equity);
+        // Loop 19 — sizing now reads GetSizingEquityAsync (realized-only equity).
+        // Tests stub both so future swaps stay covered.
+        equityProvider.Setup(e => e.GetSizingEquityAsync(It.IsAny<TradingMode>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(equity);
         sc.AddSingleton(equityProvider.Object);
 
         sc.AddSingleton<IOptions<PaperFillOptions>>(

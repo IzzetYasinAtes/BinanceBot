@@ -27,20 +27,22 @@ const App = {
                     <h2 class="section">Loglar</h2>
                     <p class="section-sub">Sistem olayları (order.placed, circuit_breaker, vb.) append-only akışı.</p>
                     <div class="toolbar">
-                        <label>Seviye
+                        <label>Seviye:
                             <select v-model="level">
-                                <option value="">hepsi</option>
-                                <option>Info</option><option>Warning</option>
-                                <option>Error</option><option>Critical</option>
+                                <option value="">Hepsi</option>
+                                <option value="Info">Bilgi</option>
+                                <option value="Warning">Uyarı</option>
+                                <option value="Error">Hata</option>
+                                <option value="Critical">Kritik</option>
                             </select>
                         </label>
-                        <label>Limit
+                        <label>Limit:
                             <select v-model.number="limit">
                                 <option>50</option><option>100</option>
                                 <option>200</option><option>500</option>
                             </select>
                         </label>
-                        <span style="color:var(--fg-3);font-size:12px;">cursor: {{ cursor }}</span>
+                        <span style="color:var(--fg-3);">İmleç: {{ cursor }}</span>
                     </div>
                     <ErrorBanner :error="error" />
 

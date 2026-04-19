@@ -37,4 +37,19 @@ public interface IEquitySnapshotProvider
     /// to ratchet PeakEquity on realized growth only.
     /// </summary>
     Task<decimal> GetRealizedEquityAsync(TradingMode mode, CancellationToken ct);
+
+    /// <summary>
+    /// Loop 19 reform — dedicated sizing equity. Returns the realized PnL-based
+    /// equity (StartingBalance + sum of closed RealizedPnl). The previous
+    /// <see cref="GetEquityAsync"/> mark-to-market value was unstable when
+    /// open positions were short-MTM-pumped: a $100 baseline could read $316
+    /// with two open positions whose UnrealizedPnl spuriously inflated the
+    /// VirtualBalance.Equity column, producing a $126 cap (40 percent of $316)
+    /// and oversized 123 XRP allocations on a paper account.
+    ///
+    /// Sizing equity must be independent of in-flight position valuations — a
+    /// strategy storm cannot inflate its own sizing budget. Hard upper bound:
+    /// StartingBalance + true realized gains.
+    /// </summary>
+    Task<decimal> GetSizingEquityAsync(TradingMode mode, CancellationToken ct);
 }

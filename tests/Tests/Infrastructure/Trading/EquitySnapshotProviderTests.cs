@@ -197,4 +197,38 @@ public class EquitySnapshotProviderTests
 
         realized.Should().Be(0m);
     }
+
+    /// <summary>
+    /// Loop 19 — sizing equity must mirror realized equity. The cap (RiskPct,
+    /// MaxPositionPct) is derived from this read, so an open-position MTM pump
+    /// must not inflate the budget that justifies further entries. This is the
+    /// test that fails before the fix: with VirtualBalance.Equity racing the
+    /// unrealized writes, sizing once read $316 on a $100 account.
+    /// </summary>
+    [Fact]
+    public async Task GetSizingEquityAsync_OpenPositionMarkPump_StaysAtBaseline()
+    {
+        var db = NewDb();
+        SeedPaperBalance(db, startingBalance: 100m);
+        var pos = OpenPosition(db, "XRPUSDT", PositionSide.Long, qty: 0.5m, entryPrice: 80m);
+        pos.MarkToMarket(markPrice: 800m, now: T0.AddMinutes(1));
+        db.SaveChanges();
+
+        var sut = new EquitySnapshotProvider(db);
+
+        var sizing = await sut.GetSizingEquityAsync(TradingMode.Paper, CancellationToken.None);
+
+        sizing.Should().Be(100m);
+    }
+
+    [Fact]
+    public async Task GetSizingEquityAsync_LiveMainnet_ReturnsZero()
+    {
+        var db = NewDb();
+        var sut = new EquitySnapshotProvider(db);
+
+        var sizing = await sut.GetSizingEquityAsync(TradingMode.LiveMainnet, CancellationToken.None);
+
+        sizing.Should().Be(0m);
+    }
 }

@@ -27,12 +27,12 @@ const App = {
                     <h2 class="section">Sinyaller</h2>
                     <p class="section-sub">Tüm stratejiler ve onların son ürettiği sinyaller.</p>
                     <div class="toolbar">
-                        <label>Durum
+                        <label>Durum:
                             <select v-model="status">
-                                <option value="">hepsi</option>
-                                <option>Draft</option>
-                                <option>Paused</option>
-                                <option>Active</option>
+                                <option value="">Hepsi</option>
+                                <option value="Draft">Taslak</option>
+                                <option value="Paused">Duraklatıldı</option>
+                                <option value="Active">Aktif</option>
                             </select>
                         </label>
                     </div>
@@ -81,19 +81,19 @@ const App = {
                     </div>
                     <pre style="margin-top:12px;padding:10px;background:var(--bg-2);border-radius:var(--radius-sm);overflow:auto;font-size:11px;color:var(--fg-1);">{{ detail.parametersJson }}</pre>
 
-                    <h2 class="section" style="margin-top:18px;">Son Sinyaller</h2>
+                    <h2 class="section" style="margin-top:20px;">Son Sinyaller</h2>
                     <table class="data" v-if="signals">
                         <thead><tr>
                             <th>Zaman</th><th>Sembol</th><th>Yön</th>
-                            <th class="align-right">Qty</th><th class="align-right">Fiyat</th>
+                            <th class="align-right">Adet</th><th class="align-right">Fiyat</th>
                         </tr></thead>
                         <tbody>
                             <tr v-for="s in signals.slice(0, 20)" :key="s.id">
                                 <td style="color:var(--fg-3);">{{ fmt.timeHms(s.emittedAt) }}</td>
                                 <td><strong>{{ s.symbol }}</strong></td>
                                 <td><span class="badge" :class="dirBadge(s.direction)">{{ dirLabel(s.direction) }}</span></td>
-                                <td class="align-right">{{ fmt.num4(s.suggestedQuantity) }}</td>
-                                <td class="align-right">{{ s.suggestedPrice ? fmt.price(s.suggestedPrice) : '—' }}</td>
+                                <td class="align-right num">{{ fmt.num4(s.suggestedQuantity) }}</td>
+                                <td class="align-right num">{{ s.suggestedPrice ? fmt.price(s.suggestedPrice) : '—' }}</td>
                             </tr>
                             <tr v-if="signals.length === 0">
                                 <td colspan="5" style="text-align:center;color:var(--fg-3);padding:18px;">Sinyal yok</td>
@@ -125,7 +125,7 @@ const App = {
             if (s === "Paused") return "warn";
             return "";
         }
-        function dirLabel(d) { return d === "Long" ? "UP" : d === "Short" ? "DOWN" : "EXIT"; }
+        function dirLabel(d) { return d === "Long" ? "ALIŞ" : d === "Short" ? "SATIŞ" : "ÇIKIŞ"; }
         function dirBadge(d) { return d === "Long" ? "up" : d === "Short" ? "down" : "warn"; }
 
         return { status, detail, signals, listPoll, select, statusBadge, dirLabel, dirBadge, fmt };

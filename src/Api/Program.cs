@@ -89,6 +89,7 @@ app.MapRiskEndpoints();
 app.MapSystemEndpoints();
 app.MapBacktestEndpoints();
 app.MapBalanceEndpoints();
+app.MapPortfolioEndpoints();
 
 await DatabaseInitializer.MigrateAsync(app.Services, CancellationToken.None);
 

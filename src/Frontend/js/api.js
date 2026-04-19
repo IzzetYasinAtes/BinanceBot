@@ -117,6 +117,12 @@ export const api = {
         pnlFor: (symbol) => request(`/api/positions/${encodeURIComponent(symbol)}/pnl`),
     },
 
+    portfolio: {
+        // GET /api/portfolio/summary — Loop 19 yeni endpoint.
+        // Backend henüz hazır olmayabilir; çağıran graceful fallback yapsın.
+        summary: () => request("/api/portfolio/summary"),
+    },
+
     strategies: {
         list: (status) => request("/api/strategies/", { query: { status } }),
         detail: (id) => request(`/api/strategies/${id}`),
