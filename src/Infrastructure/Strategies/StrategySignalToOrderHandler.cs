@@ -152,13 +152,20 @@ public sealed class StrategySignalToOrderHandler : INotificationHandler<Strategy
             // Slippage is Paper-only (live exchanges report real fills).
             var slip = mode == TradingMode.Paper ? paperOpts.FixedSlippagePct : 0m;
 
+            // ADR-0015 §15.4 — snowball sizing rule: effective min notional is the
+            // user's floor (max of equity-proportional 20% or the fixed $20 ramp)
+            // lifted by the exchange's own NOTIONAL filter. The resulting MinNotional
+            // is both a floor for the cap branch and the NOTIONAL filter for sizing.
+            var userMinNotional = SnowballSizing.CalcMinNotional(equity);
+            var effectiveMinNotional = Math.Max(userMinNotional, instrument.MinNotional);
+
             var sizingResult = sizing.Calculate(new PositionSizingInput(
                 Equity: equity,
                 EntryPrice: entry,
                 StopDistance: stopDistance,
                 RiskPct: risk.RiskPerTradePct,
                 MaxPositionPct: risk.MaxPositionSizePct,
-                MinNotional: instrument.MinNotional,
+                MinNotional: effectiveMinNotional,
                 StepSize: instrument.StepSize,
                 MinQty: instrument.MinQty,
                 SlippagePct: slip));

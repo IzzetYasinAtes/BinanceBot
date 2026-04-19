@@ -103,4 +103,17 @@ export const fmt = {
         if (!isFinite(n) || n === 0) return "metric-neutral";
         return n > 0 ? "metric-good" : "metric-bad";
     },
+    /** "BTCUSDT" -> "BTC" */
+    baseAsset: (symbol) => (symbol ? String(symbol).replace(/USDT$/i, "") : ""),
+    /** Kısa tarih — "19 Nis 14:23" */
+    dateShort: (v) => {
+        if (!v) return "-";
+        try {
+            return new Date(v).toLocaleString("tr-TR", {
+                timeZone: "Europe/Istanbul",
+                day: "2-digit", month: "short",
+                hour: "2-digit", minute: "2-digit", hour12: false,
+            });
+        } catch { return String(v); }
+    },
 };

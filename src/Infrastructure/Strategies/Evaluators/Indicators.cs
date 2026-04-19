@@ -92,6 +92,75 @@ internal static class Indicators
     }
 
     /// <summary>
+    /// ADR-0015 §15.6. Rolling typical-price (HLC/3) volume-weighted average over the full
+    /// <paramref name="bars"/> window. Returns <c>0</c> when the cumulative volume is zero
+    /// (pre-warmup / all-flat window) — caller must treat that as no-signal.
+    /// Pure decimal math — no NaN/infinity risk.
+    /// </summary>
+    public static decimal Vwap(IReadOnlyList<Kline> bars)
+    {
+        if (bars.Count == 0)
+        {
+            return 0m;
+        }
+
+        decimal tpvSum = 0m;
+        decimal volSum = 0m;
+        for (var i = 0; i < bars.Count; i++)
+        {
+            var b = bars[i];
+            var typical = (b.HighPrice + b.LowPrice + b.ClosePrice) / 3m;
+            tpvSum += typical * b.Volume;
+            volSum += b.Volume;
+        }
+
+        return volSum > 0m ? tpvSum / volSum : 0m;
+    }
+
+    /// <summary>
+    /// Simple moving average of <c>Volume</c> across the most recent
+    /// <paramref name="period"/> bars. Returns <c>0</c> when history is insufficient.
+    /// </summary>
+    public static decimal VolumeSma(IReadOnlyList<Kline> bars, int period)
+    {
+        if (period <= 0 || bars.Count < period)
+        {
+            return 0m;
+        }
+
+        decimal sum = 0m;
+        var start = bars.Count - period;
+        for (var i = start; i < bars.Count; i++)
+        {
+            sum += bars[i].Volume;
+        }
+        return sum / period;
+    }
+
+    /// <summary>
+    /// Highest <c>High</c> among the last <paramref name="lookback"/> bars. Returns <c>0</c>
+    /// when history is insufficient — evaluators treat that as no-signal.
+    /// </summary>
+    public static decimal SwingHigh(IReadOnlyList<Kline> bars, int lookback)
+    {
+        if (lookback <= 0 || bars.Count < lookback)
+        {
+            return 0m;
+        }
+
+        var start = bars.Count - lookback;
+        var high = bars[start].HighPrice;
+        for (var i = start + 1; i < bars.Count; i++)
+        {
+            if (bars[i].HighPrice > high)
+            {
+                high = bars[i].HighPrice;
+            }
+        }
+        return high;
+    }
+
+    /// <summary>
     /// Bollinger Bands (mean ± stdDev * multiplier) over the most recent <paramref name="period"/> closes.
     /// Falls back to a flat band centred on the latest close when history is insufficient.
     /// </summary>

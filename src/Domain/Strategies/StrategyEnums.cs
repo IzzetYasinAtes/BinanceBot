@@ -8,15 +8,17 @@ public enum StrategyStatus
 }
 
 /// <summary>
-/// ADR-0014 Loop 16: strategy surface reset. The historical Grid / TrendFollowing /
-/// MeanReversion trio is removed (ADR-0012 §12.5/§12.6/§12.7 superseded). Only
-/// <see cref="PatternScalping"/> remains; it is the umbrella for the 14
-/// <see cref="Application.Strategies.Patterns.IPatternDetector"/> implementations
-/// orchestrated by <c>PatternScalpingEvaluator</c>.
+/// ADR-0015 Loop 19: strategy surface reset. ADR-0014 <c>PatternScalping</c> is
+/// superseded after Loop 16-19 produced a -$0.39 net realised PnL across 16 trades
+/// (100% time-stop exit rate, 0% TP hit rate). The 14 pattern-detector family and
+/// its orchestrator <c>PatternScalpingEvaluator</c> are deleted; <c>VwapEmaHybrid</c>
+/// re-uses enum value <c>1</c> and is implemented by <c>VwapEmaStrategyEvaluator</c>
+/// — a single-strategy 1m VWAP reclaim + 1h EMA21 trend-gate. DB wipe is performed by
+/// migration <c>Loop19VwapEmaHybridReset</c> so the reused numeric value is safe.
 /// </summary>
 public enum StrategyType
 {
-    PatternScalping = 1,
+    VwapEmaHybrid = 1,
 }
 
 public enum StrategySignalDirection
