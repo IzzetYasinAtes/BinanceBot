@@ -8,6 +8,7 @@ using BinanceBot.Domain.Positions;
 using BinanceBot.Domain.RiskProfiles;
 using BinanceBot.Domain.Strategies;
 using BinanceBot.Domain.Strategies.Events;
+using BinanceBot.Domain.SystemEvents.Events;
 using BinanceBot.Domain.ValueObjects;
 using BinanceBot.Infrastructure.Trading.Paper;
 using MediatR;
@@ -109,6 +110,32 @@ public sealed class StrategySignalToOrderHandler : INotificationHandler<Strategy
         {
             var cid = $"{cidPrefix}-{mode.ToCidSuffix()}";
 
+            // ADR-0017 §17.8: per-(strategy, symbol, mode) duplicate protection.
+            // Loop 21 regression — VWAP zone + volume confirm emitted back-to-back
+            // signals on BNBUSDT 3 minutes apart; the global MaxOpenPositions guard
+            // did not trip and OrderFilledPositionHandler mutated the existing
+            // aggregate via AddFill, producing a single $78 notional row. Enforce
+            // the "one open position per (strategyId, symbol, mode)" invariant here
+            // at the orchestration layer (cross-aggregate read, Application concern).
+            var hasOpenSameStrategySymbol = await db.Positions.AsNoTracking()
+                .AnyAsync(p => p.StrategyId == notification.StrategyId
+                    && p.Symbol == symbolVo
+                    && p.Status == PositionStatus.Open
+                    && p.Mode == mode, ct);
+            if (hasOpenSameStrategySymbol)
+            {
+                _logger.LogInformation(
+                    "Duplicate signal skipped mode={Mode} strategyId={Sid} symbol={Symbol} cid={Cid}",
+                    mode, notification.StrategyId, notification.Symbol, cid);
+
+                await mediator.Publish(new StrategySignalSkippedEvent(
+                    notification.StrategyId,
+                    notification.Symbol,
+                    "duplicate_open_position",
+                    notification.BarOpenTime), ct);
+                continue;
+            }
+
             var risk = await db.RiskProfiles.AsNoTracking()
                 .FirstOrDefaultAsync(r => r.Id == RiskProfile.IdFor(mode), ct);
             if (risk is null)
@@ -152,19 +179,33 @@ public sealed class StrategySignalToOrderHandler : INotificationHandler<Strategy
             // Slippage is Paper-only (live exchanges report real fills).
             var slip = mode == TradingMode.Paper ? paperOpts.FixedSlippagePct : 0m;
 
-            // ADR-0015 §15.4 — snowball sizing rule: effective min notional is the
-            // user's floor (max of equity-proportional 20% or the fixed $20 ramp)
-            // lifted by the exchange's own NOTIONAL filter. The resulting MinNotional
-            // is both a floor for the cap branch and the NOTIONAL filter for sizing.
-            var userMinNotional = SnowballSizing.CalcMinNotional(equity);
-            var effectiveMinNotional = Math.Max(userMinNotional, instrument.MinNotional);
+            // ADR-0015 §15.4 + ADR-0017 §17.9 — target-notional sizing:
+            //   targetNotional = max(equity * 0.20, $20)     // user floor + hedef
+            //   hardCap        = equity * MaxPositionSizePct  // safety ceiling (0.40)
+            //   notional       = min(targetNotional, hardCap)
+            //
+            // Historical cap-only semantics (PositionSizingService's qtyByCap branch
+            // = equity * MaxPositionPct) drove every entry to $40 at equity=$100
+            // instead of the user-intended $20 floor. We bend the service contract
+            // by translating the chosen notional into an effective MaxPositionPct
+            // so the cap branch lands exactly on the target. MinNotional becomes a
+            // floor equal to that target (lifted by the exchange NOTIONAL filter).
+            // PositionSizingService is untouched (cleanup deferred to Loop 23 — the
+            // proper fix is a dedicated TargetNotional field on the sizing input).
+            var userMinNotional = SnowballSizing.CalcMinNotional(equity); // max(equity*0.20, 20)
+            var hardCap = equity * risk.MaxPositionSizePct;
+            var chosenNotional = Math.Min(userMinNotional, hardCap);
+            var effectiveMinNotional = Math.Max(chosenNotional, instrument.MinNotional);
+            var effectiveMaxPositionPct = equity > 0m
+                ? chosenNotional / equity
+                : risk.MaxPositionSizePct;
 
             var sizingResult = sizing.Calculate(new PositionSizingInput(
                 Equity: equity,
                 EntryPrice: entry,
                 StopDistance: stopDistance,
                 RiskPct: risk.RiskPerTradePct,
-                MaxPositionPct: risk.MaxPositionSizePct,
+                MaxPositionPct: effectiveMaxPositionPct,
                 MinNotional: effectiveMinNotional,
                 StepSize: instrument.StepSize,
                 MinQty: instrument.MinQty,

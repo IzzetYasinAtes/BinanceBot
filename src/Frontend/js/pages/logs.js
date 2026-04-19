@@ -5,12 +5,22 @@ import { api } from "../api.js";
 import { fmt } from "../format.js";
 import { Sidebar, ErrorBanner, usePolling } from "../ui.js";
 
+// Chip id -> severity string eşlemesi. 'all' → filter yok.
 const FILTERS = [
-    { id: "",        label: "Tümü" },
-    { id: "Info",    label: "Bilgi" },
-    { id: "Warning", label: "Uyarı" },
-    { id: "Error",   label: "Hata" },
+    { id: "all",   label: "Tümü" },
+    { id: "info",  label: "Bilgi" },
+    { id: "warn",  label: "Uyarı" },
+    { id: "error", label: "Hata" },
 ];
+
+// API severity değerlerini chip id'sine normalize et.
+function sevToFilterId(s) {
+    const k = String(s || "").toLowerCase();
+    if (k === "error" || k === "critical") return "error";
+    if (k === "warning" || k === "warn")   return "warn";
+    if (k === "info" || k === "information") return "info";
+    return "info";
+}
 
 function severityCls(s) {
     const k = String(s || "").toLowerCase();
@@ -49,9 +59,10 @@ const App = {
                 <section class="block">
                     <div class="chip-group">
                         <button v-for="f in filters" :key="f.id"
-                                class="chip" :class="{ active: level === f.id }"
-                                @click="level = f.id">
+                                class="chip" :class="{ active: filter === f.id }"
+                                @click="filter = f.id">
                             {{ f.label }}
+                            <span class="muted tiny">({{ counts[f.id] ?? 0 }})</span>
                         </button>
                     </div>
                 </section>
@@ -60,7 +71,7 @@ const App = {
                     <div v-if="!events" class="col gap-3">
                         <div v-for="i in 6" :key="i" class="skeleton" style="height:40px"></div>
                     </div>
-                    <div v-else-if="events.length === 0" class="empty-illust">
+                    <div v-else-if="filtered.length === 0" class="empty-illust">
                         <svg width="120" height="92" viewBox="0 0 120 92" fill="none" xmlns="http://www.w3.org/2000/svg">
                             <defs>
                                 <linearGradient id="logsGrad" x1="0" y1="0" x2="1" y2="1">
@@ -77,11 +88,9 @@ const App = {
                             <circle cx="86" cy="26" r="3" fill="#06b6d4" opacity="0.9" />
                             <circle cx="86" cy="26" r="6" fill="#06b6d4" opacity="0.25" />
                         </svg>
-                        <div class="title">{{ level ? 'Bu filtreyle olay bulunamadı' : 'Henüz sistem olayı yok' }}</div>
+                        <div class="title">{{ emptyTitle }}</div>
                         <div class="sub">
-                            {{ level
-                                ? 'Filtreyi temizleyerek tüm olay akışını görebilirsin.'
-                                : 'API çalışıyor ve olaylar kaydediliyor. Bot bir şey yaptığında (sinyal, emir, hata) burada akış olarak görünecek.' }}
+                            {{ emptySub }}
                         </div>
                         <div class="hint-row">
                             <span class="pulse-dot"></span>
@@ -89,7 +98,7 @@ const App = {
                         </div>
                     </div>
                     <div v-else class="timeline">
-                        <div v-for="e in events" :key="e.id" class="tl-item fade-in">
+                        <div v-for="e in filtered" :key="e.id" class="tl-item fade-in">
                             <div class="tl-icon" :class="severityCls(e.severity)">{{ severityIcon(e.severity) }}</div>
                             <div class="tl-time">
                                 {{ fmt.timeHms(e.occurredAt) }}
@@ -115,8 +124,9 @@ const App = {
         </div>
     `,
     setup() {
-        const level = ref("");
-        const poll = usePolling(() => api.systemEvents.tail(undefined, level.value || undefined, 80), 4000);
+        const filter = ref("all"); // all | info | warn | error
+        // Client-side filter — sunucudan hep 'all' çek, chip'leri reactive uygula.
+        const poll = usePolling(() => api.systemEvents.tail(undefined, undefined, 120), 4000);
 
         const events = computed(() => {
             const d = poll.data.value;
@@ -124,6 +134,36 @@ const App = {
             const items = Array.isArray(d.items) ? d.items : Array.isArray(d) ? d : [];
             return items.slice().sort((a, b) =>
                 new Date(b.occurredAt) - new Date(a.occurredAt));
+        });
+
+        const filtered = computed(() => {
+            const list = events.value;
+            if (!Array.isArray(list)) return [];
+            if (filter.value === "all") return list;
+            return list.filter(e => sevToFilterId(e.severity) === filter.value);
+        });
+
+        const counts = computed(() => {
+            const out = { all: 0, info: 0, warn: 0, error: 0 };
+            for (const e of (events.value || [])) {
+                out.all++;
+                const id = sevToFilterId(e.severity);
+                if (out[id] != null) out[id]++;
+            }
+            return out;
+        });
+
+        const emptyTitle = computed(() => {
+            if (filter.value === "warn")  return "Uyarı yok";
+            if (filter.value === "error") return "Hata yok";
+            if (filter.value === "info")  return "Bilgi olayı yok";
+            return "Henüz sistem olayı yok";
+        });
+        const emptySub = computed(() => {
+            if (filter.value !== "all") {
+                return "Filtreyi temizleyerek tüm olay akışını görebilirsin.";
+            }
+            return "API çalışıyor ve olaylar kaydediliyor. Bot bir şey yaptığında (sinyal, emir, hata) burada akış olarak görünecek.";
         });
 
         // payload json'ı kısa bir okunabilir özete çevir
@@ -153,7 +193,8 @@ const App = {
         }
 
         return {
-            level, filters: FILTERS, poll, events,
+            filter, filters: FILTERS, poll, events, filtered, counts,
+            emptyTitle, emptySub,
             severityCls, severityLabel, severityIcon,
             payloadSummary, fmt,
         };

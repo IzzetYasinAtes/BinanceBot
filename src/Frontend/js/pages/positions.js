@@ -4,9 +4,10 @@ import { createApp, ref, computed } from "vue";
 import { api } from "../api.js";
 import { fmt } from "../format.js";
 import { Sidebar, ErrorBanner, usePolling } from "../ui.js";
+import { SymbolLogo } from "../components/symbolLogo.js";
 
 const App = {
-    components: { Sidebar, ErrorBanner },
+    components: { Sidebar, ErrorBanner, SymbolLogo },
     template: `
         <div class="app">
             <Sidebar active="positions" />
@@ -44,7 +45,7 @@ const App = {
                         <div v-for="p in openList" :key="p.id" class="trade-card fade-in">
                             <div class="t-head">
                                 <div class="trade-sym">
-                                    <span class="sym-dot">{{ fmt.baseAsset(p.symbol).slice(0,3) }}</span>
+                                    <SymbolLogo :symbol="p.symbol" :size="28" />
                                     <span>{{ p.symbol }}</span>
                                 </div>
                                 <span class="badge" :class="p.side === 'Long' ? 'up' : 'down'">
@@ -78,6 +79,22 @@ const App = {
                                 <div class="kv">
                                     <div class="k">Tutulma Süresi</div>
                                     <div class="v">{{ fmt.duration(p.openedAt) }}</div>
+                                </div>
+                                <div class="kv">
+                                    <div class="k">Hedef Fiyat (TP)</div>
+                                    <div class="v metric-good" v-if="p.takeProfit">
+                                        {{ '$' + fmt.price(p.takeProfit) }}
+                                    </div>
+                                    <div class="v" v-else>—</div>
+                                    <div class="muted tiny">{{ tpDistance(p) }}</div>
+                                </div>
+                                <div class="kv">
+                                    <div class="k">Stop-Loss (SL)</div>
+                                    <div class="v metric-bad" v-if="p.stopPrice">
+                                        {{ '$' + fmt.price(p.stopPrice) }}
+                                    </div>
+                                    <div class="v" v-else>—</div>
+                                    <div class="muted tiny">{{ slDistance(p) }}</div>
                                 </div>
                             </div>
 
@@ -114,7 +131,7 @@ const App = {
                                 <div v-for="p in g.items" :key="p.id" class="trade-card fade-in">
                                     <div class="t-head">
                                         <div class="trade-sym">
-                                            <span class="sym-dot">{{ fmt.baseAsset(p.symbol).slice(0,3) }}</span>
+                                            <SymbolLogo :symbol="p.symbol" :size="28" />
                                             <span>{{ p.symbol }}</span>
                                         </div>
                                         <span class="badge" :class="p.side === 'Long' ? 'up' : 'down'">
@@ -212,7 +229,29 @@ const App = {
             return fmt.pctFracSigned(frac);
         }
 
-        return { tab, openPoll, closedPoll, openList, closedList, closedGroups, costBasis, pnlPctLabel, fmt };
+        function tpDistance(p) {
+            const mark = Number(p.markPrice || 0);
+            const tp   = Number(p.takeProfit || 0);
+            if (!mark || !tp) return "—";
+            const diff = ((tp - mark) / mark) * 100;
+            const sign = diff >= 0 ? "+" : "";
+            return `${sign}${diff.toFixed(2)}% uzak`;
+        }
+
+        function slDistance(p) {
+            const mark = Number(p.markPrice || 0);
+            const sl   = Number(p.stopPrice || 0);
+            if (!mark || !sl) return "—";
+            // Mark'a göre SL'nin ne kadar altında/üstünde olduğu
+            const diff = ((sl - mark) / mark) * 100;
+            const sign = diff >= 0 ? "+" : "";
+            return `${sign}${diff.toFixed(2)}% uzak`;
+        }
+
+        return {
+            tab, openPoll, closedPoll, openList, closedList, closedGroups,
+            costBasis, pnlPctLabel, tpDistance, slDistance, fmt,
+        };
     },
 };
 

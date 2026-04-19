@@ -8,12 +8,13 @@ import { Sidebar, ErrorBanner, usePolling } from "../ui.js";
 import { SymbolCarousel } from "../components/symbolCarousel.js";
 import { AnimatedNumber } from "../components/animatedNumber.js";
 import { PriceTicker } from "../components/priceTicker.js";
+import { SymbolLogo } from "../components/symbolLogo.js";
 
 const SYMBOLS = ["BTCUSDT", "ETHUSDT", "BNBUSDT", "XRPUSDT"];
 const TICKER_SYMBOLS = ["BTCUSDT", "ETHUSDT", "BNBUSDT", "XRPUSDT", "SOLUSDT", "DOGEUSDT"];
 
 const App = {
-    components: { Sidebar, ErrorBanner, SymbolCarousel, AnimatedNumber, PriceTicker },
+    components: { Sidebar, ErrorBanner, SymbolCarousel, AnimatedNumber, PriceTicker, SymbolLogo },
     template: `
         <div class="app">
             <Sidebar active="dashboard" />
@@ -50,14 +51,23 @@ const App = {
 
                         <div class="hero-side">
                             <div class="hero-label">Mevcut Bakiye</div>
-                            <div class="val">
-                                <AnimatedNumber
-                                    :value="summary.currentCash"
-                                    :decimals="2"
-                                    prefix="$"
-                                    :duration-ms="800" />
-                            </div>
-                            <div class="muted small mt-2">Gerçekleşmiş (nakit)</div>
+                            <template v-if="cashClamped">
+                                <div class="val cash-zero">Kullanılabilir: $0.00</div>
+                                <div class="cash-limit-badge">
+                                    <span class="badge bad" :title="cashTooltip">Limit aşıldı</span>
+                                </div>
+                                <div class="muted small mt-2">{{ cashTooltip }}</div>
+                            </template>
+                            <template v-else>
+                                <div class="val">
+                                    <AnimatedNumber
+                                        :value="summary.currentCash"
+                                        :decimals="2"
+                                        prefix="$"
+                                        :duration-ms="800" />
+                                </div>
+                                <div class="muted small mt-2">Gerçekleşmiş (nakit)</div>
+                            </template>
                         </div>
 
                         <div class="hero-side">
@@ -176,7 +186,7 @@ const App = {
                         <div v-for="p in recentClosed" :key="p.id" class="trade-card fade-in">
                             <div class="t-head">
                                 <div class="trade-sym">
-                                    <span class="sym-dot">{{ fmt.baseAsset(p.symbol).slice(0,3) }}</span>
+                                    <SymbolLogo :symbol="p.symbol" :size="28" />
                                     <span>{{ p.symbol }}</span>
                                 </div>
                                 <span class="badge" :class="p.side === 'Long' ? 'up' : 'down'">
@@ -248,6 +258,19 @@ const App = {
             return "metric-bad";
         });
 
+        // Cash negatif ise UI clamp — backend düzeltilene kadar yanıltıcı gösterimi engelle.
+        const cashClamped = computed(() => {
+            const c = summary.value?.currentCash;
+            return typeof c === "number" && c < 0;
+        });
+        const cashTooltip = computed(() => {
+            const s = summary.value;
+            if (!s) return "";
+            const locked = Math.max(0, Number(s.openPositionsValue || 0));
+            const shortfall = Math.max(0, -(Number(s.currentCash || 0)));
+            return `Açık pozisyonlarda ${fmt.money(locked)} bağlı · limit aşımı ${fmt.money(shortfall)}`;
+        });
+
         function pnlClass(v) {
             return fmt.sign(v);
         }
@@ -264,6 +287,7 @@ const App = {
             summaryPoll, closedPoll,
             summary, closedPositions, recentClosed,
             winRateClass, pnlClass, pctBadge, goKlines,
+            cashClamped, cashTooltip,
             symbols: SYMBOLS, tickerSymbols: TICKER_SYMBOLS, fmt,
         };
     },

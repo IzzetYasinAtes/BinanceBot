@@ -6,10 +6,11 @@ import { ref, computed, onMounted, onBeforeUnmount, watch } from "vue";
 import { api } from "../api.js";
 import { fmt } from "../format.js";
 import { Sparkline } from "./sparkline.js";
+import { SymbolLogo } from "./symbolLogo.js";
 
 export const SymbolCarousel = {
     name: "SymbolCarousel",
-    components: { Sparkline },
+    components: { Sparkline, SymbolLogo },
     props: {
         symbols: { type: Array, required: true },
         intervalMs: { type: Number, default: 10_000 },
@@ -104,7 +105,7 @@ export const SymbolCarousel = {
                 <div v-for="c in cards" :key="c.symbol" class="sym-card fade-in" @click="handleClick(c)">
                     <div class="top">
                         <div class="trade-sym">
-                            <span class="sym-dot">{{ c.base.slice(0, 3) }}</span>
+                            <SymbolLogo :symbol="c.symbol" :size="32" />
                             <span>{{ c.base }}/USDT</span>
                         </div>
                         <span class="badge" :class="trendOf(c)">

@@ -15,7 +15,13 @@ const NAV_ITEMS = [
 export const Sidebar = {
     template: `
         <aside class="sidebar">
-            <div class="brand">BinanceBot</div>
+            <div class="brand">
+                <img src="/assets/logos/binancebot.svg"
+                     width="28" height="28"
+                     class="brand-logo"
+                     alt="BinanceBot logosu" />
+                <span>BinanceBot</span>
+            </div>
             <nav class="side-nav">
                 <a v-for="i in items" :key="i.id" :href="i.href" :class="{ active: active === i.id }">
                     <span class="ic">{{ i.ic }}</span>

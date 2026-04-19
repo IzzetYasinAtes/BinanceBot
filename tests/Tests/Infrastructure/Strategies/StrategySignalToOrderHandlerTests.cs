@@ -10,6 +10,7 @@ using BinanceBot.Domain.Positions;
 using BinanceBot.Domain.RiskProfiles;
 using BinanceBot.Domain.Strategies;
 using BinanceBot.Domain.Strategies.Events;
+using BinanceBot.Domain.SystemEvents.Events;
 using BinanceBot.Domain.ValueObjects;
 using BinanceBot.Infrastructure.Strategies;
 using BinanceBot.Infrastructure.Trading.Paper;
@@ -319,6 +320,11 @@ public class StrategySignalToOrderHandlerTests
     /// MaxOpenPositions ceiling is already reached, the fan-out must skip the
     /// entry without sending a PlaceOrderCommand. We seed two open positions
     /// per mode and set MaxOpenPositions=2, so every mode hits the throttle.
+    ///
+    /// ADR-0017 §17.8: the seeded open positions share (strategyId=1, BTCUSDT)
+    /// with the incoming signal, so the per-(strategy, symbol) duplicate guard
+    /// is the first gate the handler trips — a <see cref="StrategySignalSkippedEvent"/>
+    /// publish is expected before the open-count branch would have run.
     /// </summary>
     [Fact]
     public async Task Long_SkipsAllModes_WhenMaxOpenPositionsAlreadyReached()
@@ -329,6 +335,8 @@ public class StrategySignalToOrderHandlerTests
 
         mediator.Setup(m => m.Send(It.IsAny<PlaceOrderCommand>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(Result.Success(new PlacedOrderDto("x", "BTCUSDT", "Filled", SizedQty, null, TradingMode.Paper)));
+        mediator.Setup(m => m.Publish(It.IsAny<StrategySignalSkippedEvent>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
 
         var sut = new StrategySignalToOrderHandler(
             scopeFactory, NullLogger<StrategySignalToOrderHandler>.Instance);
@@ -358,5 +366,279 @@ public class StrategySignalToOrderHandlerTests
 
         mediator.Verify(m => m.Send(It.IsAny<PlaceOrderCommand>(), It.IsAny<CancellationToken>()),
             Times.Never);
+    }
+
+    // --- ADR-0017 §17.8 duplicate signal protection ---------------------------------------
+
+    /// <summary>
+    /// ADR-0017 §17.8: a strategy that already owns an open Position on the same
+    /// symbol must not double-enter when a second signal arrives. The duplicate
+    /// pre-check skips every mode whose DB state satisfies
+    /// (strategyId, symbol, status=Open, mode) and publishes a
+    /// <see cref="StrategySignalSkippedEvent"/> with reason <c>duplicate_open_position</c>.
+    /// </summary>
+    [Fact]
+    public async Task Long_SkipsAndPublishesDuplicateEvent_WhenSameStrategySymbolOpen()
+    {
+        var (scopeFactory, mediator, _, _, db) = BuildHarness();
+
+        // Seed: mode=Paper already has an open BTCUSDT position for strategyId=1.
+        db.Positions.Add(Position.Open(
+            Symbol.From("BTCUSDT"), PositionSide.Long,
+            quantity: 0.01m, entryPrice: 29500m, stopPrice: null,
+            strategyId: 1, mode: TradingMode.Paper, now: DateTimeOffset.UtcNow));
+        db.SaveChanges();
+
+        var placed = new List<PlaceOrderCommand>();
+        mediator.Setup(m => m.Send(It.IsAny<PlaceOrderCommand>(), It.IsAny<CancellationToken>()))
+            .Callback<IRequest<Result<PlacedOrderDto>>, CancellationToken>((cmd, _) => placed.Add((PlaceOrderCommand)cmd))
+            .ReturnsAsync(Result.Success(new PlacedOrderDto("x", "BTCUSDT", "Filled", SizedQty, null, TradingMode.Paper)));
+
+        var skipped = new List<StrategySignalSkippedEvent>();
+        mediator.Setup(m => m.Publish(It.IsAny<StrategySignalSkippedEvent>(), It.IsAny<CancellationToken>()))
+            .Callback<object, CancellationToken>((n, _) => skipped.Add((StrategySignalSkippedEvent)n))
+            .Returns(Task.CompletedTask);
+
+        var sut = new StrategySignalToOrderHandler(
+            scopeFactory, NullLogger<StrategySignalToOrderHandler>.Instance);
+
+        await sut.Handle(new StrategySignalEmittedEvent(
+            StrategyId: 1, Symbol: "BTCUSDT",
+            Direction: StrategySignalDirection.Long,
+            BarOpenTime: DateTimeOffset.UtcNow,
+            SuggestedStopPrice: 29500m),
+            CancellationToken.None);
+
+        // Paper is skipped with a duplicate event; LiveTestnet and LiveMainnet
+        // are still eligible (they have no open position) so two orders fan out.
+        placed.Select(c => c.Mode).Should().BeEquivalentTo(
+            new[] { TradingMode.LiveTestnet, TradingMode.LiveMainnet });
+        skipped.Should().ContainSingle()
+            .Which.Reason.Should().Be("duplicate_open_position");
+        skipped[0].StrategyId.Should().Be(1);
+        skipped[0].Symbol.Should().Be("BTCUSDT");
+    }
+
+    /// <summary>
+    /// ADR-0017 §17.8: duplicate protection is scoped by (strategyId, symbol, mode).
+    /// When the only open position lives in a different mode the signal must still
+    /// fan out to that mode — mode isolation from ADR-0008 is preserved.
+    /// </summary>
+    [Fact]
+    public async Task Long_DoesNotSkip_WhenOpenPositionIsOnADifferentMode()
+    {
+        var (scopeFactory, mediator, _, _, db) = BuildHarness();
+
+        // Open on LiveTestnet only; Paper + LiveMainnet stay eligible.
+        db.Positions.Add(Position.Open(
+            Symbol.From("BTCUSDT"), PositionSide.Long,
+            0.01m, 29500m, null, strategyId: 1,
+            mode: TradingMode.LiveTestnet, now: DateTimeOffset.UtcNow));
+        db.SaveChanges();
+
+        var placed = new List<PlaceOrderCommand>();
+        mediator.Setup(m => m.Send(It.IsAny<PlaceOrderCommand>(), It.IsAny<CancellationToken>()))
+            .Callback<IRequest<Result<PlacedOrderDto>>, CancellationToken>((cmd, _) => placed.Add((PlaceOrderCommand)cmd))
+            .ReturnsAsync(Result.Success(new PlacedOrderDto("x", "BTCUSDT", "Filled", SizedQty, null, TradingMode.Paper)));
+        mediator.Setup(m => m.Publish(It.IsAny<StrategySignalSkippedEvent>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
+        var sut = new StrategySignalToOrderHandler(
+            scopeFactory, NullLogger<StrategySignalToOrderHandler>.Instance);
+
+        await sut.Handle(new StrategySignalEmittedEvent(
+            1, "BTCUSDT", StrategySignalDirection.Long, DateTimeOffset.UtcNow, 29500m),
+            CancellationToken.None);
+
+        placed.Select(c => c.Mode).Should().BeEquivalentTo(
+            new[] { TradingMode.Paper, TradingMode.LiveMainnet });
+    }
+
+    /// <summary>
+    /// ADR-0017 §17.8: duplicate protection is scoped by (strategyId, symbol, mode).
+    /// When the only open position is on a different symbol, the new signal must
+    /// fan out normally on all three modes.
+    /// </summary>
+    [Fact]
+    public async Task Long_DoesNotSkip_WhenOpenPositionIsOnADifferentSymbol()
+    {
+        var (scopeFactory, mediator, _, _, db) = BuildHarness();
+
+        // Seed a BNBUSDT instrument + open position so the BTCUSDT signal can
+        // still reach the order pipeline without tripping the duplicate gate.
+        db.Instruments.Add(Instrument.Create(
+            Symbol.From("BNBUSDT"), "BNB", "USDT",
+            InstrumentStatus.Trading,
+            tickSize: 0.01m, stepSize: 0.001m,
+            minNotional: 5m, minQty: 0.001m, maxQty: 9000m,
+            syncedAt: DateTimeOffset.UtcNow));
+        db.Positions.Add(Position.Open(
+            Symbol.From("BNBUSDT"), PositionSide.Long,
+            0.01m, 600m, null, strategyId: 1,
+            mode: TradingMode.Paper, now: DateTimeOffset.UtcNow));
+        db.SaveChanges();
+
+        var placed = new List<PlaceOrderCommand>();
+        mediator.Setup(m => m.Send(It.IsAny<PlaceOrderCommand>(), It.IsAny<CancellationToken>()))
+            .Callback<IRequest<Result<PlacedOrderDto>>, CancellationToken>((cmd, _) => placed.Add((PlaceOrderCommand)cmd))
+            .ReturnsAsync(Result.Success(new PlacedOrderDto("x", "BTCUSDT", "Filled", SizedQty, null, TradingMode.Paper)));
+
+        var sut = new StrategySignalToOrderHandler(
+            scopeFactory, NullLogger<StrategySignalToOrderHandler>.Instance);
+
+        await sut.Handle(new StrategySignalEmittedEvent(
+            1, "BTCUSDT", StrategySignalDirection.Long, DateTimeOffset.UtcNow, 29500m),
+            CancellationToken.None);
+
+        placed.Should().HaveCount(3);
+        placed.Select(c => c.Symbol).Should().AllBeEquivalentTo("BTCUSDT");
+    }
+
+    // --- ADR-0017 §17.9 target-notional sizing wiring -------------------------------------
+
+    /// <summary>Lift each seeded RiskProfile.MaxPositionSizePct to the ADR-0017
+    /// production default (0.40). The default factory returns 0.10 which is no
+    /// longer representative of the live config — tests that verify sizing
+    /// overrides use the post-Loop-14 cap.
+    /// </summary>
+    private static void RaiseHardCapToLoop14Default(StubDbContext db)
+    {
+        foreach (var profile in db.RiskProfiles)
+        {
+            profile.UpdateLimits(
+                riskPerTradePct: 0.02m,
+                maxPositionSizePct: 0.40m,
+                maxDrawdown24hPct: 0.20m,
+                maxDrawdownAllTimePct: 0.40m,
+                maxConsecutiveLosses: 10,
+                maxOpenPositions: 2,
+                now: DateTimeOffset.UtcNow);
+        }
+        db.SaveChanges();
+    }
+
+    /// <summary>
+    /// ADR-0017 §17.9: the handler must hand the sizing service a
+    /// <c>MaxPositionPct</c> that maps the target notional to exactly 20% of
+    /// equity (with a $20 floor when equity &lt; 100). For equity=$100 that
+    /// collapses to MaxPositionPct=0.20 and MinNotional=$20 — the cap branch of
+    /// <c>PositionSizingService</c> then sizes to the target, not the legacy
+    /// $40 hard-cap.
+    /// </summary>
+    [Fact]
+    public async Task Long_PassesTargetNotionalAsMaxPositionPctAndMinNotional_ToSizingService()
+    {
+        var (scopeFactory, mediator, sizing, _, db) = BuildHarness(equity: 100m);
+        RaiseHardCapToLoop14Default(db);
+
+        PositionSizingInput? captured = null;
+        sizing.Setup(s => s.Calculate(It.IsAny<PositionSizingInput>()))
+            .Callback<PositionSizingInput>(i => captured = i)
+            .Returns(new PositionSizingResult(Quantity: SizedQty, NotionalEstimate: 20m, SkipReason: null));
+
+        mediator.Setup(m => m.Send(It.IsAny<PlaceOrderCommand>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Result.Success(new PlacedOrderDto("x", "BTCUSDT", "Filled", SizedQty, null, TradingMode.Paper)));
+
+        var sut = new StrategySignalToOrderHandler(
+            scopeFactory, NullLogger<StrategySignalToOrderHandler>.Instance);
+
+        await sut.Handle(new StrategySignalEmittedEvent(
+            1, "BTCUSDT", StrategySignalDirection.Long, DateTimeOffset.UtcNow, 29500m),
+            CancellationToken.None);
+
+        captured.Should().NotBeNull();
+        // equity=100 -> target=max(100*0.20, 20)=20, cap=100*0.40=40, notional=min(20,40)=20
+        //   MaxPositionPct override = 20 / 100 = 0.20
+        //   MinNotional            = max(20, instrument.MinNotional=5) = 20
+        captured!.MaxPositionPct.Should().Be(0.20m);
+        captured.MinNotional.Should().Be(20m);
+    }
+
+    /// <summary>
+    /// ADR-0017 §17.9: equity=$50 -> target=max(50*0.20, 20)=$20 (floor),
+    /// cap=50*0.40=$20 -> chosen=$20 -> MaxPositionPct=20/50=0.40.
+    /// Floor wins when equity is tiny.
+    /// </summary>
+    [Fact]
+    public async Task Long_SizingOverride_Equity50_FloorWins()
+    {
+        var (scopeFactory, mediator, sizing, _, db) = BuildHarness(equity: 50m);
+        RaiseHardCapToLoop14Default(db);
+
+        PositionSizingInput? captured = null;
+        sizing.Setup(s => s.Calculate(It.IsAny<PositionSizingInput>()))
+            .Callback<PositionSizingInput>(i => captured = i)
+            .Returns(new PositionSizingResult(SizedQty, 20m, null));
+
+        mediator.Setup(m => m.Send(It.IsAny<PlaceOrderCommand>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Result.Success(new PlacedOrderDto("x", "BTCUSDT", "Filled", SizedQty, null, TradingMode.Paper)));
+
+        var sut = new StrategySignalToOrderHandler(
+            scopeFactory, NullLogger<StrategySignalToOrderHandler>.Instance);
+
+        await sut.Handle(new StrategySignalEmittedEvent(
+            1, "BTCUSDT", StrategySignalDirection.Long, DateTimeOffset.UtcNow, 29500m),
+            CancellationToken.None);
+
+        captured!.MinNotional.Should().Be(20m);
+        captured.MaxPositionPct.Should().Be(0.40m); // 20 / 50
+    }
+
+    /// <summary>
+    /// ADR-0017 §17.9: equity=$200 -> target=max(200*0.20,20)=$40, cap=200*0.40=$80
+    /// -> chosen=$40 -> MaxPositionPct=40/200=0.20. Snowball growth.
+    /// </summary>
+    [Fact]
+    public async Task Long_SizingOverride_Equity200_PctFraction()
+    {
+        var (scopeFactory, mediator, sizing, _, db) = BuildHarness(equity: 200m);
+        RaiseHardCapToLoop14Default(db);
+
+        PositionSizingInput? captured = null;
+        sizing.Setup(s => s.Calculate(It.IsAny<PositionSizingInput>()))
+            .Callback<PositionSizingInput>(i => captured = i)
+            .Returns(new PositionSizingResult(SizedQty, 40m, null));
+
+        mediator.Setup(m => m.Send(It.IsAny<PlaceOrderCommand>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Result.Success(new PlacedOrderDto("x", "BTCUSDT", "Filled", SizedQty, null, TradingMode.Paper)));
+
+        var sut = new StrategySignalToOrderHandler(
+            scopeFactory, NullLogger<StrategySignalToOrderHandler>.Instance);
+
+        await sut.Handle(new StrategySignalEmittedEvent(
+            1, "BTCUSDT", StrategySignalDirection.Long, DateTimeOffset.UtcNow, 29500m),
+            CancellationToken.None);
+
+        captured!.MinNotional.Should().Be(40m);
+        captured.MaxPositionPct.Should().Be(0.20m);
+    }
+
+    /// <summary>
+    /// ADR-0017 §17.9: equity=$500 -> target=max(500*0.20,20)=$100, cap=500*0.40=$200
+    /// -> chosen=$100. MinNotional=100, MaxPositionPct=100/500=0.20.
+    /// </summary>
+    [Fact]
+    public async Task Long_SizingOverride_Equity500_KeepsPctAtTwentyPercent()
+    {
+        var (scopeFactory, mediator, sizing, _, db) = BuildHarness(equity: 500m);
+        RaiseHardCapToLoop14Default(db);
+
+        PositionSizingInput? captured = null;
+        sizing.Setup(s => s.Calculate(It.IsAny<PositionSizingInput>()))
+            .Callback<PositionSizingInput>(i => captured = i)
+            .Returns(new PositionSizingResult(SizedQty, 100m, null));
+
+        mediator.Setup(m => m.Send(It.IsAny<PlaceOrderCommand>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Result.Success(new PlacedOrderDto("x", "BTCUSDT", "Filled", SizedQty, null, TradingMode.Paper)));
+
+        var sut = new StrategySignalToOrderHandler(
+            scopeFactory, NullLogger<StrategySignalToOrderHandler>.Instance);
+
+        await sut.Handle(new StrategySignalEmittedEvent(
+            1, "BTCUSDT", StrategySignalDirection.Long, DateTimeOffset.UtcNow, 29500m),
+            CancellationToken.None);
+
+        captured!.MinNotional.Should().Be(100m);
+        captured.MaxPositionPct.Should().Be(0.20m);
     }
 }
