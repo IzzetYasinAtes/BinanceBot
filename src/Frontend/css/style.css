@@ -311,7 +311,7 @@ main {
     background: var(--grad-hero);
     border: 1px solid var(--border-1);
     border-radius: var(--r-xl);
-    padding: var(--sp-8);
+    padding: var(--sp-5) var(--sp-6);
     position: relative;
     overflow: hidden;
     margin-bottom: var(--sp-6);
@@ -326,8 +326,28 @@ main {
     pointer-events: none;
 }
 
+/* Yavaş kayan gradient shine — hero'ya canlılık. */
+.hero::after {
+    content: "";
+    position: absolute;
+    inset: -2px;
+    background: linear-gradient(115deg,
+        transparent 25%,
+        rgba(99, 102, 241, 0.07) 45%,
+        rgba(6, 182, 212, 0.09) 55%,
+        transparent 75%);
+    background-size: 250% 100%;
+    animation: heroShine 9s linear infinite;
+    pointer-events: none;
+}
+@keyframes heroShine {
+    0%   { background-position: 200% 0; }
+    100% { background-position: -100% 0; }
+}
+
 .hero-grid {
     position: relative;
+    z-index: 1;
     display: grid;
     grid-template-columns: 1.4fr 1fr 1fr;
     gap: var(--sp-6);
@@ -338,43 +358,50 @@ main {
 }
 
 .hero-label {
-    font-size: 12.5px;
+    font-size: 11.5px;
     font-weight: 600;
     color: var(--fg-3);
     text-transform: uppercase;
     letter-spacing: 0.12em;
-    margin-bottom: var(--sp-2);
+    margin-bottom: var(--sp-1);
 }
 
 .hero-value {
-    font-size: 42px;
+    font-size: 30px;
     font-weight: 700;
-    letter-spacing: -0.03em;
+    letter-spacing: -0.02em;
     font-variant-numeric: tabular-nums;
-    line-height: 1.05;
+    line-height: 1.1;
 }
 
 .hero-sub {
     margin-top: 6px;
-    font-size: 14px;
+    font-size: 12.5px;
     color: var(--fg-3);
     display: flex;
     align-items: center;
     gap: 8px;
+    flex-wrap: wrap;
 }
+
+.hero-sub .badge { font-size: 11px; padding: 2px 8px; }
 
 .hero-side {
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: 3px;
 }
 
 .hero-side .val {
-    font-size: 22px;
+    font-size: 30px;
     font-weight: 700;
     font-variant-numeric: tabular-nums;
+    letter-spacing: -0.02em;
     color: var(--fg-0);
+    line-height: 1.1;
 }
+
+.hero-side .muted { font-size: 11.5px; }
 
 /* ============================================================
  * CARD — generic card + grid
@@ -404,11 +431,35 @@ main {
 
 .card:hover {
     transform: translateY(-2px);
-    border-color: rgba(99, 102, 241, 0.28);
-    box-shadow: var(--shadow-hover);
+    border-color: rgba(99, 102, 241, 0.45);
+    box-shadow:
+        0 12px 40px rgba(0, 0, 0, 0.55),
+        0 0 24px rgba(99, 102, 241, 0.28),
+        inset 0 0 0 1px rgba(99, 102, 241, 0.25);
     background: var(--bg-card-hover);
 }
 .card:hover::before { opacity: 1; }
+
+/* Ek kayan shine (hover'da parlayan ışık çizgisi) — sadece non-static kartlarda. */
+.card::after {
+    content: "";
+    position: absolute;
+    top: 0;
+    left: -80%;
+    width: 60%;
+    height: 100%;
+    background: linear-gradient(115deg,
+        transparent 20%,
+        rgba(255, 255, 255, 0.05) 45%,
+        rgba(99, 102, 241, 0.12) 50%,
+        rgba(255, 255, 255, 0.05) 55%,
+        transparent 80%);
+    pointer-events: none;
+    transition: left 700ms cubic-bezier(0.4, 0, 0.2, 1);
+    z-index: 0;
+}
+.card:hover::after { left: 120%; }
+.card-static::after { display: none; }
 
 .card-static:hover { transform: none; }
 .card-tight { padding: var(--sp-4); }
@@ -643,8 +694,11 @@ main {
 }
 .trade-card:hover {
     transform: translateY(-2px);
-    border-color: rgba(99,102,241,0.25);
-    box-shadow: var(--shadow-hover);
+    border-color: rgba(99, 102, 241, 0.45);
+    box-shadow:
+        0 12px 40px rgba(0, 0, 0, 0.55),
+        0 0 24px rgba(99, 102, 241, 0.28),
+        inset 0 0 0 1px rgba(99, 102, 241, 0.25);
 }
 
 .trade-card .t-head {
@@ -775,8 +829,11 @@ main {
 }
 .sym-card:hover {
     transform: translateY(-2px);
-    border-color: rgba(99,102,241,0.28);
-    box-shadow: var(--shadow-hover);
+    border-color: rgba(99, 102, 241, 0.45);
+    box-shadow:
+        0 12px 40px rgba(0, 0, 0, 0.55),
+        0 0 22px rgba(99, 102, 241, 0.3),
+        inset 0 0 0 1px rgba(99, 102, 241, 0.25);
 }
 .sym-card .top {
     display: flex;
@@ -1104,6 +1161,240 @@ main {
 @keyframes fadeIn {
     from { opacity: 0; transform: translateY(6px); }
     to   { opacity: 1; transform: translateY(0); }
+}
+
+/* ============================================================
+ * PRICE TICKER — marquee band (sticky top)
+ * ============================================================ */
+
+.price-ticker {
+    position: sticky;
+    top: 0;
+    z-index: 20;
+    width: 100%;
+    overflow: hidden;
+    background: linear-gradient(180deg,
+        rgba(10, 14, 26, 0.95),
+        rgba(15, 20, 35, 0.9));
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+    border-bottom: 1px solid var(--border-1);
+    padding: 8px 0;
+    margin: calc(-1 * var(--sp-6)) calc(-1 * var(--sp-8)) var(--sp-5);
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.35);
+}
+
+.price-ticker-skeleton {
+    padding: 10px var(--sp-6);
+}
+
+.price-ticker-track {
+    display: flex;
+    width: max-content;
+    animation: marquee 42s linear infinite;
+    will-change: transform;
+}
+
+.price-ticker:hover .price-ticker-track {
+    animation-play-state: paused;
+}
+
+.price-ticker-group {
+    display: flex;
+    gap: var(--sp-6);
+    padding-right: var(--sp-6);
+}
+
+.price-ticker-item {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 10px;
+    padding: 0 var(--sp-3);
+    border-right: 1px solid var(--border-0);
+    font-family: var(--font-mono);
+    font-size: 13px;
+}
+.price-ticker-item:last-child { border-right: none; }
+
+.price-ticker-item .pt-sym {
+    color: var(--fg-2);
+    font-weight: 600;
+    letter-spacing: 0.02em;
+}
+.price-ticker-item .pt-price {
+    color: var(--fg-0);
+    font-weight: 700;
+    font-size: 14px;
+}
+.price-ticker-item .pt-pct {
+    font-size: 12.5px;
+    font-weight: 600;
+    padding: 1px 6px;
+    border-radius: 999px;
+}
+.price-ticker-item .pt-pct.up {
+    color: var(--good-2);
+    background: rgba(16, 185, 129, 0.14);
+}
+.price-ticker-item .pt-pct.down {
+    color: var(--bad-2);
+    background: rgba(239, 68, 68, 0.14);
+}
+
+@keyframes marquee {
+    0%   { transform: translateX(0); }
+    100% { transform: translateX(-50%); }
+}
+
+@media (max-width: 980px) {
+    .price-ticker {
+        margin: calc(-1 * var(--sp-4)) calc(-1 * var(--sp-4)) var(--sp-4);
+    }
+    .price-ticker-track { animation-duration: 30s; }
+}
+
+/* ============================================================
+ * RING PROGRESS
+ * ============================================================ */
+
+.ring-progress {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+}
+
+.ring-progress svg {
+    display: block;
+    filter: drop-shadow(0 0 8px rgba(99, 102, 241, 0.2));
+}
+
+.ring-progress .ring-bg {
+    stroke: rgba(255, 255, 255, 0.06);
+}
+
+.ring-progress .ring-fg {
+    stroke-linecap: round;
+    transition: stroke-dashoffset 700ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.ring-content {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    pointer-events: none;
+}
+
+.ring-value {
+    font-size: 22px;
+    font-weight: 700;
+    color: var(--fg-0);
+    letter-spacing: -0.02em;
+    line-height: 1;
+}
+
+.ring-label {
+    font-size: 11px;
+    color: var(--fg-3);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    margin-top: 4px;
+    max-width: 80%;
+    line-height: 1.2;
+}
+
+.ring-card {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-4);
+}
+.ring-card .ring-meta {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+}
+.ring-card .ring-meta .label {
+    font-size: 11.5px;
+    color: var(--fg-3);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    font-weight: 600;
+}
+.ring-card .ring-meta .hint {
+    font-size: 12.5px;
+    color: var(--fg-3);
+}
+
+/* ============================================================
+ * EMPTY-STATE ILLUSTRATION (inline SVG card)
+ * ============================================================ */
+
+.empty-illust {
+    text-align: center;
+    padding: var(--sp-8) var(--sp-5);
+    background: linear-gradient(160deg, rgba(99, 102, 241, 0.05), rgba(6, 182, 212, 0.03));
+    border: 1px dashed var(--border-1);
+    border-radius: var(--r-lg);
+    color: var(--fg-3);
+}
+.empty-illust svg {
+    display: block;
+    margin: 0 auto var(--sp-4);
+    opacity: 0.85;
+}
+.empty-illust .title {
+    font-size: 15px;
+    font-weight: 700;
+    color: var(--fg-1);
+    margin-bottom: 6px;
+    letter-spacing: -0.01em;
+}
+.empty-illust .sub {
+    font-size: 13px;
+    color: var(--fg-3);
+    max-width: 440px;
+    margin: 0 auto;
+    line-height: 1.5;
+}
+.empty-illust .hint-row {
+    margin-top: var(--sp-4);
+    display: inline-flex;
+    gap: 8px;
+    align-items: center;
+    padding: 6px 14px;
+    background: rgba(6, 182, 212, 0.1);
+    border: 1px solid rgba(6, 182, 212, 0.25);
+    border-radius: 999px;
+    font-size: 12px;
+    color: var(--info);
+}
+.empty-illust .pulse-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--info);
+    box-shadow: 0 0 0 0 var(--info-glow);
+    animation: pulseDot 1.6s ease-in-out infinite;
+}
+@keyframes pulseDot {
+    0%   { box-shadow: 0 0 0 0 rgba(6, 182, 212, 0.45); }
+    70%  { box-shadow: 0 0 0 10px rgba(6, 182, 212, 0); }
+    100% { box-shadow: 0 0 0 0 rgba(6, 182, 212, 0); }
+}
+
+/* ============================================================
+ * ANIMATED NUMBER (counter)
+ * ============================================================ */
+
+.animated-number {
+    font-variant-numeric: tabular-nums;
+    display: inline-block;
 }
 
 /* ============================================================

@@ -2,6 +2,9 @@ using System.Buffers;
 using System.Net.WebSockets;
 using System.Text;
 using BinanceBot.Application.Abstractions.Binance;
+using BinanceBot.Domain.SystemEvents.Events;
+using MediatR;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -13,6 +16,7 @@ public sealed class BinanceWsSupervisor : BackgroundService, IWsReadinessProbe
     private readonly IOptionsMonitor<BinanceOptions> _options;
     private readonly BinanceStreamBus _bus;
     private readonly ILogger<BinanceWsSupervisor> _logger;
+    private readonly IServiceScopeFactory _scopeFactory;
 
     private volatile WsSupervisorState _state = WsSupervisorState.Disconnected;
     private volatile bool _everConnected;
@@ -29,11 +33,13 @@ public sealed class BinanceWsSupervisor : BackgroundService, IWsReadinessProbe
     public BinanceWsSupervisor(
         IOptionsMonitor<BinanceOptions> options,
         BinanceStreamBus bus,
-        ILogger<BinanceWsSupervisor> logger)
+        ILogger<BinanceWsSupervisor> logger,
+        IServiceScopeFactory scopeFactory)
     {
         _options = options;
         _bus = bus;
         _logger = logger;
+        _scopeFactory = scopeFactory;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -85,8 +91,27 @@ public sealed class BinanceWsSupervisor : BackgroundService, IWsReadinessProbe
             _everConnected = true;
         }
         if (_state == next) return;
-        _logger.LogInformation("WS state {From} -> {To}", _state, next);
+        var previous = _state;
+        _logger.LogInformation("WS state {From} -> {To}", previous, next);
         _state = next;
+
+        // ADR-0016 §16.9.6 — fire-and-forget WS state transition to the SystemEvents
+        // pipe. Telemetry path; supervisor loop must never be blocked by it.
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await using var scope = _scopeFactory.CreateAsyncScope();
+                var publisher = scope.ServiceProvider.GetRequiredService<IPublisher>();
+                await publisher.Publish(
+                    new WsConnectionStateChangedEvent(previous.ToString(), next.ToString()),
+                    CancellationToken.None);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "WsConnectionStateChanged publish failed");
+            }
+        });
     }
 
     private static TimeSpan ComputeBackoff(BinanceOptions options, int attempt)

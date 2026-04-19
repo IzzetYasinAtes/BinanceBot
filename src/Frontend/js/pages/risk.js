@@ -4,9 +4,10 @@ import { createApp, ref, computed, watch } from "vue";
 import { api, getAdminKey } from "../api.js";
 import { fmt } from "../format.js";
 import { Sidebar, ErrorBanner, usePolling } from "../ui.js";
+import { RingProgress } from "../components/ringProgress.js";
 
 const App = {
-    components: { Sidebar, ErrorBanner },
+    components: { Sidebar, ErrorBanner, RingProgress },
     template: `
         <div class="app">
             <Sidebar active="risk" />
@@ -24,24 +25,54 @@ const App = {
                     <h2 class="section-title">Anlık Durum</h2>
                     <div class="kpi-grid" v-if="profile">
                         <div class="card card-static">
-                            <div class="card-head"><h3 class="card-title">Mevcut Drawdown</h3></div>
-                            <div class="card-value" :class="ddClass">
-                                {{ fmt.pctFracSigned(-Math.abs(profile.currentDrawdownPct)) }}
+                            <div class="card-head"><h3 class="card-title">Anlık Drawdown</h3></div>
+                            <div class="ring-card">
+                                <RingProgress
+                                    :value="ddRingValue"
+                                    :size="96"
+                                    :stroke-width="9"
+                                    :warn-at="40"
+                                    :bad-at="75"
+                                    label="limit"
+                                    :decimals="1" />
+                                <div class="ring-meta">
+                                    <span class="label">mevcut</span>
+                                    <span class="card-value" :class="ddClass" style="font-size:22px;">
+                                        {{ fmt.pctFracSigned(-Math.abs(profile.currentDrawdownPct)) }}
+                                    </span>
+                                    <span class="hint">24h limit %{{ fmt.num2(profile.maxDrawdown24hPct * 100) }}</span>
+                                </div>
                             </div>
-                            <div class="card-hint">24h limit %{{ fmt.num2(profile.maxDrawdown24hPct * 100) }}</div>
                         </div>
+
                         <div class="card card-static">
                             <div class="card-head"><h3 class="card-title">Zirve Özkaynak</h3></div>
                             <div class="card-value">{{ fmt.money(profile.peakEquity) }}</div>
                             <div class="card-hint">Tarihi en yüksek equity</div>
                         </div>
+
                         <div class="card card-static">
                             <div class="card-head"><h3 class="card-title">Üst Üste Zarar</h3></div>
-                            <div class="card-value" :class="consLossClass">
-                                {{ profile.consecutiveLosses }}
+                            <div class="ring-card">
+                                <RingProgress
+                                    :value="consLossRingValue"
+                                    :size="96"
+                                    :stroke-width="9"
+                                    :warn-at="60"
+                                    :bad-at="90"
+                                    :decimals="0"
+                                    suffix="%"
+                                    label="kullanım" />
+                                <div class="ring-meta">
+                                    <span class="label">mevcut</span>
+                                    <span class="card-value" :class="consLossClass" style="font-size:22px;">
+                                        {{ profile.consecutiveLosses }}
+                                    </span>
+                                    <span class="hint">Limit {{ profile.maxConsecutiveLosses }}</span>
+                                </div>
                             </div>
-                            <div class="card-hint">Limit {{ profile.maxConsecutiveLosses }}</div>
                         </div>
+
                         <div class="card card-static" :class="cbCard">
                             <div class="card-head"><h3 class="card-title">Devre Kesici</h3></div>
                             <div class="card-value">
@@ -212,12 +243,36 @@ const App = {
             return "metric-neutral";
         });
 
+        // Ring progress 0-100 değerleri:
+        //   dd: current/limit(24h) oranı, %100 = limite vardık.
+        //   consLoss: current/max oranı.
+        const ddRingValue = computed(() => {
+            const p = profile.value;
+            if (!p) return 0;
+            const cur = Math.abs(Number(p.currentDrawdownPct) || 0);
+            const lim = Number(p.maxDrawdown24hPct) || 0;
+            if (lim <= 0) return 0;
+            const pct = (cur / lim) * 100;
+            return Math.max(0, Math.min(100, pct));
+        });
+
+        const consLossRingValue = computed(() => {
+            const p = profile.value;
+            if (!p) return 0;
+            const cur = Number(p.consecutiveLosses) || 0;
+            const max = Math.max(1, Number(p.maxConsecutiveLosses) || 1);
+            const pct = (cur / max) * 100;
+            return Math.max(0, Math.min(100, pct));
+        });
+
         return {
             poll, cbPoll, profile, cb,
             form, saving, resetting, saveError,
             resetForm, save, resetCb,
             cbTripped, cbLabel, cbBadge, cbCard,
-            ddClass, consLossClass, fmt,
+            ddClass, consLossClass,
+            ddRingValue, consLossRingValue,
+            fmt,
         };
     },
 };

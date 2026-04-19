@@ -7,18 +7,32 @@ using Microsoft.Extensions.Logging;
 namespace BinanceBot.Infrastructure.Strategies.Evaluators;
 
 /// <summary>
-/// ADR-0015 §15.2 + §15.3. VWAP-reclaim + EMA21(1h) trend-gate hybrid scalper.
+/// ADR-0016 §16.2 + §16.3. VWAP-reclaim + EMA21(1h) trend-gate hybrid scalper — V2
+/// high-frequency tuning. Supersedes the ADR-0015 formulas.
 ///
 /// Entry emits <see cref="StrategySignalDirection.Long"/> on the closed 1m bar when
 /// all four conditions hold simultaneously:
-///   1. Direction gate — 1h EMA21 is rising (EMA[now] &gt; EMA[prev]).
-///   2. VWAP context  — the previous bar closed below VWAP (pullback).
-///   3. VWAP reclaim  — the latest closed bar closed above VWAP (bullish reclaim).
-///   4. Volume confirm — last-bar volume ≥ SMA20 × <c>VolumeMultiplier</c>.
+///   1. Direction gate — 1h EMA21 slope is above tolerance:
+///        <c>nowEma &gt;= prevEma × (1 + SlopeTolerance)</c>.
+///      Default <c>SlopeTolerance = -0.0005</c> (slope ≥ −%0.05) — net bear
+///      trends remain blocked but hair-line consolidations re-open the gate.
+///   2. VWAP context  — the previous bar closed below VWAP (pullback, unchanged).
+///   3. VWAP reclaim  — last bar is above VWAP OR within the VWAP zone:
+///        <c>last &gt; VWAP OR Math.Abs(last − VWAP) / VWAP &lt; VwapTolerancePct</c>.
+///      Default <c>VwapTolerancePct = 0.0015</c> (±%0.15).
+///   4. Volume confirm — last-bar volume ≥ SMA20 × VolumeMultiplier
+///      (default multiplier relaxed from 1.2 → 1.05).
 ///
-/// Emitted signal carries: stop = entry × (1 − stopPct), TP = swingHigh20 × 0.95,
-/// maxHold = 15 minutes (all encoded in the parameters JSON). Short side is
-/// intentionally absent — ADR-0006 + user rule: spot long-only.
+/// Exits (encoded in the emitted <see cref="StrategyEvaluation"/>):
+///   - Take-profit: <c>entryPrice × (1 + TpGrossPct)</c>, default 0.007 (%0.7 gross).
+///   - Stop-loss:   <c>entryPrice × (1 − StopPct)</c>, per-seed override
+///                  (BTC/BNB 0.003, XRP 0.004).
+///   - Time-stop:   <c>MaxHoldMinutes = 12</c> (downstream monitor reads via ContextJson).
+///
+/// ADR-0015 swingHigh × 0.95 TP path is deprecated — fixed-percent TP is deterministic
+/// and aligns with Binance 1m volatility (ADR-0016 §16.3, research §3.4). The
+/// <c>SwingLookback</c>/<c>TpSafetyFactor</c> fields remain for backward compatibility
+/// with existing persisted JSON but are no longer consulted.
 ///
 /// The evaluator never opens a DB connection, never allocates a rolling buffer —
 /// it depends on <see cref="IMarketIndicatorService"/> for pre-computed primitives.
@@ -56,47 +70,64 @@ public sealed class VwapEmaStrategyEvaluator : IStrategyEvaluator
             return Task.FromResult<StrategyEvaluation?>(null);
         }
 
-        // Guard against pre-warmup snapshots that slipped through.
+        // Guard against pre-warmup snapshots that slipped through. SwingHigh20 still
+        // participates in the guard because the indicator buffer treats it as a
+        // warmup completeness signal, even though TP no longer consumes it.
         if (snapshot.Vwap <= 0m
             || snapshot.VolumeSma20 <= 0m
-            || snapshot.SwingHigh20 <= 0m
             || snapshot.Ema1h21Now <= 0m
             || snapshot.Ema1h21Prev <= 0m)
         {
             _logger.LogDebug(
-                "VwapEma snapshot incomplete symbol={Symbol} vwap={Vwap} volSma={Vol} swingHigh={SwingHigh}",
-                symbol, snapshot.Vwap, snapshot.VolumeSma20, snapshot.SwingHigh20);
+                "VwapEma snapshot incomplete symbol={Symbol} vwap={Vwap} volSma={Vol}",
+                symbol, snapshot.Vwap, snapshot.VolumeSma20);
             return Task.FromResult<StrategyEvaluation?>(null);
         }
 
-        var directionGate = snapshot.Ema1h21Now > snapshot.Ema1h21Prev;
+        // ADR-0016 §16.2 (1): slope >= SlopeTolerance relative to prev EMA. Using
+        // (1 + tol) lets a negative tol allow small downward slopes while a positive
+        // tol tightens the gate.
+        var slopeGateLevel = snapshot.Ema1h21Prev * (1m + p.SlopeTolerance);
+        var directionGate = snapshot.Ema1h21Now >= slopeGateLevel;
+
         var vwapContext = snapshot.PrevBarClose < snapshot.Vwap;
-        var vwapReclaim = snapshot.LastBarClose > snapshot.Vwap;
+
+        // ADR-0016 §16.2 (3): reclaim OR zone. Zone uses strict-less-than so tests
+        // can size exact boundary values predictably.
+        var vwapAboveReclaim = snapshot.LastBarClose > snapshot.Vwap;
+        var vwapDistance = snapshot.Vwap > 0m
+            ? Math.Abs(snapshot.LastBarClose - snapshot.Vwap) / snapshot.Vwap
+            : decimal.MaxValue;
+        var vwapZoneOk = vwapDistance < p.VwapTolerancePct;
+        var vwapReclaim = vwapAboveReclaim || vwapZoneOk;
+
         var volumeRatio = snapshot.VolumeSma20 > 0m
             ? snapshot.LastBarVolume / snapshot.VolumeSma20
             : 0m;
-        var volumeConfirm = volumeRatio >= p.VolumeMultiplier;
+        var volumeConfirm = volumeRatio > p.VolumeMultiplier;
 
         if (!directionGate || !vwapContext || !vwapReclaim || !volumeConfirm)
         {
+            var slope = snapshot.Ema1h21Prev > 0m
+                ? (snapshot.Ema1h21Now - snapshot.Ema1h21Prev) / snapshot.Ema1h21Prev
+                : 0m;
             _logger.LogDebug(
-                "VwapEma skip symbol={Symbol} directionGate={Up} vwapContext={Below} reclaim={Reclaim} " +
-                "volumeRatio={Ratio} decision=Skip",
-                symbol, directionGate, vwapContext, vwapReclaim, volumeRatio);
+                "VwapEma V2 skip symbol={Symbol} slope={Slope} slopeTol={SlopeTol} " +
+                "vwapCtx={Below} reclaim={Reclaim} vwapZoneOk={ZoneOk} volRatio={Ratio} decision=Skip",
+                symbol, slope, p.SlopeTolerance,
+                vwapContext, vwapAboveReclaim, vwapZoneOk, volumeRatio);
             return Task.FromResult<StrategyEvaluation?>(null);
         }
 
-        // ADR-0015 §15.3. Stop = entry × (1 − stopPct); TP = swingHigh20 × tpSafetyFactor.
-        // Entry price is left null here — the fan-out handler re-reads BookTicker ask/bid
-        // and forwards the effective entry to the sizing service (so mode-dependent slip
-        // propagation still works).
+        // ADR-0016 §16.3: TP = entry × (1 + TpGrossPct); SL = entry × (1 − StopPct).
+        // Per-symbol StopPct override (opt-in sembol → decimal map) honoured before
+        // the seed-level default — Loop 21 seeds encode per-seed StopPct directly,
+        // but we leave the dict path open for future tek-seed multi-symbol designs.
         var entryPrice = snapshot.LastBarClose;
-        var stopPrice = entryPrice * (1m - p.StopPct);
-        var takeProfit = snapshot.SwingHigh20 * p.TpSafetyFactor;
+        var stopPct = ResolveStopPct(p, symbol);
+        var stopPrice = entryPrice * (1m - stopPct);
+        var takeProfit = entryPrice * (1m + p.TpGrossPct);
 
-        // Guard rail: TP must be above entry and stop must be below entry. Either
-        // violation means the snapshot contradicts itself (e.g. swingHigh20 fell below
-        // entry after a flash move) — skip the signal.
         if (takeProfit <= entryPrice || stopPrice >= entryPrice)
         {
             _logger.LogDebug(
@@ -105,23 +136,30 @@ public sealed class VwapEmaStrategyEvaluator : IStrategyEvaluator
             return Task.FromResult<StrategyEvaluation?>(null);
         }
 
+        var slopeRatio = snapshot.Ema1h21Prev > 0m
+            ? (snapshot.Ema1h21Now - snapshot.Ema1h21Prev) / snapshot.Ema1h21Prev
+            : 0m;
+
         var ctx = EvaluatorParameterHelper.SerializeContext(new
         {
-            type = "vwap-ema-hybrid",
+            type = "vwap-ema-hybrid-v2",
             vwap = snapshot.Vwap,
             ema1h21Now = snapshot.Ema1h21Now,
             ema1h21Prev = snapshot.Ema1h21Prev,
+            slope = slopeRatio,
             prevBarClose = snapshot.PrevBarClose,
             lastBarClose = snapshot.LastBarClose,
+            vwapDistance,
             volumeRatio,
-            swingHigh20 = snapshot.SwingHigh20,
-            stopPct = p.StopPct,
+            stopPct,
+            tpGrossPct = p.TpGrossPct,
             maxHoldMinutes = p.MaxHoldMinutes,
         });
 
         _logger.LogInformation(
-            "VwapEma emit symbol={Symbol} entry={Entry} stop={Stop} tp={Tp} volumeRatio={Ratio}",
-            symbol, entryPrice, stopPrice, takeProfit, volumeRatio);
+            "VwapEma V2 emit symbol={Symbol} entry={Entry} stop={Stop} tp={Tp} " +
+            "slope={Slope} vwapZone={ZoneOk} volumeRatio={Ratio}",
+            symbol, entryPrice, stopPrice, takeProfit, slopeRatio, vwapZoneOk, volumeRatio);
 
         // SuggestedQuantity is a placeholder — fan-out handler overrides via sizing service.
         // A positive-but-tiny value satisfies the StrategySignal.Emit domain invariant
@@ -136,20 +174,41 @@ public sealed class VwapEmaStrategyEvaluator : IStrategyEvaluator
             SuggestedTakeProfit: takeProfit));
     }
 
+    private static decimal ResolveStopPct(Parameters p, string symbol)
+    {
+        if (p.StopPctPerSymbol is { Count: > 0 } map
+            && !string.IsNullOrWhiteSpace(symbol)
+            && map.TryGetValue(symbol, out var perSymbol)
+            && perSymbol > 0m)
+        {
+            return perSymbol;
+        }
+        return p.StopPct;
+    }
+
     /// <summary>
-    /// Parameters consumed from <c>Strategies.Seed[].ParametersJson</c> (ADR-0015 §15.1).
-    /// Per-symbol overrides (e.g. XRP tighter volume multiplier) are encoded in the seed;
-    /// defaults below cover the happy path for BTC/BNB/XRP spot.
+    /// ADR-0016 §16.5 parameter contract. Serialised as <c>Strategies.Seed[].ParametersJson</c>.
+    /// Per-symbol overrides for BTC/BNB (0.003) vs XRP (0.004) live in each seed's JSON.
     /// </summary>
     private sealed class Parameters
     {
-        public decimal StopPct { get; set; } = 0.008m;
-        public decimal VolumeMultiplier { get; set; } = 1.2m;
-        public int SwingLookback { get; set; } = 20;
-        public decimal TpSafetyFactor { get; set; } = 0.95m;
-        public int MaxHoldMinutes { get; set; } = 15;
+        // ADR-0015 fields (new defaults per ADR-0016).
+        public decimal StopPct { get; set; } = 0.003m;
+        public decimal VolumeMultiplier { get; set; } = 1.05m;
+        public int SwingLookback { get; set; } = 20;            // deprecated, kept for JSON back-compat
+        public decimal TpSafetyFactor { get; set; } = 0.95m;    // deprecated, kept for JSON back-compat
+        public int MaxHoldMinutes { get; set; } = 12;
         public int EmaPeriod { get; set; } = 21;
         public string EmaTimeframe { get; set; } = "1h";
         public int VwapWindowBars { get; set; } = 1440;
+
+        // ADR-0016 new fields.
+        public decimal VwapTolerancePct { get; set; } = 0.0015m;
+        public decimal SlopeTolerance { get; set; } = -0.0005m;
+        public decimal TpGrossPct { get; set; } = 0.007m;
+
+        // Optional per-symbol StopPct override (future tek-seed multi-symbol
+        // designs); Loop 21 seeds leave this null.
+        public Dictionary<string, decimal>? StopPctPerSymbol { get; set; }
     }
 }
