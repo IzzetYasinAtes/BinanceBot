@@ -12,64 +12,196 @@
 <body>
 <div id="app"></div>
 <script type="module">
-import { createApp, ref, watch } from "vue";
+import { createApp, ref, watch, computed } from "vue";
 import { api } from "/js/api.js";
 import { fmt } from "/js/format.js";
 import { Sidebar, ErrorBanner, usePolling } from "/js/ui.js";
 
+// Binance taker ücret tahmini (backend gerçek komisyonu /api/portfolio/summary'de döner;
+// per-trade granular komisyon DB'de yok → tahmini hesap (notional × 0.1%) göster).
+const FEE_RATE = 0.001;
+
+function estimateCommission(p) {
+    // Açık pozisyon için sadece giriş; kapalı için giriş+çıkış (2 leg).
+    const entry = Number(p.averageEntryPrice ?? 0);
+    const qty = Number(p.quantity ?? 0);
+    const exit = Number(p.exitPrice ?? p.markPrice ?? 0);
+    const entryFee = entry * qty * FEE_RATE;
+    const exitFee = (p.status === "Closed" ? exit * qty * FEE_RATE : 0);
+    return entryFee + exitFee;
+}
+
+// Açık pozisyon kartı
+const OpenPositionCard = {
+    props: ["pos"],
+    setup(props) {
+        const sideLabel = computed(() => props.pos.side === "Long" ? "ALIŞ (Long)" : "SATIŞ (Short)");
+        const sideBadge = computed(() => props.pos.side === "Long" ? "up" : "down");
+        const notionalEntry = computed(() => Number(props.pos.averageEntryPrice ?? 0) * Number(props.pos.quantity ?? 0));
+        const notionalNow = computed(() => Number(props.pos.markPrice ?? 0) * Number(props.pos.quantity ?? 0));
+        const pnl = computed(() => Number(props.pos.unrealizedPnl ?? 0));
+        const pnlPct = computed(() => {
+            if (notionalEntry.value <= 0) return 0;
+            return (pnl.value / notionalEntry.value) * 100;
+        });
+        const pnlClass = computed(() => fmt.sign(pnl.value));
+        return { fmt, sideLabel, sideBadge, notionalEntry, notionalNow, pnl, pnlPct, pnlClass };
+    },
+    template: `
+        <div class="trade-card open">
+            <div class="tc-head">
+                <div class="tc-title">
+                    <span class="ico">●</span>
+                    <span class="id">#{{ pos.id }}</span>
+                    {{ pos.symbol }}
+                    <span class="badge" :class="sideBadge" style="margin-left:8px;">{{ sideLabel }}</span>
+                </div>
+                <span class="badge open">AÇIK</span>
+            </div>
+            <div class="tc-leg">
+                <span class="k">Adet:</span>
+                <span class="v">{{ fmt.num4(pos.quantity) }} {{ pos.symbol.replace(/USDT$/i,'') }}</span>
+                <span class="k">Giriş:</span>
+                <span class="v">{{ fmt.price(pos.averageEntryPrice) }} ({{ fmt.money(notionalEntry) }})</span>
+                <span class="k">Mark:</span>
+                <span class="v">{{ fmt.price(pos.markPrice) }} ({{ fmt.money(notionalNow) }})</span>
+                <span class="k">Açıldı:</span>
+                <span class="v">{{ fmt.timeIso(pos.openedAt) }} · {{ fmt.duration(pos.openedAt) }} açık</span>
+            </div>
+            <div class="tc-net">
+                <span class="lbl">Anlık K/Z</span>
+                <span>
+                    <span class="amt" :class="pnlClass">{{ fmt.moneySigned(pnl) }}</span>
+                    <span class="pct" :class="pnlClass">{{ fmt.pctSigned(pnlPct) }}</span>
+                </span>
+            </div>
+        </div>
+    `,
+};
+
+// Kapalı pozisyon kartı (kazanan/kaybeden)
+const ClosedPositionCard = {
+    props: ["pos"],
+    setup(props) {
+        const isWin = computed(() => Number(props.pos.realizedPnl ?? 0) >= 0);
+        const cardCls = computed(() => isWin.value ? "win" : "loss");
+        const sideLabel = computed(() => props.pos.side === "Long" ? "ALIŞ (Long)" : "SATIŞ (Short)");
+        const sideBadge = computed(() => props.pos.side === "Long" ? "up" : "down");
+        const resultBadge = computed(() => isWin.value ? "good" : "bad");
+        const resultLabel = computed(() => isWin.value ? "KAZANAN" : "KAYIP");
+        const ico = computed(() => isWin.value ? "✓" : "✗");
+        const entryNotional = computed(() => Number(props.pos.averageEntryPrice ?? 0) * Number(props.pos.quantity ?? 0));
+        const exitNotional = computed(() => {
+            const ex = props.pos.exitPrice ?? props.pos.markPrice;
+            return Number(ex ?? 0) * Number(props.pos.quantity ?? 0);
+        });
+        const pnl = computed(() => Number(props.pos.realizedPnl ?? 0));
+        const pnlPct = computed(() => {
+            if (entryNotional.value <= 0) return 0;
+            return (pnl.value / entryNotional.value) * 100;
+        });
+        const pnlClass = computed(() => fmt.sign(pnl.value));
+        const commissionEst = computed(() => estimateCommission(props.pos));
+        const duration = computed(() => fmt.duration(props.pos.openedAt, props.pos.closedAt));
+        return {
+            fmt, isWin, cardCls, sideLabel, sideBadge, resultBadge, resultLabel, ico,
+            entryNotional, exitNotional, pnl, pnlPct, pnlClass, commissionEst, duration,
+        };
+    },
+    template: `
+        <div class="trade-card" :class="cardCls">
+            <div class="tc-head">
+                <div class="tc-title">
+                    <span class="ico" :class="pnlClass">{{ ico }}</span>
+                    <span class="id">#{{ pos.id }}</span>
+                    {{ pos.symbol }}
+                    <span class="badge" :class="sideBadge" style="margin-left:8px;">{{ sideLabel }}</span>
+                </div>
+                <span class="badge" :class="resultBadge">{{ resultLabel }}</span>
+            </div>
+            <div class="tc-leg">
+                <span class="k">Açıldı:</span>
+                <span class="v">{{ fmt.timeIso(pos.openedAt) }} @ {{ fmt.price(pos.averageEntryPrice) }}
+                    ({{ fmt.num4(pos.quantity) }} = {{ fmt.money(entryNotional) }})
+                </span>
+                <span class="k">Kapandı:</span>
+                <span class="v">
+                    {{ pos.closedAt ? fmt.timeIso(pos.closedAt) : '—' }}
+                    @ {{ fmt.price(pos.exitPrice ?? pos.markPrice) }}
+                    ({{ fmt.money(exitNotional) }})
+                </span>
+                <span class="k">Süre:</span>
+                <span class="v">{{ duration }}</span>
+                <span class="k">Komisyon:</span>
+                <span class="v" style="color:var(--warn);">~{{ fmt.money(commissionEst, 4) }} (tahmini)</span>
+            </div>
+            <div class="tc-net">
+                <span class="lbl">Net K/Z</span>
+                <span>
+                    <span class="amt" :class="pnlClass">{{ fmt.moneySigned(pnl) }}</span>
+                    <span class="pct" :class="pnlClass">{{ fmt.pctSigned(pnlPct) }}</span>
+                </span>
+            </div>
+        </div>
+    `,
+};
+
 const App = {
-    components: { Sidebar, ErrorBanner },
+    components: { Sidebar, ErrorBanner, OpenPositionCard, ClosedPositionCard },
     template: `
         <div class="app">
             <Sidebar active="positions" />
             <main>
                 <section class="block">
-                    <h2 class="section">Portföy</h2>
-                    <p class="section-sub">Açık ve kapalı pozisyonlar. Yön, giriş fiyatı ve anlık kar/zarar durumu.</p>
+                    <h2 class="section">Portföy / Pozisyonlar</h2>
+                    <p class="section-sub">
+                        Açık ve kapalı pozisyonların kart görünümü. Her kart bir trade'in açılış-kapanış-net kar bilgisini özetler.
+                    </p>
                     <div class="toolbar">
-                        <label>Durum
+                        <label>Durum:
                             <select v-model="status">
-                                <option value="">hepsi</option>
-                                <option value="open">açık</option>
-                                <option value="closed">kapalı</option>
+                                <option value="">Hepsi</option>
+                                <option value="Open">Açık</option>
+                                <option value="Closed">Kapalı</option>
                             </select>
                         </label>
-                        <label>Sembol
-                            <input v-model="symbol" placeholder="opsiyonel" style="width:120px;">
+                        <label>Sembol:
+                            <input v-model="symbol" placeholder="örn. BTCUSDT" style="width:140px;">
                         </label>
+                        <span style="color:var(--fg-3);" v-if="poll.data.value">
+                            Toplam: <strong style="color:var(--fg-1);">{{ poll.data.value.length }}</strong>
+                            ({{ openCount }} açık · {{ closedCount }} kapalı)
+                        </span>
                     </div>
                     <ErrorBanner :error="poll.error.value" />
+                </section>
 
-                    <table class="data" v-if="poll.data.value">
-                        <thead><tr>
-                            <th>#</th><th>Sembol</th><th>Yön</th><th>Durum</th>
-                            <th class="align-right">Adet</th>
-                            <th class="align-right">Giriş</th>
-                            <th class="align-right">Mark</th>
-                            <th class="align-right">Unrealized</th>
-                            <th class="align-right">Realized</th>
-                            <th>Açılış</th><th>Kapanış</th>
-                        </tr></thead>
-                        <tbody>
-                            <tr v-for="p in poll.data.value" :key="p.id">
-                                <td>{{ p.id }}</td>
-                                <td><strong>{{ p.symbol }}</strong></td>
-                                <td><span class="badge" :class="p.side === 'Long' ? 'up' : 'down'">{{ p.side === 'Long' ? 'UP' : 'DOWN' }}</span></td>
-                                <td><span class="badge" :class="p.status === 'Open' ? 'open' : ''">{{ p.status === 'Open' ? 'OPEN' : 'CLOSED' }}</span></td>
-                                <td class="align-right">{{ fmt.num4(p.quantity) }}</td>
-                                <td class="align-right">{{ fmt.price(p.averageEntryPrice) }}</td>
-                                <td class="align-right">{{ fmt.price(p.markPrice) }}</td>
-                                <td class="align-right" :class="fmt.sign(p.unrealizedPnl)">{{ fmt.num2(p.unrealizedPnl) }}</td>
-                                <td class="align-right" :class="fmt.sign(p.realizedPnl)">{{ fmt.num2(p.realizedPnl) }}</td>
-                                <td style="color:var(--fg-3);">{{ fmt.timeHms(p.openedAt) }}</td>
-                                <td style="color:var(--fg-3);">{{ p.closedAt ? fmt.timeHms(p.closedAt) : '—' }}</td>
-                            </tr>
-                            <tr v-if="poll.data.value.length === 0">
-                                <td colspan="11" style="text-align:center;color:var(--fg-3);padding:24px;">Henüz pozisyon yok</td>
-                            </tr>
-                        </tbody>
-                    </table>
-                    <div v-else class="skeleton" style="height:180px"></div>
+                <section class="block" v-if="poll.data.value && openPositions.length > 0">
+                    <h2 class="section">Açık Pozisyonlar ({{ openPositions.length }})</h2>
+                    <p class="section-sub">Şu an piyasada açık olan, henüz kapanmamış trade'ler.</p>
+                    <div class="trade-grid">
+                        <OpenPositionCard v-for="p in openPositions" :key="'open-'+p.id" :pos="p" />
+                    </div>
+                </section>
+
+                <section class="block" v-if="poll.data.value && closedPositions.length > 0">
+                    <h2 class="section">Kapanan Pozisyonlar ({{ closedPositions.length }})</h2>
+                    <p class="section-sub">Tamamlanan trade'ler. Net kar = (çıkış - giriş) × adet, kayıplar kırmızı, kazançlar yeşil işaretlidir.</p>
+                    <div class="trade-grid">
+                        <ClosedPositionCard v-for="p in closedPositions" :key="'cl-'+p.id" :pos="p" />
+                    </div>
+                </section>
+
+                <section class="block" v-if="poll.data.value && poll.data.value.length === 0">
+                    <div class="kpi" style="text-align:center;color:var(--fg-2);padding:32px;">
+                        Henüz pozisyon yok. Strateji aktive edildiğinde burada görünür.
+                    </div>
+                </section>
+
+                <section class="block" v-if="!poll.data.value">
+                    <div class="trade-grid">
+                        <div v-for="n in 4" :key="n" class="skeleton" style="height:200px"></div>
+                    </div>
                 </section>
             </main>
         </div>
@@ -78,10 +210,27 @@ const App = {
         const status = ref("");
         const symbol = ref("");
         const poll = usePolling(
-            () => api.positions.list({ status: status.value, symbol: symbol.value }),
-            2000);
+            () => api.positions.list({
+                status: status.value || undefined,
+                symbol: symbol.value || undefined,
+            }),
+            2500);
         watch([status, symbol], () => poll.refresh());
-        return { status, symbol, poll, fmt };
+
+        const openPositions = computed(() => {
+            const list = poll.data.value ?? [];
+            return list.filter(p => p.status === "Open").sort((a, b) =>
+                new Date(b.openedAt).getTime() - new Date(a.openedAt).getTime());
+        });
+        const closedPositions = computed(() => {
+            const list = poll.data.value ?? [];
+            return list.filter(p => p.status === "Closed").sort((a, b) =>
+                new Date(b.closedAt ?? b.updatedAt).getTime() - new Date(a.closedAt ?? a.updatedAt).getTime());
+        });
+        const openCount = computed(() => openPositions.value.length);
+        const closedCount = computed(() => closedPositions.value.length);
+
+        return { status, symbol, poll, openPositions, closedPositions, openCount, closedCount, fmt };
     },
 };
 createApp(App).mount("#app");

@@ -17,14 +17,26 @@ import { api } from "/js/api.js";
 import { fmt } from "/js/format.js";
 import { Sidebar, ErrorBanner, usePolling } from "/js/ui.js";
 
-const OrderRows = {
+// Binance taker ücret oranı tahmini — gerçek fill komisyonları DB granular DTO'da
+// henüz yok; toplam tutar `/api/portfolio/summary.totalCommissionPaid` üzerinden gelir.
+const FEE_RATE = 0.001;
+
+const OrderHistoryTable = {
     props: ["rows"],
-    setup(props) {
+    setup() {
         function statusBadge(s) {
             if (s === "Filled") return "good";
             if (s === "Rejected" || s === "Cancelled" || s === "Expired") return "bad";
             if (s === "PartiallyFilled") return "warn";
             return "open";
+        }
+        function statusLabel(s) {
+            return s === "Filled" ? "DOLDU"
+                : s === "Cancelled" ? "İPTAL"
+                : s === "Rejected" ? "RED"
+                : s === "PartiallyFilled" ? "KISMİ"
+                : s === "Expired" ? "SÜRE DOLDU"
+                : "AÇIK";
         }
         function modeBadge(m) {
             if (m === "Paper") return "open";
@@ -37,74 +49,61 @@ const OrderRows = {
             if (m === "LiveMainnet") return "MAIN";
             return "PAPER";
         }
-        return { fmt, statusBadge, modeBadge, modeLabel };
+        function sideLabel(s) { return s === "Buy" ? "ALIŞ" : "SATIŞ"; }
+        function sideBadge(s) { return s === "Buy" ? "up" : "down"; }
+        function notional(o) {
+            // Tercihen fill notional, yoksa qty × price.
+            const cum = Number(o.cumulativeQuoteQty ?? 0);
+            if (cum > 0) return cum;
+            const q = Number(o.executedQuantity ?? o.quantity ?? 0);
+            const p = Number(o.price ?? 0);
+            return q * p;
+        }
+        function commissionEst(o) {
+            if (o.status !== "Filled" && o.status !== "PartiallyFilled") return 0;
+            return notional(o) * FEE_RATE;
+        }
+        return { fmt, statusBadge, statusLabel, modeBadge, modeLabel, sideLabel, sideBadge, notional, commissionEst };
     },
     template: `
         <table class="data">
             <thead><tr>
-                <th>ClientId</th><th>Sembol</th><th>Mode</th><th>Yön</th><th>Tip</th><th>Durum</th>
+                <th>ClientId</th>
+                <th>Sembol</th>
+                <th>Mod</th>
+                <th>Yön</th>
+                <th>Tip</th>
+                <th>Durum</th>
                 <th class="align-right">Adet</th>
                 <th class="align-right">Gerçekleşen</th>
                 <th class="align-right">Fiyat</th>
+                <th class="align-right">Notional</th>
+                <th class="align-right">Komisyon (~)</th>
                 <th>Zaman</th>
             </tr></thead>
             <tbody>
                 <tr v-for="o in rows" :key="o.clientOrderId">
-                    <td style="font-size:10.5px;color:var(--fg-3);">{{ o.clientOrderId }}</td>
+                    <td style="font-size:11px;color:var(--fg-3);font-family:var(--mono);">
+                        {{ o.clientOrderId.length > 18 ? o.clientOrderId.slice(0,18) + '…' : o.clientOrderId }}
+                    </td>
                     <td><strong>{{ o.symbol }}</strong></td>
                     <td><span class="badge" :class="modeBadge(o.mode)">{{ modeLabel(o.mode) }}</span></td>
-                    <td><span class="badge" :class="o.side === 'Buy' ? 'up' : 'down'">{{ o.side === 'Buy' ? 'UP' : 'DOWN' }}</span></td>
+                    <td><span class="badge" :class="sideBadge(o.side)">{{ sideLabel(o.side) }}</span></td>
                     <td>{{ o.type }}</td>
-                    <td><span class="badge" :class="statusBadge(o.status)">{{ o.status }}</span></td>
-                    <td class="align-right">{{ fmt.num4(o.quantity) }}</td>
-                    <td class="align-right">{{ fmt.num4(o.executedQuantity) }}</td>
-                    <td class="align-right">{{ o.price ? fmt.price(o.price) : '—' }}</td>
+                    <td><span class="badge" :class="statusBadge(o.status)">{{ statusLabel(o.status) }}</span></td>
+                    <td class="align-right num">{{ fmt.num4(o.quantity) }}</td>
+                    <td class="align-right num">{{ fmt.num4(o.executedQuantity) }}</td>
+                    <td class="align-right num">{{ o.price ? fmt.price(o.price) : '—' }}</td>
+                    <td class="align-right num">{{ fmt.money(notional(o)) }}</td>
+                    <td class="align-right num" style="color:var(--warn);">
+                        {{ commissionEst(o) > 0 ? fmt.money(commissionEst(o), 4) : '—' }}
+                    </td>
                     <td style="color:var(--fg-3);">{{ fmt.timeHms(o.createdAt) }}</td>
                 </tr>
                 <tr v-if="rows.length === 0">
-                    <td colspan="10" style="text-align:center;color:var(--fg-3);padding:18px;">Kayıt yok</td>
-                </tr>
-            </tbody>
-        </table>
-    `,
-};
-
-const PositionRows = {
-    props: ["rows"],
-    setup() {
-        function sideBadge(s) {
-            return s === "Long" ? "up" : s === "Short" ? "down" : "";
-        }
-        function sideLabel(s) {
-            return s === "Long" ? "LONG" : s === "Short" ? "SHORT" : s;
-        }
-        return { fmt, sideBadge, sideLabel };
-    },
-    template: `
-        <table class="data">
-            <thead><tr>
-                <th>Sembol</th>
-                <th>Yön</th>
-                <th class="align-right">Adet</th>
-                <th class="align-right">Giriş</th>
-                <th class="align-right">Mark</th>
-                <th class="align-right">Unrealized PnL</th>
-                <th>Açılış</th>
-            </tr></thead>
-            <tbody>
-                <tr v-for="p in rows" :key="p.id">
-                    <td><strong>{{ p.symbol }}</strong></td>
-                    <td><span class="badge" :class="sideBadge(p.side)">{{ sideLabel(p.side) }}</span></td>
-                    <td class="align-right">{{ fmt.num4(p.quantity) }}</td>
-                    <td class="align-right">{{ fmt.price(p.averageEntryPrice) }}</td>
-                    <td class="align-right">{{ fmt.price(p.markPrice) }}</td>
-                    <td class="align-right" :class="fmt.sign(p.unrealizedPnl)">
-                        \${{ fmt.num2(p.unrealizedPnl ?? 0) }}
+                    <td colspan="12" style="text-align:center;color:var(--fg-3);padding:24px;">
+                        Hiç işlem yok
                     </td>
-                    <td style="color:var(--fg-3);">{{ fmt.timeHms(p.openedAt) }}</td>
-                </tr>
-                <tr v-if="rows.length === 0">
-                    <td colspan="7" style="text-align:center;color:var(--fg-3);padding:18px;">Açık pozisyon yok</td>
                 </tr>
             </tbody>
         </table>
@@ -112,54 +111,47 @@ const PositionRows = {
 };
 
 const App = {
-    components: { Sidebar, ErrorBanner, OrderRows, PositionRows },
+    components: { Sidebar, ErrorBanner, OrderHistoryTable },
     template: `
         <div class="app">
             <Sidebar active="orders" />
             <main>
                 <section class="block">
-                    <h2 class="section">Açık Pozisyonlar</h2>
-                    <p class="section-sub">Şu anda açık olan trade pozisyonları.</p>
-                    <div class="toolbar">
-                        <label>Sembol
-                            <input v-model="positionSymbol" placeholder="opsiyonel" style="width:120px;">
-                        </label>
-                        <span style="color:var(--fg-3);font-size:12px;" v-if="positionsPoll.data.value">
-                            toplam: {{ positionsPoll.data.value.length }}
-                        </span>
-                    </div>
-                    <ErrorBanner :error="positionsPoll.error.value" />
-                    <PositionRows v-if="positionsPoll.data.value" :rows="positionsPoll.data.value" />
-                    <div v-else class="skeleton" style="height:80px"></div>
-                </section>
-
-                <section class="block">
                     <h2 class="section">İşlem Geçmişi</h2>
-                    <p class="section-sub">Son gerçekleşen alım/satım kayıtları.</p>
+                    <p class="section-sub">
+                        Tüm alım-satım emirlerinin ham kaydı. Açık pozisyonların özeti için
+                        <a href="/positions.html" style="color:var(--accent);">Portföy</a> sekmesine bakın.
+                        Komisyon sütunu yaklaşık değerdir — gerçek toplam Binance fill ücretine göre
+                        Genel Bakış'taki "Toplam Komisyon Ödenen" KPI'sından alınır.
+                    </p>
                     <div class="toolbar">
-                        <label>Sembol
-                            <input v-model="symbol" placeholder="opsiyonel" style="width:120px;">
+                        <label>Sembol:
+                            <input v-model="symbol" placeholder="örn. BTCUSDT" style="width:140px;">
                         </label>
-                        <label>Mod
+                        <label>Mod:
                             <select v-model="mode">
-                                <option value="">hepsi</option>
+                                <option value="">Hepsi</option>
                                 <option value="Paper">Paper</option>
-                                <option value="LiveTestnet">LiveTestnet</option>
-                                <option value="LiveMainnet">LiveMainnet</option>
+                                <option value="LiveTestnet">Live Testnet</option>
+                                <option value="LiveMainnet">Live Mainnet</option>
                             </select>
                         </label>
-                        <label>Limit
+                        <label>Limit:
                             <select v-model.number="take">
-                                <option>20</option><option>50</option><option>100</option>
+                                <option>20</option>
+                                <option>50</option>
+                                <option>100</option>
+                                <option>200</option>
                             </select>
                         </label>
-                        <span style="color:var(--fg-3);font-size:12px;" v-if="historyPoll.data.value">
-                            toplam: {{ historyPoll.data.value.totalCount }}<span v-if="mode"> · filtre: {{ filteredHistory?.length ?? 0 }}</span>
+                        <span style="color:var(--fg-3);" v-if="historyPoll.data.value">
+                            Toplam: <strong style="color:var(--fg-1);">{{ historyPoll.data.value.totalCount }}</strong>
+                            <span v-if="mode"> · Filtrelenen: {{ filteredHistory?.length ?? 0 }}</span>
                         </span>
                     </div>
                     <ErrorBanner :error="historyPoll.error.value" />
-                    <OrderRows v-if="filteredHistory" :rows="filteredHistory" />
-                    <div v-else class="skeleton" style="height:80px"></div>
+                    <OrderHistoryTable v-if="filteredHistory" :rows="filteredHistory" />
+                    <div v-else class="skeleton" style="height:200px"></div>
                 </section>
             </main>
         </div>
@@ -168,17 +160,16 @@ const App = {
         const symbol = ref("");
         const take = ref(50);
         const mode = ref("");
-        const positionSymbol = ref("");
 
-        const positionsPoll = usePolling(
-            () => api.positions.list({ status: "Open", symbol: positionSymbol.value }),
-            3000);
         const historyPoll = usePolling(
-            () => api.orders.history({ symbol: symbol.value, skip: 0, take: take.value }),
+            () => api.orders.history({
+                symbol: symbol.value || undefined,
+                skip: 0,
+                take: take.value,
+            }),
             5000);
 
-        watch([symbol, take], () => { historyPoll.refresh(); });
-        watch(positionSymbol, () => { positionsPoll.refresh(); });
+        watch([symbol, take], () => historyPoll.refresh());
 
         const filteredHistory = computed(() => {
             const payload = historyPoll.data.value;
@@ -188,7 +179,7 @@ const App = {
             return items.filter(o => o.mode === mode.value);
         });
 
-        return { symbol, take, mode, positionSymbol, positionsPoll, historyPoll, filteredHistory };
+        return { symbol, take, mode, historyPoll, filteredHistory };
     },
 };
 

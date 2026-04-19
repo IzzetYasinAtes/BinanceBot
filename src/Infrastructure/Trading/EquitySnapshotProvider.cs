@@ -90,4 +90,18 @@ public sealed class EquitySnapshotProvider : IEquitySnapshotProvider
 
         return balance.StartingBalance + realizedSum;
     }
+
+    /// <summary>
+    /// Loop 19 — sizing equity uses the realized-only formulation. Symmetric to
+    /// <see cref="GetRealizedEquityAsync"/> by design: the PeakEquity tracker
+    /// (Loop 17) and the position sizer (Loop 19) both need the property that
+    /// open-position mark fluctuations cannot expand the budget that justifies
+    /// further entries. Loop 18 trace: VirtualBalance.Equity drifted from $100
+    /// to $316 once two short positions were marked aggressively, which fed a
+    /// $126 cap (0.40 * $316) and produced 123-XRP fan-outs on a $100 paper
+    /// account. Anchoring sizing on StartingBalance + realized PnL bounds the
+    /// cap at $40 (0.40 * $100) until trades actually settle.
+    /// </summary>
+    public Task<decimal> GetSizingEquityAsync(TradingMode mode, CancellationToken ct)
+        => GetRealizedEquityAsync(mode, ct);
 }

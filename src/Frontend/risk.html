@@ -56,62 +56,79 @@ const App = {
             <main>
                 <section class="block">
                     <h2 class="section">Risk Yönetimi</h2>
-                    <p class="section-sub">Güncel risk limitleri, devre kesici durumu ve drawdown.</p>
+                    <p class="section-sub">Güncel risk limitleri, acil stop durumu ve anlık kayıp yüzdesi.</p>
                     <ErrorBanner :error="anyError" />
 
                     <div class="kpi-row" v-if="profile">
                         <div class="kpi">
-                            <div class="label">Risk / İşlem</div>
+                            <div class="label">İşlem Başına Risk %</div>
                             <div class="value small">{{ fmt.pct(profile.riskPerTradePct) }}</div>
+                            <div class="hint">Tek trade'de riske atılabilecek maks bakiye yüzdesi</div>
                         </div>
                         <div class="kpi">
-                            <div class="label">Max Pozisyon</div>
+                            <div class="label">Max Pozisyon Boyutu %</div>
                             <div class="value small">{{ fmt.pct(profile.maxPositionSizePct) }}</div>
+                            <div class="hint">Bakiyenin yüzdesi olarak izin verilen max açık pozisyon</div>
                         </div>
                         <div class="kpi">
-                            <div class="label">Max DD 24s</div>
+                            <div class="label">Max Kayıp 24s</div>
                             <div class="value small">{{ fmt.pct(profile.maxDrawdown24hPct) }}</div>
+                            <div class="hint">Son 24 saatteki izin verilen max kayıp eşiği</div>
                         </div>
                         <div class="kpi">
-                            <div class="label">Max DD Alltime</div>
+                            <div class="label">Max Kayıp Tüm Zaman</div>
                             <div class="value small">{{ fmt.pct(profile.maxDrawdownAllTimePct) }}</div>
+                            <div class="hint">Tüm zamanlarda izin verilen max düşüş eşiği</div>
                         </div>
                         <div class="kpi">
-                            <div class="label">Max Consec Losses</div>
+                            <div class="label">Max Ardışık Kayıp</div>
                             <div class="value small">{{ profile.maxConsecutiveLosses }}</div>
+                            <div class="hint">Bu sayıyı aşan ardışık kayıp acil stop tetikler</div>
                         </div>
                     </div>
 
-                    <div class="kpi-row" v-if="profile" style="margin-top:12px;">
+                    <div class="kpi-row" v-if="profile" style="margin-top:14px;">
                         <div class="kpi">
-                            <div class="label">Devre Kesici</div>
+                            <div class="label">Acil Stop Durumu</div>
                             <div class="value small">
-                                <span class="badge" :class="cbClass">{{ cb?.status ?? '—' }}</span>
+                                <span class="badge" :class="cbClass">{{ cbLabel }}</span>
                             </div>
                             <div class="hint" v-if="cb?.reason">{{ cb.reason }}</div>
+                            <div class="hint" v-else>Sistem normal çalışıyor</div>
                         </div>
                         <div class="kpi">
-                            <div class="label">Anlık Drawdown</div>
+                            <div class="label">Anlık Kayıp Yüzdesi</div>
                             <div class="value" :class="ddClass">{{ fmt.pct(profile.currentDrawdownPct) }}</div>
+                            <div class="hint">Peak'ten ne kadar düştük</div>
                         </div>
                         <div class="kpi">
-                            <div class="label">Consec Losses</div>
+                            <div class="label">Ardışık Kayıp Sayısı</div>
                             <div class="value">{{ profile.consecutiveLosses }}</div>
+                            <div class="hint">Üst üste kaybedilen trade adedi</div>
                         </div>
                         <div class="kpi">
-                            <div class="label">Realized 24s</div>
-                            <div class="value small" :class="fmt.sign(profile.realizedPnl24h)">{{ fmt.num2(profile.realizedPnl24h) }}</div>
+                            <div class="label">Bugünkü Gerçekleşen K/Z</div>
+                            <div class="value small" :class="fmt.sign(profile.realizedPnl24h)">
+                                {{ fmt.moneySigned(profile.realizedPnl24h) }}
+                            </div>
+                            <div class="hint">Son 24 saat kapanan pozisyonların toplam karı/zararı</div>
                         </div>
                         <div class="kpi">
-                            <div class="label">Realized Alltime</div>
-                            <div class="value small" :class="fmt.sign(profile.realizedPnlAllTime)">{{ fmt.num2(profile.realizedPnlAllTime) }}</div>
+                            <div class="label">Toplam Gerçekleşen K/Z</div>
+                            <div class="value small" :class="fmt.sign(profile.realizedPnlAllTime)">
+                                {{ fmt.moneySigned(profile.realizedPnlAllTime) }}
+                            </div>
+                            <div class="hint">Tüm zamanların kümülatif kar/zararı</div>
                         </div>
                     </div>
                 </section>
 
                 <section class="block">
-                    <h2 class="section">Drawdown Geçmişi (30 gün)</h2>
-                    <p class="section-sub">Her kapanan pozisyon sonrası kümülatif equity ve drawdown.</p>
+                    <h2 class="section">Kayıp Geçmişi (Son 30 Gün)</h2>
+                    <p class="section-sub">
+                        Yeşil çizgi: kümülatif equity (sermaye değişimi). Kırmızı çizgi: drawdown yüzdesi —
+                        peak'ten ne kadar düştüğümüzü gösterir, 0 = peak'teyiz.
+                    </p>
                     <div class="chart-shell">
                         <div class="chart-legend">
                             <span class="lg-kv"><span>Equity</span><strong style="color:var(--accent);">{{ hoverEquity }}</strong></span>
@@ -250,11 +267,18 @@ const App = {
             const s = cbPoll.data.value?.status;
             return s === "Healthy" ? "good" : s === "Tripped" ? "bad" : "warn";
         });
+        const cbLabel = computed(() => {
+            const s = cbPoll.data.value?.status;
+            if (s === "Healthy") return "NORMAL";
+            if (s === "Tripped") return "ACIL STOP";
+            if (s === "Warning") return "UYARI";
+            return s ?? "—";
+        });
 
         return {
             profile: profilePoll.data, cb: cbPoll.data, ddPoll,
             chartEl, hoverEquity, hoverDd,
-            anyError, ddClass, cbClass, fmt,
+            anyError, ddClass, cbClass, cbLabel, fmt,
         };
     },
 };

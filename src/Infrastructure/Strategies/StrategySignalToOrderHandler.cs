@@ -136,7 +136,13 @@ public sealed class StrategySignalToOrderHandler : INotificationHandler<Strategy
                 continue;
             }
 
-            var equity = await equityProvider.GetEquityAsync(mode, ct);
+            // Loop 19 fix: sizing must use realized-only equity (Loop 17 formula).
+            // The previous mark-to-market read inflated the cap when concurrent
+            // open positions were short-MTM-pumped, producing 123-XRP fan-outs
+            // on a $100 paper account ($126 cap = 40 percent of a $316 inflated
+            // equity read). Anchoring on StartingBalance + closed RealizedPnl
+            // keeps the cap at the intended ~$40 floor until trades settle.
+            var equity = await equityProvider.GetSizingEquityAsync(mode, ct);
             if (equity <= 0m)
             {
                 _logger.LogInformation("Equity <= 0 mode={Mode}, signal skipped {Cid}", mode, cid);
