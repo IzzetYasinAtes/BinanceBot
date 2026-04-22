@@ -37,6 +37,55 @@ const App = {
 
                 <ErrorBanner :error="summaryPoll.error.value" />
 
+                <!-- PnL HERO — 3 karta ayrılmış K/Z göstergesi -->
+                <!-- Loop 33: Kapalı Net / Açık Unrealized / Toplam Net ayrı kartlarda. -->
+                <section class="block">
+                    <h2 class="section-title">Kâr / Zarar Özeti</h2>
+
+                    <div class="portfolio-hero-grid">
+                        <!-- 1. Kapalı Net -->
+                        <div class="hero-card" title="Kapanmış işlemlerin komisyondan sonra gerçekleşen net sonucu">
+                            <div class="hero-label">Kapalı Net</div>
+                            <div class="hero-value" :class="pnlClass(summary?.realizedPnlAllTime)">
+                                <template v-if="summary">{{ fmt.moneySigned(summary.realizedPnlAllTime) }}</template>
+                                <span v-else>—</span>
+                            </div>
+                            <div class="hero-sub">
+                                {{ summary ? fmt.int(summary.closedTradeCount) : '—' }} işlem
+                            </div>
+                        </div>
+
+                        <!-- 2. Açık (Kağıt) -->
+                        <div class="hero-card" title="Açık pozisyonların mark-to-market kağıt kâr/zararı; kapanınca komisyon düşer">
+                            <div class="hero-label">Açık (Kağıt)</div>
+                            <div class="hero-value" :class="pnlClass(summary?.unrealizedPnlTotal)">
+                                <template v-if="summary">{{ fmt.moneySigned(summary.unrealizedPnlTotal) }}</template>
+                                <span v-else>—</span>
+                            </div>
+                            <div class="hero-sub">
+                                {{ summary ? fmt.int(summary.openPositionCount) : '—' }} pozisyon
+                            </div>
+                        </div>
+
+                        <!-- 3. Toplam Net -->
+                        <div class="hero-card" title="Cash-grounded toplam: trueEquity − startingBalance (kapalı + açık kağıt)">
+                            <div class="hero-label">Toplam Net</div>
+                            <div class="hero-value" :class="pnlClass(summary?.netPnl)">
+                                <template v-if="summary">{{ fmt.moneySigned(summary.netPnl) }}</template>
+                                <span v-else>—</span>
+                            </div>
+                            <div class="hero-sub">
+                                <template v-if="summary">{{ fmt.pctFracSigned(summary.netPnlPct) }}</template>
+                                <span v-else>—</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <p class="portfolio-hero-note">
+                        Kapalı ≠ Toplam: toplam = kapalı + açık kağıt. Açık pozisyon kapandığında komisyondan sonra gerçek sonucu bulur.
+                    </p>
+                </section>
+
                 <!-- PORTFÖY DURUMU — 7 KPI kartı + mini snowball chart -->
                 <section class="block">
                     <h2 class="section-title">Portföy Durumu</h2>
@@ -51,7 +100,7 @@ const App = {
                                     <AnimatedNumber
                                         v-if="summary"
                                         :value="summary.netPnl"
-                                        :decimals="2"
+                                        :decimals="4"
                                         prefix="$"
                                         :signed="summary.netPnl !== 0"
                                         :duration-ms="800" />
@@ -73,7 +122,7 @@ const App = {
                                     <h3 class="card-title">Mevcut Bakiye</h3>
                                 </div>
                                 <template v-if="cashClamped">
-                                    <div class="card-value metric-warn">$0.00</div>
+                                    <div class="card-value metric-warn">$0.0000</div>
                                     <div class="card-hint">
                                         <span class="badge bad" :title="cashTooltip">Limit aşıldı</span>
                                     </div>
@@ -83,7 +132,7 @@ const App = {
                                         <AnimatedNumber
                                             v-if="summary"
                                             :value="summary.currentCash"
-                                            :decimals="2"
+                                            :decimals="4"
                                             prefix="$"
                                             :duration-ms="800" />
                                         <span v-else>—</span>
@@ -101,7 +150,7 @@ const App = {
                                     <AnimatedNumber
                                         v-if="summary"
                                         :value="summary.trueEquity"
-                                        :decimals="2"
+                                        :decimals="4"
                                         prefix="$"
                                         :duration-ms="800" />
                                     <span v-else>—</span>
@@ -153,6 +202,9 @@ const App = {
                                 <div class="card-value">{{ summary ? fmt.int(summary.openPositionCount) : '—' }}</div>
                                 <div class="card-hint">
                                     MTM {{ summary ? fmt.money(summary.openPositionsValue) : '—' }}
+                                </div>
+                                <div class="card-hint muted tiny" v-if="summary">
+                                    Toplam notional: {{ fmt.money(summary.openPositionsValue) }}
                                 </div>
                             </div>
                         </div>
