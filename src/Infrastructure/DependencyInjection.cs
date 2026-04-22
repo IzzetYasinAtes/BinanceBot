@@ -160,6 +160,9 @@ public static class DependencyInjection
         // ADR-0018 §18.11 — MicroScalper evaluator registered alongside the deprecated
         // VwapEma evaluator; registry dispatches by StrategyType enum value.
         services.AddSingleton<IStrategyEvaluator, MicroScalperVwapEma30sEvaluator>();
+        // Loop 33 AR-GE (Strateji D) — AtrScalper evaluator, MicroScalper ile aynı
+        // IMarketIndicatorService snapshot kaynağını tüketir (yeni Atr14 alanı).
+        services.AddSingleton<IStrategyEvaluator, AtrScalperVwapEmaEvaluator>();
         services.AddSingleton<StrategyEvaluatorRegistry>();
 
         services.AddOptions<StrategySeedOptions>()

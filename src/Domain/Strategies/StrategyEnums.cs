@@ -21,6 +21,11 @@ public enum StrategyStatus
 /// discount). <see cref="VwapEmaHybrid"/> enum ordinali korunur (Loop 19 pattern) —
 /// DB reseed ile eski seed'ler silinir, kod yüzeyinde <c>VwapEmaStrategyEvaluator</c>
 /// deprecated olarak kalır (backward-compat ParametersJson).
+///
+/// Loop 33 AR-GE Strateji D: <see cref="AtrScalperVwapEma1m"/> value <c>3</c> added.
+/// 1m kline VWAP reclaim + EMA20 slope + ATR14 çarpanlı dinamik TP/SL — fee/gross
+/// oranını yüksek-volatiliteli semboller (SOL, ADA) üzerinden %85 yerine %24'e
+/// indirir. MicroScalper ile aynı filtre geometrisi; tek fark TP/SL ATR-adaptif.
 /// </summary>
 public enum StrategyType
 {
@@ -31,6 +36,14 @@ public enum StrategyType
     /// Evaluator: <c>MicroScalperVwapEma30sEvaluator</c>.
     /// </summary>
     MicroScalperVwapEma30s = 2,
+
+    /// <summary>
+    /// Loop 33 AR-GE (Strateji D) — 1m kline VWAP reclaim + EMA20 slope + ATR14
+    /// çarpanlı dinamik TP/SL. Evaluator: <c>AtrScalperVwapEmaEvaluator</c>. Yüksek
+    /// volatiliteli altcoin rotasyonu (SOL, ADA) için çalışır; BTC/ETH/BNB/XRP için
+    /// MicroScalperVwapEma30s geometrisi korunur.
+    /// </summary>
+    AtrScalperVwapEma1m = 3,
 }
 
 public enum StrategySignalDirection
