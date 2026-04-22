@@ -159,9 +159,22 @@ public sealed class MarketIndicatorService : IMarketIndicatorService, IHostedSer
     }
 
     /// <summary>
-    /// ADR-0018 §18.11 — 30sn bar bazında MicroScalper snapshot'ını üretir.
-    /// Warmup: 15-bar VWAP + 20-bar EMA + 20-bar volume SMA → en az 21 bar.
-    /// Hiç bar yoksa veya warmup tamamlanmadıysa <c>null</c>.
+    /// ADR-0018 §18.11 — MicroScalper snapshot'ı.
+    ///
+    /// Loop 24 runtime bug-fix: Binance SPOT WebSocket <c>@kline_30s</c>'i
+    /// desteklemez (bkz. binance-spot-api-docs: valid kline intervals =
+    /// 1s,1m,3m,5m,15m,30m,1h,…). Testnet SPOT stream 30s subscription'ını
+    /// sessizce reddediyordu ve <c>state.ThirtySecond</c> buffer'ı hiçbir zaman
+    /// dolmuyordu (20 dk runtime = 0 bar). Evaluator path bu yüzden hiç
+    /// çağrılmadı (0 emit, 0 skip).
+    ///
+    /// Geçici çözüm: snapshot artık <c>state.OneMinute</c> buffer'ından
+    /// hesaplanıyor — KlineIngestionWorker ve warmup REST path ikisi de 1m
+    /// bar'ları doldurur. Warmup 1440 bar REST backfill ile anında tamamlanır.
+    /// Parametreler (<c>TpGrossPct=0.006</c>, <c>StopPct=0.0035</c>,
+    /// <c>MaxHoldMinutes=2</c>) değişmez ama artık 1m bar bazında uygulanır.
+    /// Strateji tipinin adı (<c>MicroScalperVwapEma30s</c>) geriye dönük uyumluluk
+    /// için korunuyor; ADR-0018 §18.6 revizyonu binance-expert tarafından yapılacak.
     /// </summary>
     public MicroScalperIndicatorSnapshot? TryGetMicroScalperSnapshot(string symbol)
     {
@@ -177,29 +190,35 @@ public sealed class MarketIndicatorService : IMarketIndicatorService, IHostedSer
 
         lock (state.SyncRoot)
         {
-            var thirtyBars = state.ThirtySecond.Snapshot();
+            // Loop 24: 1m buffer'ı kullan (30s spot WS tarafından desteklenmiyor).
+            var bars = state.OneMinute.Snapshot();
 
-            // ADR-0018 §18.11 — 30s warmup eşiği: EMA20 + VolumeSMA20 hesaplanabilir
-            // olmalı + önceki EMA değeri için +1 bar gerekli. 21 bar minimumu safe.
-            if (thirtyBars.Count < 21)
+            // Warmup eşiği: EMA20 + VolumeSMA20 hesaplanabilir + önceki EMA için +1 bar.
+            if (bars.Count < 21)
             {
                 return null;
             }
 
-            // VWAP rolling 15-bar: toplam bar 21 olsa bile VWAP yalnızca son 15 bar'dan
-            // hesaplanır (ADR-0018 §18.7 VwapWindowBars=15).
-            var klines30s = ToKlineList(thirtyBars);
-            var vwapWindow = klines30s.Count <= 15
-                ? klines30s
-                : (IReadOnlyList<Kline>)klines30s.GetRange(klines30s.Count - 15, 15);
+            // VWAP rolling 15-bar: toplam bar sayısı fazla olsa bile son 15 bar.
+            var klines = ToKlineList(bars);
+            var vwapWindow = klines.Count <= 15
+                ? klines
+                : (IReadOnlyList<Kline>)klines.GetRange(klines.Count - 15, 15);
 
             var vwap = Evaluators.Indicators.Vwap(vwapWindow);
-            var volumeSma20 = Evaluators.Indicators.VolumeSma(klines30s, 20);
-            var ema20Now = Evaluators.Indicators.Ema(klines30s, period: 20, endIndex: klines30s.Count - 1);
-            var ema20Prev = Evaluators.Indicators.Ema(klines30s, period: 20, endIndex: klines30s.Count - 2);
+            var volumeSma20 = Evaluators.Indicators.VolumeSma(klines, 20);
+            var ema20Now = Evaluators.Indicators.Ema(klines, period: 20, endIndex: klines.Count - 1);
+            var ema20Prev = Evaluators.Indicators.Ema(klines, period: 20, endIndex: klines.Count - 2);
 
-            var lastBar = klines30s[^1];
-            var prevBar = klines30s[^2];
+            // Loop 33 (AR-GE Strateji D) — ATR14 snapshot alanı. AtrScalperVwapEma1m
+            // evaluator TP/SL geometrisini volatilite rejimine adaptif ölçekler.
+            // Indicators.Atr() bar < period+1 ise 0 döner; evaluator MinTp/MaxTp
+            // clip ile degenerate-case'i güvenle handle eder. 21-bar warmup eşiği
+            // 14-period ATR için zaten yeterli (15 bar minimum).
+            var atr14 = Evaluators.Indicators.Atr(klines, period: 14);
+
+            var lastBar = klines[^1];
+            var prevBar = klines[^2];
 
             return new MicroScalperIndicatorSnapshot(
                 Vwap: vwap,
@@ -209,7 +228,8 @@ public sealed class MarketIndicatorService : IMarketIndicatorService, IHostedSer
                 VolumeSma20: volumeSma20,
                 Ema20Now: ema20Now,
                 Ema20Prev: ema20Prev,
-                AsOf: lastBar.CloseTime);
+                AsOf: lastBar.CloseTime,
+                Atr14: atr14);
         }
     }
 
@@ -318,16 +338,11 @@ public sealed class MarketIndicatorService : IMarketIndicatorService, IHostedSer
 
             await WarmupOneAsync(marketData, symbol, KlineInterval.OneMinute, OneMinuteBufferCapacity, ct);
             await WarmupOneAsync(marketData, symbol, KlineInterval.OneHour, OneHourBufferCapacity, ct);
-            // Loop 23 blocker fix (BLOCKER-1): Binance REST /api/v3/klines does NOT
-            // support interval=30s (only WS streams do). Calling it returns 400.
-            // 30s buffer fills from the live WS consumer loop below; MicroScalper
-            // evaluator skip-returns while TryGetMicroScalperSnapshot is null
-            // (~10 min until 21-bar threshold, accepted trade-off).
-            _logger.LogInformation(
-                "MarketIndicator warmup {Symbol} {Interval}: REST backfill skipped (Binance " +
-                "does not support 30s on REST); WS stream will accumulate bars (~10 min to reach " +
-                "21-bar threshold)",
-                symbol, KlineInterval.ThirtySeconds);
+            // Loop 24 bug-fix: 30s bar path deprecated — Binance SPOT WS does NOT
+            // support @kline_30s (SPOT valid intervals: 1s,1m,3m,…). TryGetMicroScalperSnapshot
+            // now reads state.OneMinute directly, so no separate 30s warmup needed.
+            // state.ThirtySecond buffer remains (consumer loop keeps accepting 30s
+            // bars if ever sent) but is intentionally unused downstream.
 
             // ADR-0016 §16.9.6 — emit per-symbol warmup completion marker.
             await MaybePublishWarmupAsync(symbol, ct);

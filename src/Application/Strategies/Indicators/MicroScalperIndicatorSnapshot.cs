@@ -16,6 +16,14 @@ namespace BinanceBot.Application.Strategies.Indicators;
 /// <param name="Ema20Now">Son bar EMA20 değeri.</param>
 /// <param name="Ema20Prev">Bir önceki bar EMA20 değeri — slope gate için.</param>
 /// <param name="AsOf">Son kapalı 30s bar close time.</param>
+/// <param name="Atr14">
+/// Loop 33 — son 14 bar Average True Range. AtrScalperVwapEma1m evaluator TP/SL
+/// geometrisini volatilite rejimine göre adaptif ölçeklemek için kullanır
+/// (<c>TpPrice = entry ± TpAtrMultiplier × Atr14</c>). Eski MicroScalper evaluator
+/// bu alana dokunmaz, backward-compat için default <c>0</c>. Warmup tamamlanmadan
+/// (14+1 bar altında) <c>0</c> döner — evaluator <c>MinTpPct/MaxTpPct</c> clip ile
+/// degenerate case'i güvenli biçimde handle eder.
+/// </param>
 public sealed record MicroScalperIndicatorSnapshot(
     decimal Vwap,
     decimal PrevBarClose,
@@ -24,4 +32,5 @@ public sealed record MicroScalperIndicatorSnapshot(
     decimal VolumeSma20,
     decimal Ema20Now,
     decimal Ema20Prev,
-    DateTimeOffset AsOf);
+    DateTimeOffset AsOf,
+    decimal Atr14 = 0m);
