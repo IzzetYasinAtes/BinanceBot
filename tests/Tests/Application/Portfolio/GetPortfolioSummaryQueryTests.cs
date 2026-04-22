@@ -241,59 +241,40 @@ public class GetPortfolioSummaryQueryTests
     }
 
     /// <summary>
-    /// ADR-0019 §19.9 — the commission total surfaced by
-    /// <see cref="GetPortfolioSummaryQuery"/> must be the literal SUM of
-    /// <c>OrderFills.Commission</c>, not a hardcoded 0.10% projection. Loop 23
-    /// reviewer BLOCKER proved the old implementation returned a 33% overshoot
-    /// whenever <c>UseBnbFeeDiscount = true</c>. This test stages 3 paper fills
-    /// with the BNB-discount rate (0.075%) applied and asserts the aggregate
-    /// matches the research §5 back-of-envelope: 3 × $5.10 × 0.00075 = $0.011475.
+    /// ADR-0020 §20.8 — the commission total now reads from the Position
+    /// aggregate's own quote-denominated ledger (EntryCommission + ExitCommission),
+    /// not from the OrderFills.Commission mixed-currency aggregation that was
+    /// yielding BTC-value+USDT-value sums in loop 32 diagnosis §4.4.
+    /// Staging: 3 closed positions each with entry+exit commissions set; the
+    /// handler aggregates them to a single USDT total.
     /// </summary>
     [Fact]
-    public async Task TotalCommissionPaid_SumsFromOrderFills_WithBnbDiscount()
+    public async Task TotalCommissionPaid_ReadsFromPositionAggregate_EntryPlusExit()
     {
         var db = NewDb();
         SeedPaper(db, 1000m);
 
-        // 3 paper fills — each at the ADR-0018 §18.10 floor notional of $5.10
-        // (0.001 BTC × 5100). BNB-discount commission = 5.10 × 0.00075 = 0.003825.
-        const decimal expectedPerFillCommission = 0.003825m;
+        // 3 closed paper positions, each with entry+exit quote fee = 0.003825
+        // (0.001 BTC × $5100 × 0.075% BNB-discount per leg). Total expected =
+        // 3 × (0.003825 + 0.003825) = 0.022950 USDT.
         for (var i = 0; i < 3; i++)
         {
-            var order = Order.Place(
-                clientOrderId: $"cid-fee-{i}",
+            var pos = Position.Open(
                 Symbol.From("BTCUSDT"),
-                OrderSide.Sell,
-                OrderType.Market,
-                TimeInForce.Ioc,
+                PositionSide.Long,
                 quantity: 0.001m,
-                price: null,
+                entryPrice: 5100m,
                 stopPrice: null,
                 strategyId: null,
                 mode: TradingMode.Paper,
-                now: T0);
-            order.RegisterFill(
-                exchangeTradeId: 1000 + i,
-                price: 5100m,
-                quantity: 0.001m,
-                commission: expectedPerFillCommission,
-                commissionAsset: "USDT",
-                filledAt: T0);
-            db.Orders.Add(order);
-        }
-        db.SaveChanges();
-
-        // Handler joins OrderFills to Orders on f.OrderId == o.Id. StubDbContext
-        // Ignore()s Order.Fills (nav collection), so we stamp fills into their
-        // own DbSet via EF's change-tracker property API — this doesn't reach
-        // through the domain setter so Order's invariant stays intact.
-        long syntheticFillId = 1;
-        foreach (var o in db.Orders.ToList())
-        {
-            var f = o.Fills.First();
-            var entry = db.OrderFills.Add(f);
-            entry.Property(nameof(OrderFill.OrderId)).CurrentValue = o.Id;
-            entry.Property(nameof(OrderFill.Id)).CurrentValue = syntheticFillId++;
+                now: T0,
+                entryCommission: 0.003825m);
+            pos.Close(
+                exitPrice: 5110m,
+                reason: "tp",
+                now: T0.AddMinutes(5),
+                exitCommission: 0.003825m);
+            db.Positions.Add(pos);
         }
         db.SaveChanges();
 
@@ -302,7 +283,7 @@ public class GetPortfolioSummaryQueryTests
             new GetPortfolioSummaryQuery(TradingMode.Paper), CancellationToken.None);
 
         result.IsSuccess.Should().BeTrue();
-        // 3 × 0.003825 = 0.011475 — the ADR-0019 §19.9 expected aggregate.
-        result.Value.TotalCommissionPaid.Should().Be(0.011475m);
+        // 3 × (0.003825 + 0.003825) = 0.02295 USDT — fee-aware aggregate.
+        result.Value.TotalCommissionPaid.Should().Be(0.02295m);
     }
 }

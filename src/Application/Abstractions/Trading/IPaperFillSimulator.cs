@@ -34,4 +34,9 @@ public sealed record PaperFillOutcome(
     string? RejectReason,
     decimal ExecutedQuantity,
     decimal AvgFillPrice,
-    decimal RealizedCashDelta);
+    decimal RealizedCashDelta,
+    // ADR-0020 §20.7 — sum of per-fill commissions expressed in QUOTE (USDT) currency,
+    // regardless of BUY/SELL side. BUY: quote-equivalent of base-asset fee; SELL:
+    // native quote fee. Caller forwards this into Position.Open(entryCommission:)
+    // or Position.Close(exitCommission:) so domain RealizedPnl stays net of fees.
+    decimal QuoteCommissionTotal = 0m);

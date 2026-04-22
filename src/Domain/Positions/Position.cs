@@ -43,6 +43,20 @@ public sealed class Position : AggregateRoot<long>
 
     public decimal UnrealizedPnl { get; private set; }
     public decimal RealizedPnl { get; private set; }
+
+    /// <summary>
+    /// ADR-0020 §20.6 — entry-leg commission expressed in quote (USDT) currency.
+    /// Accumulates across partial fills via <see cref="AddFill"/>. Never negative.
+    /// Used by <see cref="Close"/> to compute net <see cref="RealizedPnl"/>.
+    /// </summary>
+    public decimal EntryCommission { get; private set; }
+
+    /// <summary>
+    /// ADR-0020 §20.6 — exit-leg commission expressed in quote (USDT) currency.
+    /// Captured on <see cref="Close"/>. Zero while the position is open. Never negative.
+    /// </summary>
+    public decimal ExitCommission { get; private set; }
+
     public long? StrategyId { get; private set; }
     public TradingMode Mode { get; private set; }
     public DateTimeOffset OpenedAt { get; private set; }
@@ -60,6 +74,7 @@ public sealed class Position : AggregateRoot<long>
         long? strategyId,
         TradingMode mode,
         DateTimeOffset now,
+        decimal entryCommission = 0m,
         decimal? takeProfit = null,
         TimeSpan? maxHoldDuration = null)
     {
@@ -83,6 +98,13 @@ public sealed class Position : AggregateRoot<long>
         {
             throw new DomainException("Max hold duration must be positive when set.");
         }
+        if (entryCommission < 0m)
+        {
+            // ADR-0020 §20.6 — negative fees are never valid (Binance fee credit is
+            // not modelled). Admin-open / test paths pass 0m; paper simulator passes
+            // the quote-equivalent fee from PaperFillOutcome.QuoteCommissionTotal.
+            throw new DomainException("Entry commission must be non-negative.");
+        }
 
         var position = new Position
         {
@@ -95,6 +117,8 @@ public sealed class Position : AggregateRoot<long>
             StopPrice = stopPrice,
             TakeProfit = takeProfit,
             MaxHoldDuration = maxHoldDuration,
+            EntryCommission = entryCommission,
+            ExitCommission = 0m,
             StrategyId = strategyId,
             Mode = mode,
             OpenedAt = now,
@@ -106,17 +130,23 @@ public sealed class Position : AggregateRoot<long>
         return position;
     }
 
-    public void AddFill(decimal addQuantity, decimal addPrice, DateTimeOffset now)
+    public void AddFill(decimal addQuantity, decimal addPrice, DateTimeOffset now, decimal addCommission = 0m)
     {
         EnsureOpen();
         if (addQuantity <= 0m || addPrice <= 0m)
         {
             throw new DomainException("Quantity and price must be positive.");
         }
+        if (addCommission < 0m)
+        {
+            throw new DomainException("Fill commission must be non-negative.");
+        }
 
         var totalCost = (AverageEntryPrice * Quantity) + (addPrice * addQuantity);
         Quantity += addQuantity;
         AverageEntryPrice = totalCost / Quantity;
+        // ADR-0020 §20.6 — cumulative fee ledger (not weighted average).
+        EntryCommission += addCommission;
         UpdatedAt = now;
 
         RaiseDomainEvent(new PositionUpdatedEvent(Id, Symbol.Value, Quantity, AverageEntryPrice));
@@ -139,18 +169,28 @@ public sealed class Position : AggregateRoot<long>
         RaiseDomainEvent(new PositionMarkedToMarketEvent(Id, Symbol.Value, markPrice, UnrealizedPnl));
     }
 
-    public void Close(decimal exitPrice, string reason, DateTimeOffset now)
+    public void Close(decimal exitPrice, string reason, DateTimeOffset now, decimal exitCommission = 0m)
     {
         EnsureOpen();
         if (exitPrice <= 0m)
         {
             throw new DomainException("Exit price must be positive.");
         }
+        if (exitCommission < 0m)
+        {
+            throw new DomainException("Exit commission must be non-negative.");
+        }
 
         ExitPrice = exitPrice;
-        RealizedPnl = Side == PositionSide.Long
+        ExitCommission = exitCommission;
+
+        // ADR-0020 §20.6 — RealizedPnl is net of entry + exit commissions (quote USDT).
+        // Pre-ADR-0020 callers that don't provide a commission still get the gross
+        // behaviour because EntryCommission and the default exitCommission are both 0m.
+        var gross = Side == PositionSide.Long
             ? (exitPrice - AverageEntryPrice) * Quantity
             : (AverageEntryPrice - exitPrice) * Quantity;
+        RealizedPnl = gross - EntryCommission - ExitCommission;
         UnrealizedPnl = 0m;
         Status = PositionStatus.Closed;
         ClosedAt = now;
