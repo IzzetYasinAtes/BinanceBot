@@ -136,14 +136,23 @@ public sealed class GetPortfolioSummaryQueryHandler
             select (decimal?)f.Commission
         ).SumAsync(ct) ?? 0m;
 
-        var netPnl = realizedAllTime + unrealizedTotal;
+        // Cash-grounded net: trueEquity - starting. Component metrikleri
+        // (RealizedPnlAllTime, UnrealizedPnlTotal) UI'a ayrı alanlar olarak gider
+        // ama hero "Net K/Z" bu tek tutarlılık sağlanan değerle gösterilir.
+        // PaperFillSimulator fee asimetrisi (ADR-0020 tracklenen) nedeniyle gross
+        // component toplamı trueEquity'den ~fee_quote kadar sapabilir; tek kaynak cash.
+        var netPnl = trueEquity - balance.StartingBalance;
         var netPct = balance.StartingBalance > 0m
             ? netPnl / balance.StartingBalance
             : 0m;
 
-        // Commissions are already netted into RealizedPnl/UnrealizedPnl by the
-        // paper simulator, so NetProfitAfterFees == NetPnl. The field is kept
-        // explicit to make the intent obvious to UI consumers.
+        // ADR-0020 pending: PaperFillSimulator BUY fee base asset cinsinden
+        // OrderFill.Commission alanına yazılıyor ama cash'ten düşülmüyor; SELL
+        // fee ise quote cinsinden cash'ten düşülüyor. Dolayısıyla Position.
+        // RealizedPnl gross kalıyor. NetProfitAfterFees şimdilik netPnl
+        // (cash-grounded) ile aynı döner — ADR-0020 ile Position'a
+        // EntryCommission/ExitCommission eklenince bu alan RealizedPnl_net
+        // toplamına taşınacak.
         var netAfterFees = netPnl;
 
         var decided = winningTrades + losingTrades;

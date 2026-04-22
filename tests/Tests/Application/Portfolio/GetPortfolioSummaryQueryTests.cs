@@ -2,6 +2,7 @@ using BinanceBot.Application.Abstractions;
 using BinanceBot.Application.Portfolio.Queries.GetPortfolioSummary;
 using BinanceBot.Domain.Balances;
 using BinanceBot.Domain.Common;
+using BinanceBot.Domain.Orders;
 using BinanceBot.Domain.Positions;
 using BinanceBot.Domain.ValueObjects;
 using BinanceBot.Tests.Infrastructure.Strategies;
@@ -118,8 +119,12 @@ public class GetPortfolioSummaryQueryTests
         dto.OpenPositionsValue.Should().Be(25m);            // 20 cost + 5 unrealized
         dto.TrueEquity.Should().Be(125m);                   // cash + open value
         dto.OpenPositionCount.Should().Be(1);
-        dto.NetPnl.Should().Be(5m);                         // 0 realized + 5 unrealized
-        dto.NetPnlPct.Should().Be(0.05m);
+        // Loop 32 fix-a: netPnl cash-grounded (trueEquity - starting).
+        // Bu senaryoda fill yok, cash=100, trueEquity=125, starting=100 → netPnl=25.
+        // Component gross toplamı (0 realized + 5 unrealized = 5) artık hero
+        // metriği değil; UI ayrı `UnrealizedPnlTotal` alanından gösterecek.
+        dto.NetPnl.Should().Be(25m);
+        dto.NetPnlPct.Should().Be(0.25m);
     }
 
     [Fact]
@@ -148,7 +153,78 @@ public class GetPortfolioSummaryQueryTests
         dto.WinRate.Should().BeApproximately(2m / 3m, 1e-6m);
         dto.RealizedPnlAllTime.Should().Be(3.5m);
         dto.RealizedPnl24h.Should().Be(3.5m);
-        dto.NetPnl.Should().Be(3.5m);
+        // Loop 32 fix-a: netPnl cash-grounded. Bu testte Position.Close çağırılıyor
+        // ama fill oluşturulmuyor; StubDbContext'te cash (VirtualBalance.CurrentBalance)
+        // 100 kalıyor, trueEquity=100, starting=100 → netPnl=0. Bu senaryo tam olarak
+        // ADR-0020'nin adresleyeceği gap'i sergiliyor: RealizedPnl 3.5 component'i
+        // hero'ya değil, UI'a "RealizedPnlAllTime" alanından gidiyor. ADR-0020 ile
+        // Position.Close cash etkisi simulator içinde netleşince netPnl bu senaryoda
+        // da 3.5m'e yaklaşacak.
+        dto.NetPnl.Should().Be(0m);
+    }
+
+    /// <summary>
+    /// Loop 32 fix-a — invariant. `NetPnl` hero metriği tek bir tutarlılık sağlanan
+    /// değerle gösterilir: <c>trueEquity - startingBalance</c>. Component metrikleri
+    /// (RealizedPnlAllTime + UnrealizedPnlTotal) PaperFillSimulator BUY/SELL fee
+    /// asimetrisi (ADR-0020 tracklenen) nedeniyle trueEquity'den ~fee_quote kadar
+    /// sapabilir. Bu test üç farklı senaryoda (fresh, açık poz unrealized, kapalı
+    /// poz realized) invariant'ın kırılmadığını doğrular.
+    /// </summary>
+    [Fact]
+    public async Task NetPnl_Invariant_EqualsTrueEquityMinusStartingBalance_FreshAccount()
+    {
+        var db = NewDb();
+        SeedPaper(db, 250m);
+        var sut = new GetPortfolioSummaryQueryHandler(db, StubClock().Object);
+
+        var result = await sut.Handle(
+            new GetPortfolioSummaryQuery(TradingMode.Paper), CancellationToken.None);
+
+        result.IsSuccess.Should().BeTrue();
+        var dto = result.Value;
+        dto.NetPnl.Should().Be(dto.TrueEquity - dto.StartingBalance);
+        dto.NetPnl.Should().Be(0m);
+    }
+
+    [Fact]
+    public async Task NetPnl_Invariant_EqualsTrueEquityMinusStartingBalance_OpenUnrealized()
+    {
+        var db = NewDb();
+        SeedPaper(db, 100m);
+        var pos = OpenPos(db, "XRPUSDT", PositionSide.Long, qty: 10m, entry: 2m);
+        pos.MarkToMarket(markPrice: 2.5m, now: T0.AddMinutes(1));
+        db.SaveChanges();
+
+        var sut = new GetPortfolioSummaryQueryHandler(db, StubClock().Object);
+
+        var result = await sut.Handle(
+            new GetPortfolioSummaryQuery(TradingMode.Paper), CancellationToken.None);
+
+        var dto = result.Value;
+        dto.NetPnl.Should().Be(dto.TrueEquity - dto.StartingBalance);
+    }
+
+    [Fact]
+    public async Task NetPnl_Invariant_EqualsTrueEquityMinusStartingBalance_ClosedPlusOpen()
+    {
+        var db = NewDb();
+        SeedPaper(db, 500m);
+
+        var closed = OpenPos(db, "BTCUSDT", PositionSide.Long, qty: 0.001m, entry: 30000m);
+        closed.Close(exitPrice: 31000m, reason: "tp", now: T0.AddMinutes(5));
+
+        var openPos = OpenPos(db, "ETHUSDT", PositionSide.Long, qty: 0.05m, entry: 2500m);
+        openPos.MarkToMarket(markPrice: 2600m, now: T0.AddMinutes(6));
+        db.SaveChanges();
+
+        var sut = new GetPortfolioSummaryQueryHandler(db, StubClock().Object);
+
+        var result = await sut.Handle(
+            new GetPortfolioSummaryQuery(TradingMode.Paper), CancellationToken.None);
+
+        var dto = result.Value;
+        dto.NetPnl.Should().Be(dto.TrueEquity - dto.StartingBalance);
     }
 
     [Fact]
@@ -162,5 +238,71 @@ public class GetPortfolioSummaryQueryTests
 
         result.IsSuccess.Should().BeFalse();
         result.Status.Should().Be(Ardalis.Result.ResultStatus.NotFound);
+    }
+
+    /// <summary>
+    /// ADR-0019 §19.9 — the commission total surfaced by
+    /// <see cref="GetPortfolioSummaryQuery"/> must be the literal SUM of
+    /// <c>OrderFills.Commission</c>, not a hardcoded 0.10% projection. Loop 23
+    /// reviewer BLOCKER proved the old implementation returned a 33% overshoot
+    /// whenever <c>UseBnbFeeDiscount = true</c>. This test stages 3 paper fills
+    /// with the BNB-discount rate (0.075%) applied and asserts the aggregate
+    /// matches the research §5 back-of-envelope: 3 × $5.10 × 0.00075 = $0.011475.
+    /// </summary>
+    [Fact]
+    public async Task TotalCommissionPaid_SumsFromOrderFills_WithBnbDiscount()
+    {
+        var db = NewDb();
+        SeedPaper(db, 1000m);
+
+        // 3 paper fills — each at the ADR-0018 §18.10 floor notional of $5.10
+        // (0.001 BTC × 5100). BNB-discount commission = 5.10 × 0.00075 = 0.003825.
+        const decimal expectedPerFillCommission = 0.003825m;
+        for (var i = 0; i < 3; i++)
+        {
+            var order = Order.Place(
+                clientOrderId: $"cid-fee-{i}",
+                Symbol.From("BTCUSDT"),
+                OrderSide.Sell,
+                OrderType.Market,
+                TimeInForce.Ioc,
+                quantity: 0.001m,
+                price: null,
+                stopPrice: null,
+                strategyId: null,
+                mode: TradingMode.Paper,
+                now: T0);
+            order.RegisterFill(
+                exchangeTradeId: 1000 + i,
+                price: 5100m,
+                quantity: 0.001m,
+                commission: expectedPerFillCommission,
+                commissionAsset: "USDT",
+                filledAt: T0);
+            db.Orders.Add(order);
+        }
+        db.SaveChanges();
+
+        // Handler joins OrderFills to Orders on f.OrderId == o.Id. StubDbContext
+        // Ignore()s Order.Fills (nav collection), so we stamp fills into their
+        // own DbSet via EF's change-tracker property API — this doesn't reach
+        // through the domain setter so Order's invariant stays intact.
+        long syntheticFillId = 1;
+        foreach (var o in db.Orders.ToList())
+        {
+            var f = o.Fills.First();
+            var entry = db.OrderFills.Add(f);
+            entry.Property(nameof(OrderFill.OrderId)).CurrentValue = o.Id;
+            entry.Property(nameof(OrderFill.Id)).CurrentValue = syntheticFillId++;
+        }
+        db.SaveChanges();
+
+        var sut = new GetPortfolioSummaryQueryHandler(db, StubClock().Object);
+        var result = await sut.Handle(
+            new GetPortfolioSummaryQuery(TradingMode.Paper), CancellationToken.None);
+
+        result.IsSuccess.Should().BeTrue();
+        // 3 × 0.003825 = 0.011475 — the ADR-0019 §19.9 expected aggregate.
+        result.Value.TotalCommissionPaid.Should().Be(0.011475m);
     }
 }
