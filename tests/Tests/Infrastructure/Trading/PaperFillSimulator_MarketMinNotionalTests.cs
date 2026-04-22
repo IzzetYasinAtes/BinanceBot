@@ -105,8 +105,9 @@ public class PaperFillSimulator_MarketMinNotionalTests
 
         outcome.Filled.Should().BeTrue();
         outcome.AvgFillPrice.Should().Be(30015m);
-        // BUY cash delta: -price*qty = -30015 * 0.001 = -30.015
-        outcome.RealizedCashDelta.Should().Be(-30.015m);
+        // ADR-0020 §20.7 cash-symmetric — BUY cash = -price*qty - quoteFee.
+        // Notional 30.015, fee 0.10% = 0.030015, cash delta = -30.045015.
+        outcome.RealizedCashDelta.Should().Be(-30.045015m);
     }
 
     [Fact]

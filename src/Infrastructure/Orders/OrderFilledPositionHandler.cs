@@ -61,6 +61,19 @@ public sealed class OrderFilledPositionHandler : INotificationHandler<OrderFille
         var fillQty = order.ExecutedQuantity;
         var now = _clock.UtcNow;
 
+        // ADR-0020 §20.7 — aggregate quote-denominated commission for this order's
+        // fills so the Position aggregate tracks fee-aware RealizedPnl. BUY legs
+        // report commission in base asset (quote-equivalent = fee * price); SELL
+        // legs report commission already in quote currency. Same aggregation
+        // applies for live fills so mainnet/testnet reuse the same pathway when
+        // ADR-0006 unblocks.
+        var orderQuoteFee = await db.OrderFills
+            .AsNoTracking()
+            .Where(f => f.OrderId == order.Id)
+            .SumAsync(f => order.Side == OrderSide.Buy
+                ? f.Commission * f.Price
+                : f.Commission, cancellationToken);
+
         var openPosition = await db.Positions
             .FirstOrDefaultAsync(p =>
                 p.Symbol == order.Symbol &&
@@ -136,6 +149,7 @@ public sealed class OrderFilledPositionHandler : INotificationHandler<OrderFille
                 // ADR-0014 §14.5: maxHoldDuration sourced above from StrategySignal.ContextJson.
                 var pos = Position.Open(order.Symbol, newSide, fillQty, fillPrice,
                     order.StopPrice, order.StrategyId, order.Mode, now,
+                    entryCommission: orderQuoteFee,
                     takeProfit: order.TakeProfit,
                     maxHoldDuration: maxHoldDuration);
                 db.Positions.Add(pos);
@@ -151,17 +165,38 @@ public sealed class OrderFilledPositionHandler : INotificationHandler<OrderFille
 
                 if (sameSide)
                 {
-                    openPosition.AddFill(fillQty, fillPrice, now);
+                    // ADR-0020 §20.6 — partial fill commission accumulates on the
+                    // aggregate via AddFill's addCommission parameter.
+                    openPosition.AddFill(fillQty, fillPrice, now, addCommission: orderQuoteFee);
                     _logger.LogInformation(
-                        "Position {Pos} added fill {Cid} qty={Qty}",
-                        openPosition.Id, notification.ClientOrderId, fillQty);
+                        "Position {Pos} added fill {Cid} qty={Qty} fee={Fee}",
+                        openPosition.Id, notification.ClientOrderId, fillQty, orderQuoteFee);
                 }
                 else if (fillQty >= openPosition.Quantity)
                 {
-                    openPosition.Close(fillPrice, $"order_{notification.ClientOrderId}", now);
+                    // ADR-0020 §20.6 — the reverse fill closes the position so the
+                    // order's quote commission funds the ExitCommission ledger.
+                    // Any leftover flip-side quantity carries the remainder as the
+                    // new position's entry commission (pro-rata by qty share).
+                    decimal exitFee;
+                    decimal flipEntryFee;
+                    if (fillQty > 0m)
+                    {
+                        var closeShare = openPosition.Quantity / fillQty;
+                        exitFee = orderQuoteFee * closeShare;
+                        flipEntryFee = orderQuoteFee - exitFee;
+                    }
+                    else
+                    {
+                        exitFee = 0m;
+                        flipEntryFee = 0m;
+                    }
+
+                    openPosition.Close(fillPrice, $"order_{notification.ClientOrderId}", now,
+                        exitCommission: exitFee);
                     _logger.LogInformation(
-                        "Position {Pos} closed by reverse fill {Cid} price={Price}",
-                        openPosition.Id, notification.ClientOrderId, fillPrice);
+                        "Position {Pos} closed by reverse fill {Cid} price={Price} fee={Fee}",
+                        openPosition.Id, notification.ClientOrderId, fillPrice, exitFee);
 
                     var leftover = fillQty - openPosition.Quantity;
                     if (leftover > 0m)
@@ -172,6 +207,7 @@ public sealed class OrderFilledPositionHandler : INotificationHandler<OrderFille
                         // The flip uses the same incoming stop / take-profit hints as the closing entry order.
                         var flip = Position.Open(order.Symbol, flipSide, leftover, fillPrice,
                             order.StopPrice, order.StrategyId, order.Mode, now,
+                            entryCommission: flipEntryFee,
                             takeProfit: order.TakeProfit,
                             maxHoldDuration: maxHoldDuration);
                         db.Positions.Add(flip);

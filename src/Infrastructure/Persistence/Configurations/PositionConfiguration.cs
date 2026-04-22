@@ -40,6 +40,17 @@ public sealed class PositionConfiguration : IEntityTypeConfiguration<Position>
                 v => v.HasValue ? (TimeSpan?)TimeSpan.FromSeconds(v.Value) : null);
         builder.Property(p => p.UnrealizedPnl).HasPrecision(28, 10);
         builder.Property(p => p.RealizedPnl).HasPrecision(28, 10);
+        // ADR-0020 §20.6 — fee-aware accounting. Both commissions are quote-denominated
+        // (USDT) and accumulated by domain; the column default is 0 so pre-0020 rows
+        // round-trip safely through the migration backfill.
+        builder.Property(p => p.EntryCommission)
+            .HasColumnType("decimal(18,8)")
+            .IsRequired()
+            .HasDefaultValue(0m);
+        builder.Property(p => p.ExitCommission)
+            .HasColumnType("decimal(18,8)")
+            .IsRequired()
+            .HasDefaultValue(0m);
 
         builder.HasIndex(p => new { p.Symbol, p.Mode })
             .IsUnique()

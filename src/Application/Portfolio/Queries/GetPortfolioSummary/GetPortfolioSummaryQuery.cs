@@ -126,25 +126,32 @@ public sealed class GetPortfolioSummaryQueryHandler
                      && p.ClosedAt >= todayStart)
             .SumAsync(p => (decimal?)p.RealizedPnl, ct) ?? 0m;
 
-        // Commission total — sum from OrderFills.Commission joined with Orders by
-        // mode. PaperFeeSimulator writes the real per-fill commission (BNB
-        // discount 0.075% or standard 0.10%) so SUM surfaces the actual cost.
-        var totalCommission = await (
-            from f in _db.OrderFills.AsNoTracking()
-            join o in _db.Orders.AsNoTracking() on f.OrderId equals o.Id
-            where o.Mode == mode
-            select (decimal?)f.Commission
-        ).SumAsync(ct) ?? 0m;
+        // ADR-0020 §20.8 — commission source is the Position aggregate's own
+        // quote-denominated ledger (EntryCommission + ExitCommission). The previous
+        // SUM over OrderFills.Commission mixed BUY fees (base asset) and SELL fees
+        // (quote asset) into one numeric column — the result was not meaningful in
+        // any single currency (see loop 32 diagnosis §4.4 for the exact breakage).
+        var totalCommission = await _db.Positions
+            .AsNoTracking()
+            .Where(p => p.Mode == mode)
+            .SumAsync(p => (decimal?)(p.EntryCommission + p.ExitCommission), ct) ?? 0m;
 
-        var netPnl = realizedAllTime + unrealizedTotal;
+        // Cash-grounded net: trueEquity - starting. Component metrikleri
+        // (RealizedPnlAllTime, UnrealizedPnlTotal) UI'a ayrı alanlar olarak gider
+        // ama hero "Net K/Z" bu tek tutarlılık sağlanan değerle gösterilir.
+        // PaperFillSimulator fee asimetrisi (ADR-0020 tracklenen) nedeniyle gross
+        // component toplamı trueEquity'den ~fee_quote kadar sapabilir; tek kaynak cash.
+        var netPnl = trueEquity - balance.StartingBalance;
         var netPct = balance.StartingBalance > 0m
             ? netPnl / balance.StartingBalance
             : 0m;
 
-        // Commissions are already netted into RealizedPnl/UnrealizedPnl by the
-        // paper simulator, so NetProfitAfterFees == NetPnl. The field is kept
-        // explicit to make the intent obvious to UI consumers.
-        var netAfterFees = netPnl;
+        // ADR-0020 §20.8 — Position.Close artık RealizedPnl'i fee-net yazıyor.
+        // NetProfitAfterFees realizedAllTime + unrealizedTotal toplamı: kapalı
+        // işlemlerin fee-net realized + açık pozisyonların gross unrealized.
+        // Cash-grounded netPnl (trueEquity − starting) matematiksel identite
+        // olarak bu değere eşit olmalı; reviewer invariant skill'i bunu denetler.
+        var netAfterFees = realizedAllTime + unrealizedTotal;
 
         var decided = winningTrades + losingTrades;
         var winRate = decided > 0

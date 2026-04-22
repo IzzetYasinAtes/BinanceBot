@@ -93,11 +93,18 @@ public class OrderFilledPositionHandlerTests
                 b.Property(x => x.Direction).HasConversion<int>();
             });
 
+            // ADR-0020 §20.7 — handler now sums OrderFills for quote-denominated
+            // commission aggregation, so the entity must be mapped even though
+            // the tests below don't stage fills directly.
+            modelBuilder.Entity<OrderFill>(b =>
+            {
+                b.HasKey(x => x.Id);
+            });
+
             modelBuilder.Ignore<Instrument>();
             modelBuilder.Ignore<Kline>();
             modelBuilder.Ignore<BookTicker>();
             modelBuilder.Ignore<OrderBookSnapshot>();
-            modelBuilder.Ignore<OrderFill>();
             modelBuilder.Ignore<Strategy>();
             modelBuilder.Ignore<RiskProfile>();
             modelBuilder.Ignore<BacktestRun>();

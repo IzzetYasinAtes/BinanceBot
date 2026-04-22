@@ -199,7 +199,7 @@ public sealed class StrategySignalToOrderHandler : INotificationHandler<Strategy
             //   effectiveMinNotional: floor check threshold (user target, buffer not counted)
             // This way floor rounding lands between target and target+buffer,
             // but the min-notional skip check uses the strict target.
-            var userTarget = SnowballSizing.CalcMinNotional(equity); // max(equity*0.20, 20)
+            var userTarget = SnowballSizing.CalcMinNotional(equity); // ADR-0021: max(equity*0.20, 20.10)
             var hardCap = equity * risk.MaxPositionSizePct;
             var lotSizeBufferUsd = instrument.StepSize > 0m
                 ? instrument.StepSize * entry

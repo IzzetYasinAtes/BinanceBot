@@ -163,30 +163,30 @@ public sealed class PaperFillSimulator : IPaperFillSimulator
         }
 
         // ---- STEP 5: Commission + RegisterFill ---------------------------------------
+        // ADR-0020 §20.7 — cash-symmetric fee application. BUY and SELL both deduct
+        // the quote-equivalent fee from the virtual cash ledger so the
+        // `starting + Σ realized − Σ open_cost_basis = cash` invariant holds.
         // ADR-0018 §18.12 — BNB discount toggle is honoured via PaperFeeSimulator.
-        // BUY commission is in base asset, SELL in quote, but the simulated rate
-        // (0.10% or 0.075%) is identical; the asset/denomination is purely bookkeeping.
+        // The OrderFill.Commission column keeps Binance fill-report shape: BUY writes
+        // the base-asset equivalent (quoteFee / price), SELL writes the quote fee.
         decimal realizedCash = 0m;
+        decimal quoteCommissionTotal = 0m;
         foreach (var f in fills)
         {
-            var (commission, commissionAsset) = ComputeCommission(
+            var (reportedCommission, commissionAsset, quoteFee) = ComputeCommissionV2(
                 order.Side, f.Price, f.Quantity, instrument, _options.UseBnbFeeDiscount);
 
             var tradeId = Interlocked.Increment(ref _virtualTradeCounter);
-            order.RegisterFill(tradeId, f.Price, f.Quantity, commission, commissionAsset, now);
+            order.RegisterFill(tradeId, f.Price, f.Quantity, reportedCommission, commissionAsset, now);
 
-            // Cash delta (for Paper VirtualBalance). BUY spends quote + base-commission (converted to quote),
-            // SELL gains quote - quote-commission. We keep this in QUOTE currency terms.
-            if (order.Side == OrderSide.Buy)
-            {
-                // Spend quote: -price*qty; base commission is taken from received base (doesn't affect cash)
-                realizedCash -= f.Price * f.Quantity;
-            }
-            else
-            {
-                // Receive quote: +price*qty - quote commission
-                realizedCash += (f.Price * f.Quantity) - commission;
-            }
+            // Cash delta — signed notional minus quote-denominated fee. Applies to
+            // both sides so BUY no longer leaves a "ghost" fee (ADR-0020 §20.7 fix
+            // for loop 32 diagnosis §4.1 asymmetry).
+            var signedNotional = order.Side == OrderSide.Buy
+                ? -f.Price * f.Quantity
+                : +f.Price * f.Quantity;
+            realizedCash += signedNotional - quoteFee;
+            quoteCommissionTotal += quoteFee;
         }
 
         if (remaining > 0m && order.TimeInForce != TimeInForce.Gtc)
@@ -203,34 +203,38 @@ public sealed class PaperFillSimulator : IPaperFillSimulator
             RejectReason: null,
             ExecutedQuantity: executed,
             AvgFillPrice: avg,
-            RealizedCashDelta: realizedCash);
+            RealizedCashDelta: realizedCash,
+            QuoteCommissionTotal: quoteCommissionTotal);
     }
 
-    private static (decimal Commission, string Asset) ComputeCommission(
+    /// <summary>
+    /// ADR-0020 §20.7 — returns three values instead of two: the reported
+    /// commission (base asset for BUY, quote for SELL; Binance fill-report shape),
+    /// the asset label, and the quote-denominated fee used for cash-ledger math
+    /// and <see cref="PaperFillOutcome.QuoteCommissionTotal"/>. The reported
+    /// commission is derived from <see cref="PaperFeeSimulator.CalculateCommission"/>
+    /// which honours the BNB-discount toggle (ADR-0018 §18.12).
+    /// </summary>
+    private static (decimal ReportedCommission, string Asset, decimal QuoteFee) ComputeCommissionV2(
         OrderSide side,
         decimal price,
         decimal quantity,
         Instrument instrument,
         bool bnbDiscount)
     {
-        // ADR-0018 §18.12 — commission uses the shared PaperFeeSimulator which
-        // honours the BNB discount toggle (0.10% → 0.075%). Side-specific asset
-        // denomination (BUY: base, SELL: quote) is kept so the OrderFill ledger
-        // stays consistent with mainnet fill report shape.
         var notional = price * quantity;
+        var quoteFee = PaperFeeSimulator.CalculateCommission(notional, bnbDiscount);
         if (side == OrderSide.Buy)
         {
-            // Commission in base asset — we charge the fee against the notional
-            // then express the quantity equivalent (commission / price).
-            var quoteFee = PaperFeeSimulator.CalculateCommission(notional, bnbDiscount);
+            // BUY commission reported in base asset — matches Binance fill-report
+            // shape (idempotency key per ADR-0008 §8.2) while quoteFee carries the
+            // equivalent USDT value for cash ledger symmetry.
             var baseCommission = price > 0m ? quoteFee / price : 0m;
-            return (baseCommission, instrument.BaseAsset);
+            return (baseCommission, instrument.BaseAsset, quoteFee);
         }
-        else
-        {
-            var commission = PaperFeeSimulator.CalculateCommission(notional, bnbDiscount);
-            return (commission, instrument.QuoteAsset);
-        }
+
+        // SELL: commission already in quote asset; reported == quoteFee.
+        return (quoteFee, instrument.QuoteAsset, quoteFee);
     }
 
     private static string? ValidateFilters(Order order, Instrument instrument)
