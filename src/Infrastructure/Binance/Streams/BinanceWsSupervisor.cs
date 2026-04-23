@@ -227,10 +227,17 @@ public sealed class BinanceWsSupervisor : BackgroundService, IWsReadinessProbe
 
         private void DispatchFrame(byte[] raw, DateTimeOffset receivedAt)
         {
+            string streamName = string.Empty;
             try
             {
-                if (!BinanceStreamParser.TryParseCombinedEnvelope(raw, out var streamName, out var data))
+                if (!BinanceStreamParser.TryParseCombinedEnvelope(raw, out streamName, out var data))
                 {
+                    // Loop 24 diagnostic — non-envelope frames (subscription acks, error
+                    // payloads) were silently dropped. Log the first 200 bytes so we can
+                    // see subscription errors (e.g. "Invalid stream" for unsupported
+                    // intervals on SPOT testnet).
+                    var preview = System.Text.Encoding.UTF8.GetString(raw, 0, Math.Min(raw.Length, 200));
+                    _logger.LogWarning("WS non-envelope frame ({Size}B): {Preview}", raw.Length, preview);
                     return;
                 }
 
@@ -238,7 +245,17 @@ public sealed class BinanceWsSupervisor : BackgroundService, IWsReadinessProbe
                 {
                     if (BinanceStreamParser.TryParseKline(data, receivedAt, out var kline))
                     {
+                        // Loop 24 diagnostic — explicit per-frame kline log so we can
+                        // verify 30s bars actually arrive from the WS. MicroScalper ingestion
+                        // debugging requires this to be visible at INFO level.
+                        _logger.LogInformation(
+                            "Kline received {Symbol} {Interval} openTime={OpenTime:HH:mm:ss} closed={IsClosed} close={Close}",
+                            kline.Symbol, kline.Interval, kline.OpenTime, kline.IsClosed, kline.Close);
                         _bus.PublishKline(kline);
+                    }
+                    else
+                    {
+                        _logger.LogWarning("Kline parse failed stream={Stream}", streamName);
                     }
                 }
                 else if (streamName.Contains("@bookTicker", StringComparison.OrdinalIgnoreCase))
@@ -258,7 +275,9 @@ public sealed class BinanceWsSupervisor : BackgroundService, IWsReadinessProbe
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "WS frame dispatch error. Frame size: {Size}", raw.Length);
+                _logger.LogError(ex,
+                    "WS frame dispatch error stream={Stream} size={Size}",
+                    streamName, raw.Length);
             }
         }
 

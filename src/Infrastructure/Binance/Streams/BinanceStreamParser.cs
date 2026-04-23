@@ -36,7 +36,18 @@ public static class BinanceStreamParser
 
         var symbol = data.GetProperty("s").GetString() ?? string.Empty;
         var intervalCode = k.GetProperty("i").GetString() ?? string.Empty;
-        var interval = KlineIntervalExtensions.FromBinanceCode(intervalCode);
+        KlineInterval interval;
+        try
+        {
+            interval = KlineIntervalExtensions.FromBinanceCode(intervalCode);
+        }
+        catch (ArgumentOutOfRangeException)
+        {
+            // Loop 24 diagnostic — silently-dropped frames with unsupported codes
+            // (e.g. anything the host did not expose in the enum) are now visible
+            // to the caller via the bool return. Supervisor logs the drop.
+            return false;
+        }
         var openTime = DateTimeOffset.FromUnixTimeMilliseconds(k.GetProperty("t").GetInt64());
         var closeTime = DateTimeOffset.FromUnixTimeMilliseconds(k.GetProperty("T").GetInt64());
         var open = ParseDecimal(k.GetProperty("o").GetString());

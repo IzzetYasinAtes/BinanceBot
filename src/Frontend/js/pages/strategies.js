@@ -1,7 +1,8 @@
-// Stratejiler — kart grid + aktif/pasif toggle + son sinyaller.
+// Stratejiler — readonly durum + son sinyaller (Loop 30: aç/kapa panel kaldırıldı).
+// Stratejiler `src/Api/appsettings.json` Seeds dizisinden kod seviyesinde yönetiliyor.
 
-import { createApp, ref, computed } from "vue";
-import { api, getAdminKey } from "../api.js";
+import { createApp, computed } from "vue";
+import { api } from "../api.js";
 import { fmt } from "../format.js";
 import { Sidebar, ErrorBanner, usePolling } from "../ui.js";
 import { SymbolLogo } from "../components/symbolLogo.js";
@@ -14,17 +15,16 @@ const App = {
             <main>
                 <div class="page-header">
                     <h1 class="page-title">Stratejiler</h1>
-                    <p class="page-sub">VWAP + EMA21 hibrit kısa vadeli stratejiler, aktif/pasif toggle ve son sinyal akışı.</p>
+                    <p class="page-sub">Stratejiler kod seviyesinden yönetiliyor. Aç/kapa için <code>src/Api/appsettings.json</code> Seeds dizisinden <code>Activate</code> alanını değiştirin.</p>
                 </div>
 
                 <ErrorBanner :error="listPoll.error.value" />
-                <div v-if="actionError" class="alert">{{ actionError }}</div>
 
                 <section class="block">
-                    <h2 class="section-title">Stratejiler</h2>
+                    <h2 class="section-title">Tanımlı Stratejiler</h2>
 
                     <div v-if="!strategies" class="card-grid">
-                        <div v-for="i in 3" :key="i" class="skeleton" style="height:200px; border-radius:16px"></div>
+                        <div v-for="i in 3" :key="i" class="skeleton" style="height:180px; border-radius:16px"></div>
                     </div>
 
                     <div v-else-if="strategies.length === 0" class="empty-state">
@@ -70,19 +70,7 @@ const App = {
                                     Aktif: {{ fmt.dateShort(s.activatedAt) }}
                                 </span>
                                 <span class="muted tiny" v-else>Hiç aktifleştirilmemiş</span>
-
-                                <button v-if="s.status === 'Active'"
-                                        class="btn btn-sm btn-ghost"
-                                        @click="toggle(s, false)"
-                                        :disabled="busy === s.id">
-                                    Duraklat
-                                </button>
-                                <button v-else
-                                        class="btn btn-sm btn-good"
-                                        @click="toggle(s, true)"
-                                        :disabled="busy === s.id">
-                                    Aktif Et
-                                </button>
+                                <span class="muted tiny">Kod yönetimli (readonly)</span>
                             </div>
                         </div>
                     </div>
@@ -139,8 +127,6 @@ const App = {
     setup() {
         const listPoll    = usePolling(() => api.strategies.list(), 10000);
         const signalsPoll = usePolling(() => api.strategies.latestSignals(12), 8000);
-        const actionError = ref(null);
-        const busy = ref(null);
 
         const strategies = computed(() => {
             const d = listPoll.data.value;
@@ -153,7 +139,7 @@ const App = {
         });
 
         function statusLabel(s) {
-            const map = { Active: "AKTİF", Paused: "DURAKLAMIŞ", Draft: "TASLAK", Deactivated: "KAPALI" };
+            const map = { Active: "AKTİF", Paused: "PASİF", Draft: "TASLAK", Deactivated: "KAPALI" };
             return map[s] || s;
         }
         function statusBadge(s) {
@@ -162,30 +148,7 @@ const App = {
             return "closed";
         }
 
-        async function toggle(s, activate) {
-            actionError.value = null;
-            const key = getAdminKey({ promptMessage: "Admin key (strateji aç/kapa):" });
-            if (!key) return;
-            busy.value = s.id;
-            try {
-                const path = activate
-                    ? `/api/strategies/${s.id}/activate`
-                    : `/api/strategies/${s.id}/deactivate`;
-                const body = activate ? undefined : { reason: "user_toggle" };
-                await api.raw(path, {
-                    method: "POST",
-                    body,
-                    headers: { "X-Admin-Key": key },
-                });
-                await listPoll.refresh();
-            } catch (e) {
-                actionError.value = `Strateji güncellenemedi: ${e.message || e}`;
-            } finally {
-                busy.value = null;
-            }
-        }
-
-        return { listPoll, signalsPoll, strategies, signals, statusLabel, statusBadge, toggle, busy, actionError, fmt };
+        return { listPoll, signalsPoll, strategies, signals, statusLabel, statusBadge, fmt };
     },
 };
 

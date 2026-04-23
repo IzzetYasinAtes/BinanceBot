@@ -84,5 +84,27 @@
       "2026-04-19T20:55:42.1200124Z claimed by backend-dev",
       "2026-04-19T21:01:10.2766451Z released by backend-dev -\u003E Done"
     ]
+  },
+  "loop-24-30s-ingestion-fix": {
+    "TaskId": "loop-24-30s-ingestion-fix",
+    "Status": "Done",
+    "Owner": null,
+    "CreatedUtc": "2026-04-19T21:26:48.7558761Z",
+    "UpdatedUtc": "2026-04-19T21:43:13.797051Z",
+    "History": [
+      "2026-04-19T21:26:48.7558761Z claimed by backend-dev",
+      "2026-04-19T21:43:13.7970510Z released by backend-dev -\u003E Done"
+    ]
+  },
+  "loop33-adr-0020-impl": {
+    "TaskId": "loop33-adr-0020-impl",
+    "Status": "Done",
+    "Owner": null,
+    "CreatedUtc": "2026-04-22T19:09:22.3435895Z",
+    "UpdatedUtc": "2026-04-22T19:18:08.4469639Z",
+    "History": [
+      "2026-04-22T19:09:22.3435895Z claimed by backend-dev",
+      "2026-04-22T19:18:08.4469639Z released by backend-dev -\u003E Done"
+    ]
   }
 }

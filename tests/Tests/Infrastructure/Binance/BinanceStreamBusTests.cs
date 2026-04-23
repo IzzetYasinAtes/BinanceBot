@@ -1,3 +1,4 @@
+using System.Text;
 using BinanceBot.Application.Abstractions.Binance;
 using BinanceBot.Domain.MarketData;
 using BinanceBot.Infrastructure.Binance.Streams;
@@ -90,6 +91,67 @@ public sealed class BinanceStreamBusTests
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(2));
         (await r1.ReadAsync(cts.Token)).Should().Be(payload);
         (await r2.ReadAsync(cts.Token)).Should().Be(payload);
+    }
+
+    /// <summary>
+    /// Loop 24 runtime bug: Binance SPOT WS does not support @kline_30s. Even so,
+    /// our local parser must still parse a raw 30s kline payload correctly — the
+    /// stream-side dispatcher must not silently drop it if the server ever routes
+    /// one through (e.g. a futures endpoint swap, test fixture, or mocked frame).
+    /// </summary>
+    [Fact]
+    public async Task PublishKline_30sPayload_ParsedAndBroadcastToAllSubscribers()
+    {
+        // Combined-stream envelope raw JSON matching Binance doc layout.
+        var rawJson =
+            "{\"stream\":\"btcusdt@kline_30s\",\"data\":{\"e\":\"kline\",\"E\":1745000000000," +
+            "\"s\":\"BTCUSDT\",\"k\":{\"t\":1744999980000,\"T\":1745000009999,\"s\":\"BTCUSDT\"," +
+            "\"i\":\"30s\",\"f\":1,\"L\":10,\"o\":\"100.0\",\"c\":\"100.5\",\"h\":\"101.0\"," +
+            "\"l\":\"99.5\",\"v\":\"10.0\",\"n\":5,\"x\":true,\"q\":\"1000.0\",\"V\":\"5.0\"," +
+            "\"Q\":\"500.0\",\"B\":\"0\"}}}";
+        var rawBytes = Encoding.UTF8.GetBytes(rawJson);
+
+        BinanceStreamParser.TryParseCombinedEnvelope(rawBytes, out var streamName, out var data)
+            .Should().BeTrue();
+        streamName.Should().Be("btcusdt@kline_30s");
+
+        BinanceStreamParser.TryParseKline(data, DateTimeOffset.UtcNow, out var kline)
+            .Should().BeTrue();
+        kline.Interval.Should().Be(KlineInterval.ThirtySeconds);
+        kline.IsClosed.Should().BeTrue();
+
+        // Fan-out broadcast — two subscribers both get the 30s kline envelope.
+        var bus = new BinanceStreamBus();
+        var r1 = bus.SubscribeKlines();
+        var r2 = bus.SubscribeKlines();
+        bus.PublishKline(kline).Should().BeTrue();
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+        (await r1.ReadAsync(cts.Token)).Interval.Should().Be(KlineInterval.ThirtySeconds);
+        (await r2.ReadAsync(cts.Token)).Interval.Should().Be(KlineInterval.ThirtySeconds);
+    }
+
+    /// <summary>
+    /// Loop 24 — unsupported interval codes must not throw through the dispatcher.
+    /// Previously <see cref="KlineIntervalExtensions.FromBinanceCode"/> threw
+    /// ArgumentOutOfRangeException which bubbled into a swallowed WS frame
+    /// dispatch error. Parser now returns <c>false</c> and the supervisor logs it.
+    /// </summary>
+    [Fact]
+    public void TryParseKline_UnknownIntervalCode_ReturnsFalseWithoutThrowing()
+    {
+        var rawJson =
+            "{\"stream\":\"btcusdt@kline_foo\",\"data\":{\"e\":\"kline\",\"E\":1,\"s\":\"BTCUSDT\"," +
+            "\"k\":{\"t\":1,\"T\":2,\"s\":\"BTCUSDT\",\"i\":\"foo\",\"f\":1,\"L\":2,\"o\":\"1\"," +
+            "\"c\":\"1\",\"h\":\"1\",\"l\":\"1\",\"v\":\"1\",\"n\":1,\"x\":true,\"q\":\"1\"," +
+            "\"V\":\"1\",\"Q\":\"1\",\"B\":\"0\"}}}";
+        var raw = Encoding.UTF8.GetBytes(rawJson);
+
+        BinanceStreamParser.TryParseCombinedEnvelope(raw, out _, out var data).Should().BeTrue();
+
+        var parsed = BinanceStreamParser.TryParseKline(data, DateTimeOffset.UtcNow, out var kline);
+        parsed.Should().BeFalse();
+        kline.Should().BeNull();
     }
 
     [Fact]
