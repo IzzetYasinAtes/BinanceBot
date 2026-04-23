@@ -29,11 +29,11 @@ UPDATE Strategies
       UpdatedAt = SYSUTCDATETIME(),
       ActivatedAt = SYSUTCDATETIME();
 
--- 6. VirtualBalance reset (Paper only)
+-- 6. VirtualBalance reset (Paper only) — ADR-0022 Loop 34: $500
 UPDATE VirtualBalances
-  SET StartingBalance = 100.0000000000,
-      CurrentBalance = 100.0000000000,
-      Equity = 100.0000000000,
+  SET StartingBalance = 500.0000000000,
+      CurrentBalance = 500.0000000000,
+      Equity = 500.0000000000,
       IterationId = NEWID(),
       StartedAt = SYSUTCDATETIME(),
       LastResetAt = SYSUTCDATETIME(),
@@ -51,7 +51,7 @@ UPDATE RiskProfiles
       ConsecutiveLosses = 0,
       RealizedPnl24h = 0,
       RealizedPnlAllTime = 0,
-      PeakEquity = 100.0000,
+      PeakEquity = 500.0000,
       CurrentDrawdownPct = 0,
       MaxOpenPositions = 3,          -- ADR-0021: 6 → 3
       UpdatedAt = SYSUTCDATETIME();
