@@ -71,12 +71,16 @@ public sealed class AtrScalperVwapEmaEvaluator : IStrategyEvaluator
     {
         var p = EvaluatorParameterHelper.TryParse<Parameters>(parametersJson) ?? new Parameters();
 
-        var snapshot = _indicators.TryGetMicroScalperSnapshot(symbol);
+        // Loop 37 — KlineInterval param ile snapshot buffer seçimi. 5m timeframe
+        // migrasyonu: Loop 33-36'da 1m bar body × MaxHold potansiyeli TP hit
+        // için matematiksel yetersiz; 5m'e geçiş TP hit olasılığını %50+ artırır.
+        var interval = ParseIntervalOrDefault(p.KlineInterval);
+        var snapshot = _indicators.TryGetMicroScalperSnapshot(symbol, interval);
         if (snapshot is null)
         {
             _logger.LogDebug(
-                "AtrScalper snapshot not ready symbol={Symbol} strategyId={StrategyId}",
-                symbol, strategyId);
+                "AtrScalper snapshot not ready symbol={Symbol} strategyId={StrategyId} interval={Interval}",
+                symbol, strategyId, interval);
             return Task.FromResult<StrategyEvaluation?>(null);
         }
 
@@ -214,6 +218,21 @@ public sealed class AtrScalperVwapEmaEvaluator : IStrategyEvaluator
         if (max > 0m && value > max) return max;
         return value;
     }
+
+    /// <summary>
+    /// Loop 37 — seed JSON <c>KlineInterval</c> string'ini enum'a çevirir.
+    /// Desteklenen değerler: <c>"1m"</c> → <see cref="KlineInterval.OneMinute"/>,
+    /// <c>"5m"</c> → <see cref="KlineInterval.FiveMinutes"/>. Diğer her şey
+    /// <see cref="KlineInterval.OneMinute"/> fallback. Buffer mevcut değilse
+    /// MarketIndicatorService snapshot'ı null döner → evaluator erken çıkar.
+    /// </summary>
+    private static KlineInterval ParseIntervalOrDefault(string? raw) =>
+        raw switch
+        {
+            "1m" => KlineInterval.OneMinute,
+            "5m" => KlineInterval.FiveMinutes,
+            _ => KlineInterval.OneMinute,
+        };
 
     /// <summary>
     /// AR-GE §5 ve Implementation Roadmap — parametre kontratı. Serialised as

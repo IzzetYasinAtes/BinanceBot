@@ -49,6 +49,16 @@ public sealed class MarketIndicatorService : IMarketIndicatorService, IHostedSer
     // 50 bar safety. Binance REST limit endpoint 1 sayfa yeter (=< 1000).
     internal const int ThirtySecondBufferCapacity = 50;
 
+    // Loop 37 — 5m bar buffer (AtrScalper timeframe migration). 5m timeframe'de
+    // MaxHold (default 8 bar) × bar body potansiyeli 1m'e göre 5× artar, TP hit
+    // olasılığı matematiksel olarak sağlanır. Gerekli lookback:
+    //   - EMA20 warm: ~40 bar
+    //   - VolumeSMA20: 20 bar
+    //   - VWAP 15-bar rolling: 15 bar
+    //   - ATR14: 15 bar
+    // 100 bar safety (~8 saat geçmiş). Binance REST limit 1 sayfa yeter.
+    internal const int FiveMinuteBufferCapacity = 100;
+
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly IBinanceMarketStream _stream;
     private readonly IOptionsMonitor<BinanceOptions> _options;
@@ -159,7 +169,8 @@ public sealed class MarketIndicatorService : IMarketIndicatorService, IHostedSer
     }
 
     /// <summary>
-    /// ADR-0018 §18.11 — MicroScalper snapshot'ı.
+    /// ADR-0018 §18.11 + Loop 37 — MicroScalper/AtrScalper snapshot'ı. Interval
+    /// parametresi ile hangi rolling buffer'dan okuyacağı seçilir.
     ///
     /// Loop 24 runtime bug-fix: Binance SPOT WebSocket <c>@kline_30s</c>'i
     /// desteklemez (bkz. binance-spot-api-docs: valid kline intervals =
@@ -168,15 +179,23 @@ public sealed class MarketIndicatorService : IMarketIndicatorService, IHostedSer
     /// dolmuyordu (20 dk runtime = 0 bar). Evaluator path bu yüzden hiç
     /// çağrılmadı (0 emit, 0 skip).
     ///
-    /// Geçici çözüm: snapshot artık <c>state.OneMinute</c> buffer'ından
-    /// hesaplanıyor — KlineIngestionWorker ve warmup REST path ikisi de 1m
-    /// bar'ları doldurur. Warmup 1440 bar REST backfill ile anında tamamlanır.
-    /// Parametreler (<c>TpGrossPct=0.006</c>, <c>StopPct=0.0035</c>,
-    /// <c>MaxHoldMinutes=2</c>) değişmez ama artık 1m bar bazında uygulanır.
-    /// Strateji tipinin adı (<c>MicroScalperVwapEma30s</c>) geriye dönük uyumluluk
-    /// için korunuyor; ADR-0018 §18.6 revizyonu binance-expert tarafından yapılacak.
+    /// Geçici çözüm: <see cref="KlineInterval.OneMinute"/> default'u
+    /// <c>state.OneMinute</c> buffer'ından hesaplanıyor — KlineIngestionWorker
+    /// ve warmup REST path ikisi de 1m bar'ları doldurur. Warmup 1440 bar REST
+    /// backfill ile anında tamamlanır.
+    ///
+    /// Loop 37: <see cref="KlineInterval.FiveMinutes"/> interval parametresi
+    /// ile <c>state.FiveMinute</c> buffer üzerinden 5m snapshot hesaplanır.
+    /// 4 loop kümülatif 1/28 TP hit (%3.6) teşhisi sonrası 5m timeframe'e
+    /// geçilir: 5m bar body × 8 bar = %1.20 potansiyel, TP %0.30 hit %50+
+    /// beklentisi. Parametreler evaluator JSON'ından (<c>KlineInterval</c>
+    /// alanı) taşınır.
+    ///
+    /// Unsupported interval (3m/15m/30m/1h/...) ⇒ <c>null</c>.
     /// </summary>
-    public MicroScalperIndicatorSnapshot? TryGetMicroScalperSnapshot(string symbol)
+    public MicroScalperIndicatorSnapshot? TryGetMicroScalperSnapshot(
+        string symbol,
+        KlineInterval interval = KlineInterval.OneMinute)
     {
         if (string.IsNullOrWhiteSpace(symbol))
         {
@@ -190,8 +209,21 @@ public sealed class MarketIndicatorService : IMarketIndicatorService, IHostedSer
 
         lock (state.SyncRoot)
         {
-            // Loop 24: 1m buffer'ı kullan (30s spot WS tarafından desteklenmiyor).
-            var bars = state.OneMinute.Snapshot();
+            // Loop 37: interval-driven buffer seçimi. Unsupported interval ⇒ null.
+            // OneMinute = legacy MicroScalper/AtrScalper path (Loop 24 workaround);
+            // FiveMinutes = Loop 37 AtrScalper 5m timeframe.
+            var buffer = interval switch
+            {
+                KlineInterval.OneMinute => state.OneMinute,
+                KlineInterval.FiveMinutes => state.FiveMinute,
+                _ => null,
+            };
+            if (buffer is null)
+            {
+                return null;
+            }
+
+            var bars = buffer.Snapshot();
 
             // Warmup eşiği: EMA20 + VolumeSMA20 hesaplanabilir + önceki EMA için +1 bar.
             if (bars.Count < 21)
@@ -263,6 +295,8 @@ public sealed class MarketIndicatorService : IMarketIndicatorService, IHostedSer
             KlineInterval.OneMinute => state.OneMinute,
             KlineInterval.OneHour => state.OneHour,
             KlineInterval.ThirtySeconds => state.ThirtySecond,
+            // Loop 37 — 5m bar buffer (AtrScalper timeframe migration).
+            KlineInterval.FiveMinutes => state.FiveMinute,
             _ => null,
         };
 
@@ -294,7 +328,8 @@ public sealed class MarketIndicatorService : IMarketIndicatorService, IHostedSer
 
                 if (payload.Interval != KlineInterval.OneMinute
                     && payload.Interval != KlineInterval.OneHour
-                    && payload.Interval != KlineInterval.ThirtySeconds)
+                    && payload.Interval != KlineInterval.ThirtySeconds
+                    && payload.Interval != KlineInterval.FiveMinutes)
                 {
                     continue;
                 }
@@ -338,9 +373,12 @@ public sealed class MarketIndicatorService : IMarketIndicatorService, IHostedSer
 
             await WarmupOneAsync(marketData, symbol, KlineInterval.OneMinute, OneMinuteBufferCapacity, ct);
             await WarmupOneAsync(marketData, symbol, KlineInterval.OneHour, OneHourBufferCapacity, ct);
+            // Loop 37 — 5m bar warmup (AtrScalper timeframe migration). 100 bar
+            // REST backfill ile anında doldur; WS @kline_5m stream ile live tutulur.
+            await WarmupOneAsync(marketData, symbol, KlineInterval.FiveMinutes, FiveMinuteBufferCapacity, ct);
             // Loop 24 bug-fix: 30s bar path deprecated — Binance SPOT WS does NOT
             // support @kline_30s (SPOT valid intervals: 1s,1m,3m,…). TryGetMicroScalperSnapshot
-            // now reads state.OneMinute directly, so no separate 30s warmup needed.
+            // OneMinute default'u state.OneMinute'dan okur, 30s warmup gerekmez.
             // state.ThirtySecond buffer remains (consumer loop keeps accepting 30s
             // bars if ever sent) but is intentionally unused downstream.
 
@@ -531,6 +569,8 @@ public sealed class MarketIndicatorService : IMarketIndicatorService, IHostedSer
         public IndicatorRollingBuffer OneHour { get; } = new(OneHourBufferCapacity);
         // ADR-0018 §18.11 — 30sn bar buffer for MicroScalper path.
         public IndicatorRollingBuffer ThirtySecond { get; } = new(ThirtySecondBufferCapacity);
+        // Loop 37 — 5m bar buffer for AtrScalper 5m timeframe migration.
+        public IndicatorRollingBuffer FiveMinute { get; } = new(FiveMinuteBufferCapacity);
 
         // ADR-0016 §16.9.6 — one-shot latch: when warmup budget crosses threshold
         // we publish IndicatorWarmupCompletedEvent exactly once per symbol.
