@@ -34,10 +34,13 @@ public class AtrScalperVwapEmaEvaluatorTests
         "\"MaxHoldMinutes\":6}";
 
     private static (AtrScalperVwapEmaEvaluator Sut, Mock<IMarketIndicatorService> Indicators)
-        Build(MicroScalperIndicatorSnapshot? snapshot, string symbol = Symbol)
+        Build(
+            MicroScalperIndicatorSnapshot? snapshot,
+            string symbol = Symbol,
+            KlineInterval interval = KlineInterval.OneMinute)
     {
         var mock = new Mock<IMarketIndicatorService>();
-        mock.Setup(i => i.TryGetMicroScalperSnapshot(symbol)).Returns(snapshot);
+        mock.Setup(i => i.TryGetMicroScalperSnapshot(symbol, interval)).Returns(snapshot);
         var sut = new AtrScalperVwapEmaEvaluator(
             mock.Object, NullLogger<AtrScalperVwapEmaEvaluator>.Instance);
         return (sut, mock);
@@ -273,5 +276,61 @@ public class AtrScalperVwapEmaEvaluatorTests
         result.ContextJson.Should().Contain("slPct");
         result.ContextJson.Should().Contain("volumeRatio");
         result.ContextJson.Should().Contain("slope");
+    }
+
+    // ---- Loop 37 — 5m timeframe dispatch ---------------------------------
+
+    [Fact]
+    public async Task KlineInterval5m_Routes_ToFiveMinuteBuffer()
+    {
+        // Seed JSON KlineInterval="5m" olduğunda evaluator snapshot'ı
+        // MarketIndicatorService'ten FiveMinutes interval ile ister. Mock
+        // sadece FiveMinutes için snapshot döner; OneMinute için null (default).
+        // Emit edilmişse dispatch 5m path'e doğru akmış demektir.
+        var snapshot = HappySnapshot();
+        var mock = new Mock<IMarketIndicatorService>();
+        mock.Setup(i => i.TryGetMicroScalperSnapshot(Symbol, KlineInterval.FiveMinutes))
+            .Returns(snapshot);
+        // OneMinute fallback kasten null — default-param yoluyla yanlışlıkla
+        // 1m buffer'dan okunursa test fail eder.
+        mock.Setup(i => i.TryGetMicroScalperSnapshot(Symbol, KlineInterval.OneMinute))
+            .Returns((MicroScalperIndicatorSnapshot?)null);
+        var sut = new AtrScalperVwapEmaEvaluator(
+            mock.Object, NullLogger<AtrScalperVwapEmaEvaluator>.Instance);
+
+        var fiveMinParams = DefaultParams.Replace("\"KlineInterval\":\"1m\"", "\"KlineInterval\":\"5m\"");
+
+        var result = await sut.EvaluateAsync(
+            strategyId: 1, fiveMinParams, Symbol,
+            closedBars: Array.Empty<Kline>(), CancellationToken.None);
+
+        result.Should().NotBeNull("5m snapshot mevcut ve tüm filter gate'leri geçiyor");
+        mock.Verify(
+            i => i.TryGetMicroScalperSnapshot(Symbol, KlineInterval.FiveMinutes),
+            Times.Once);
+        mock.Verify(
+            i => i.TryGetMicroScalperSnapshot(Symbol, KlineInterval.OneMinute),
+            Times.Never);
+    }
+
+    [Fact]
+    public async Task KlineInterval1m_Routes_ToOneMinuteBuffer()
+    {
+        // Backward-compat: seed'lerin çoğu halen "1m"; OneMinute buffer'dan okumalı.
+        var snapshot = HappySnapshot();
+        var mock = new Mock<IMarketIndicatorService>();
+        mock.Setup(i => i.TryGetMicroScalperSnapshot(Symbol, KlineInterval.OneMinute))
+            .Returns(snapshot);
+        var sut = new AtrScalperVwapEmaEvaluator(
+            mock.Object, NullLogger<AtrScalperVwapEmaEvaluator>.Instance);
+
+        var result = await sut.EvaluateAsync(
+            strategyId: 1, DefaultParams, Symbol,
+            closedBars: Array.Empty<Kline>(), CancellationToken.None);
+
+        result.Should().NotBeNull();
+        mock.Verify(
+            i => i.TryGetMicroScalperSnapshot(Symbol, KlineInterval.OneMinute),
+            Times.Once);
     }
 }

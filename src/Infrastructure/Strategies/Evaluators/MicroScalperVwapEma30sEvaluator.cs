@@ -56,12 +56,15 @@ public sealed class MicroScalperVwapEma30sEvaluator : IStrategyEvaluator
     {
         var p = EvaluatorParameterHelper.TryParse<Parameters>(parametersJson) ?? new Parameters();
 
-        var snapshot = _indicators.TryGetMicroScalperSnapshot(symbol);
+        // Loop 37 — KlineInterval param ile snapshot buffer seçimi. Parse edilemez
+        // veya desteklenmeyen değer OneMinute fallback (legacy Loop 24 default).
+        var interval = ParseIntervalOrDefault(p.KlineInterval);
+        var snapshot = _indicators.TryGetMicroScalperSnapshot(symbol, interval);
         if (snapshot is null)
         {
             _logger.LogDebug(
-                "MicroScalper snapshot not ready symbol={Symbol} strategyId={StrategyId}",
-                symbol, strategyId);
+                "MicroScalper snapshot not ready symbol={Symbol} strategyId={StrategyId} interval={Interval}",
+                symbol, strategyId, interval);
             return Task.FromResult<StrategyEvaluation?>(null);
         }
 
@@ -170,6 +173,23 @@ public sealed class MicroScalperVwapEma30sEvaluator : IStrategyEvaluator
             ContextJson: ctx,
             SuggestedTakeProfit: takeProfit));
     }
+
+    /// <summary>
+    /// Loop 37 — seed JSON <c>KlineInterval</c> string'ini enum'a çevirir.
+    /// Desteklenen değerler: <c>"1m"</c> → <see cref="KlineInterval.OneMinute"/>,
+    /// <c>"5m"</c> → <see cref="KlineInterval.FiveMinutes"/>.
+    /// Diğer her şey (boş, null, "30s", geçersiz) <see cref="KlineInterval.OneMinute"/>
+    /// fallback (Loop 24 legacy default). MarketIndicatorService'teki SelectBuffer
+    /// yalnızca OneMinute/FiveMinutes destekler; başka değer snapshot'ı null
+    /// yapar ve evaluator güvenle erken çıkar.
+    /// </summary>
+    private static KlineInterval ParseIntervalOrDefault(string? raw) =>
+        raw switch
+        {
+            "1m" => KlineInterval.OneMinute,
+            "5m" => KlineInterval.FiveMinutes,
+            _ => KlineInterval.OneMinute,
+        };
 
     /// <summary>
     /// ADR-0018 §18.7 parameter contract. Serialised as
