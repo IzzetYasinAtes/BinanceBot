@@ -1,4 +1,4 @@
-// Emir Geçmişi — kart grid + status filtre.
+// Emir Geçmişi — satır-satır tablo + status filtre (Loop 30).
 
 import { createApp, ref, computed } from "vue";
 import { api } from "../api.js";
@@ -22,7 +22,7 @@ const App = {
             <main>
                 <div class="page-header">
                     <h1 class="page-title">Emir Geçmişi</h1>
-                    <p class="page-sub">Bot tarafından gönderilen tüm emirler — miktar, gerçekleşen fiyat ve durum.</p>
+                    <p class="page-sub">Bot tarafından gönderilen tüm emirler — satır satır tablo, miktar, fiyat ve durum.</p>
                 </div>
 
                 <ErrorBanner :error="poll.error.value" />
@@ -38,67 +38,57 @@ const App = {
                     </div>
                 </div>
 
-                <div v-if="!rows" class="card-grid">
-                    <div v-for="i in 6" :key="i" class="skeleton" style="height:180px; border-radius:16px"></div>
-                </div>
+                <div v-if="!rows" class="skeleton" style="height:320px; border-radius:14px"></div>
 
                 <div v-else-if="visible.length === 0" class="empty-state">
                     <span class="emoji">∅</span>
                     Bu filtre için emir yok.
                 </div>
 
-                <div v-else class="card-grid-2">
-                    <div v-for="o in visible" :key="o.clientOrderId" class="trade-card fade-in">
-                        <div class="t-head">
-                            <div class="trade-sym">
-                                <SymbolLogo :symbol="o.symbol" :size="28" />
-                                <span>{{ o.symbol }}</span>
-                            </div>
-                            <div class="row gap-2">
-                                <span class="badge" :class="sideClass(o)">
-                                    {{ o.side === 'Buy' ? 'ALIŞ' : 'SATIŞ' }}
-                                </span>
-                                <span class="badge" :class="statusBadge(o.status)">
-                                    {{ statusLabel(o.status) }}
-                                </span>
-                            </div>
-                        </div>
-
-                        <div class="t-body">
-                            <div class="kv">
-                                <div class="k">Tip</div>
-                                <div class="v">{{ o.type }} · {{ o.timeInForce }}</div>
-                            </div>
-                            <div class="kv">
-                                <div class="k">Miktar</div>
-                                <div class="v">{{ fmt.num4(o.quantity) }}</div>
-                            </div>
-                            <div class="kv">
-                                <div class="k">Gerçekleşen</div>
-                                <div class="v">{{ fmt.num4(o.executedQuantity) }}</div>
-                            </div>
-                            <div class="kv">
-                                <div class="k">Ortalama Fiyat</div>
-                                <div class="v">{{ avgPrice(o) }}</div>
-                            </div>
-                            <div class="kv">
-                                <div class="k">Limit / Stop</div>
-                                <div class="v">
-                                    {{ o.price ? '$' + fmt.price(o.price) : '—' }}
-                                    <span v-if="o.stopPrice" class="muted tiny"> · SL {{ '$' + fmt.price(o.stopPrice) }}</span>
-                                </div>
-                            </div>
-                            <div class="kv">
-                                <div class="k">Notional</div>
-                                <div class="v">{{ fmt.money(o.cumulativeQuoteQty) }}</div>
-                            </div>
-                        </div>
-
-                        <div class="t-foot">
-                            <span class="muted tiny">{{ fmt.dateShort(o.createdAt) }}</span>
-                            <span class="muted tiny mono">#{{ o.clientOrderId.slice(0, 12) }}</span>
-                        </div>
-                    </div>
+                <div v-else class="data-table-wrap">
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>ClientOrderId</th>
+                                <th>Sembol</th>
+                                <th>Yön</th>
+                                <th>Tip</th>
+                                <th class="num">Miktar</th>
+                                <th class="num">Ortalama Fiyat</th>
+                                <th class="num">Notional</th>
+                                <th class="num">Komisyon</th>
+                                <th>Durum</th>
+                                <th class="num">Zaman</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr v-for="o in visible" :key="o.clientOrderId">
+                                <td class="mono">{{ shortId(o.clientOrderId) }}</td>
+                                <td class="sym">
+                                    <span class="row-sym">
+                                        <SymbolLogo :symbol="o.symbol" :size="16" />
+                                        {{ o.symbol }}
+                                    </span>
+                                </td>
+                                <td>
+                                    <span class="badge" :class="sideClass(o)">
+                                        {{ o.side === 'Buy' ? 'ALIŞ' : 'SATIŞ' }}
+                                    </span>
+                                </td>
+                                <td>{{ o.type }}<span class="muted tiny"> · {{ o.timeInForce }}</span></td>
+                                <td class="num">{{ fmt.num4(o.quantity) }}</td>
+                                <td class="num">{{ avgPrice(o) }}</td>
+                                <td class="num">{{ fmt.money(o.cumulativeQuoteQty) }}</td>
+                                <td class="num">{{ commissionLabel(o) }}</td>
+                                <td>
+                                    <span class="badge" :class="statusBadge(o.status)">
+                                        {{ statusLabel(o.status) }}
+                                    </span>
+                                </td>
+                                <td class="num">{{ fmt.dateShort(o.createdAt) }}</td>
+                            </tr>
+                        </tbody>
+                    </table>
                 </div>
             </main>
         </div>
@@ -162,12 +152,26 @@ const App = {
             const q = Number(o.executedQuantity || 0);
             const nq = Number(o.cumulativeQuoteQty || 0);
             if (q <= 0 || nq <= 0) return "—";
-            return "$" + fmt.price(nq / q);
+            return fmt.price(nq / q);
+        }
+
+        function commissionLabel(o) {
+            const c = o.commission ?? o.commissionPaid ?? 0;
+            const n = Number(c);
+            if (!isFinite(n) || n === 0) return "—";
+            return fmt.money(n);
+        }
+
+        function shortId(id) {
+            if (!id) return "—";
+            const s = String(id);
+            return s.length > 14 ? s.slice(0, 14) + "…" : s;
         }
 
         return {
             active, filters: STATUS_FILTERS, poll, rows, visible,
-            countByFilter, sideClass, statusLabel, statusBadge, avgPrice, fmt,
+            countByFilter, sideClass, statusLabel, statusBadge, avgPrice,
+            commissionLabel, shortId, fmt,
         };
     },
 };

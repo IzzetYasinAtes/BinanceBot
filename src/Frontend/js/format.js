@@ -15,19 +15,25 @@ export const fmt = {
     num8: (v) => (v == null ? "-" : nf8.format(Number(v))),
     pct: (v) => (v == null ? "-" : `${nf2.format(Number(v) * 100)}%`),
     pctRaw: (v) => (v == null ? "-" : `${nf2.format(Number(v))}%`),
-    /** İşaretli para — örn. +$0.10 / -$0.45 */
-    money: (v, decimals = 2) => {
+    /** Default 4 küsürat para — örn. $0.1234 / $99.9113 (Loop 30: her yerde 4 basamak) */
+    money: (v, decimals = 4) => {
         const n = safeNum(v);
         if (n === null) return "-";
-        const f = decimals === 4 ? nf4 : nf2;
+        const f = decimals === 2 ? nf2 : decimals === 8 ? nf8 : nf4;
         return `$${f.format(Math.abs(n))}`;
     },
-    moneySigned: (v, decimals = 2) => {
+    moneySigned: (v, decimals = 4) => {
         const n = safeNum(v);
         if (n === null) return "-";
-        const f = decimals === 4 ? nf4 : nf2;
+        const f = decimals === 2 ? nf2 : decimals === 8 ? nf8 : nf4;
         const sign = n > 0 ? "+" : n < 0 ? "-" : "";
         return `${sign}$${f.format(Math.abs(n))}`;
+    },
+    /** 4 basamak sade para — prefix YOK (örn. 0.0023 / 100.0000) */
+    money4: (v) => {
+        const n = safeNum(v);
+        if (n === null) return "-";
+        return nf4.format(Math.abs(n));
     },
     /** İşaretli yüzde — örn. +%0.10 / -%5.43 (raw input zaten yüzde değeri) */
     pctSigned: (v) => {
@@ -44,12 +50,19 @@ export const fmt = {
         const sign = p > 0 ? "+" : p < 0 ? "-" : "";
         return `${sign}%${nf2.format(Math.abs(p))}`;
     },
+    /** Default fiyat gösterimi — her zaman 4 basamak (Loop 30 kuralı). */
     price: (v) => {
         if (v == null) return "-";
         const n = Number(v);
-        if (n >= 1000) return nf2.format(n);
-        if (n >= 1) return nf4.format(n);
-        return nf8.format(n);
+        if (!isFinite(n)) return "-";
+        return nf4.format(n);
+    },
+    /** Eski magnitüd bazlı fiyat — sadece klines/orderbook çok küçük altcoin için kalıyor. */
+    price4: (v) => {
+        if (v == null) return "-";
+        const n = Number(v);
+        if (!isFinite(n)) return "-";
+        return n.toFixed(4);
     },
     timeIso: (v) => {
         if (!v) return "-";
