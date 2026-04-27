@@ -59,6 +59,14 @@ public sealed class MarketIndicatorService : IMarketIndicatorService, IHostedSer
     // 100 bar safety (~8 saat geçmiş). Binance REST limit 1 sayfa yeter.
     internal const int FiveMinuteBufferCapacity = 100;
 
+    // Loop 41 — 15m bar buffer (Donchian Breakout 15m). Gerekli lookback:
+    //   - Donchian 20: 20 bar
+    //   - VolumeAvg+Std 20: 20 bar
+    //   - ATR14: 15 bar
+    //   - +1 current bar
+    // 80 bar safety (~20 saat geçmiş). 1 sayfa REST yeter (limit 1000).
+    internal const int FifteenMinuteBufferCapacity = 80;
+
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly IBinanceMarketStream _stream;
     private readonly IOptionsMonitor<BinanceOptions> _options;
@@ -266,6 +274,178 @@ public sealed class MarketIndicatorService : IMarketIndicatorService, IHostedSer
     }
 
     /// <summary>
+    /// Loop 41 AR-GE — Donchian Breakout 15m snapshot. 15m rolling buffer'dan
+    /// son <paramref name="donchianPeriod"/> KAPANMIŞ bar'ın Donchian
+    /// (high/low) penceresini, son <paramref name="volumeWindow"/> bar'ın
+    /// volume aritmetik ortalama + population std dev'ini, son
+    /// <paramref name="atrPeriod"/>+1 bar'lık ATR'ı hesaplar; "current bar"
+    /// olarak buffer'daki son kapalı bar'ı kullanır (Donchian penceresi
+    /// current bar'ı dışarıda bırakır — "üst kırılım" semantiği).
+    ///
+    /// Warmup eşiği: <c>max(donchianPeriod + 1, volumeWindow + 1, atrPeriod + 2)</c>
+    /// — pencereyi current bar dışarıda bırakmak için +1 bar.
+    /// Eşik karşılanmadıysa, symbol takip edilmiyorsa veya parametre &lt;= 0 ise
+    /// <c>null</c> döner.
+    /// </summary>
+    public DonchianBreakoutIndicatorSnapshot? TryGetDonchianBreakoutSnapshot(
+        string symbol,
+        int donchianPeriod,
+        int volumeWindow,
+        int atrPeriod)
+    {
+        if (string.IsNullOrWhiteSpace(symbol))
+        {
+            return null;
+        }
+        if (donchianPeriod <= 0 || volumeWindow <= 0 || atrPeriod <= 0)
+        {
+            return null;
+        }
+
+        if (!_state.TryGetValue(symbol, out var state))
+        {
+            return null;
+        }
+
+        lock (state.SyncRoot)
+        {
+            var bars = state.FifteenMinute.Snapshot();
+
+            // Pencere kapalı bar'lardan oluşur; current bar kırılımı kapalı bar
+            // tabanına göre ölçülür → minimum bar sayısı + current.
+            var minBars = Math.Max(
+                Math.Max(donchianPeriod + 1, volumeWindow + 1),
+                atrPeriod + 2);
+            if (bars.Count < minBars)
+            {
+                return null;
+            }
+
+            var klines = ToKlineList(bars);
+
+            // Current bar = son kapalı; pencere bunu içermez (closed-window
+            // breakout semantiği — currentClose > Max(prev N).
+            var current = klines[^1];
+            var window = klines.GetRange(klines.Count - 1 - donchianPeriod, donchianPeriod);
+
+            var (donHigh, donLow) = Evaluators.Indicators.Donchian(window, donchianPeriod);
+
+            var volWindow = klines.GetRange(klines.Count - 1 - volumeWindow, volumeWindow);
+            var volAvg = Evaluators.Indicators.VolumeSma(volWindow, volumeWindow);
+            var volStd = Evaluators.Indicators.VolumeStdev(volWindow, volumeWindow, volAvg);
+
+            // ATR window: current bar dahil son atrPeriod+1 bar (Indicators.Atr
+            // pencerede period+1 bar bekler — son period bar üzerinde TR hesabı).
+            var atrWindow = klines.GetRange(klines.Count - (atrPeriod + 1), atrPeriod + 1);
+            var atr14 = Evaluators.Indicators.Atr(atrWindow, atrPeriod);
+
+            return new DonchianBreakoutIndicatorSnapshot(
+                DonchianHigh20: donHigh,
+                DonchianLow20: donLow,
+                VolumeAvg20: volAvg,
+                VolumeStd20: volStd,
+                CurrentVolume: current.Volume,
+                Atr14: atr14,
+                CurrentClose: current.ClosePrice,
+                BarClosed: true,
+                LastBarOpenTime: current.OpenTime,
+                AsOf: current.CloseTime);
+        }
+    }
+
+    /// <summary>
+    /// Loop 44 AR-GE — Bollinger Bands Mean Reversion 15m snapshot. 15m rolling
+    /// buffer'dan son <paramref name="bbPeriod"/> bar'ın Bollinger Bands
+    /// (mean ± stdMultiplier × σ), son <paramref name="rsiPeriod"/>+1 bar'ın
+    /// Wilder RSI'ı, son <paramref name="volumeWindow"/> bar'ın volume aritmetik
+    /// ortalama + population std dev'ini ve son <paramref name="atrPeriod"/>+1
+    /// bar'ın ATR'ını hesaplar; "current bar" buffer'daki son kapalı bar'dır.
+    ///
+    /// Donchian'dan farklı: BB pencere semantiğinde current bar DAHİLDİR
+    /// (standard BB period = son N bar; current bar period'un en son üyesi).
+    /// Aynı şekilde Volume mean/std ve RSI da current bar'ı içerir. ATR ise
+    /// period+1 bar gerektirir (önceki bar prev-close referansı için).
+    ///
+    /// Warmup eşiği:
+    /// <c>max(bbPeriod, rsiPeriod + 1, volumeWindow, atrPeriod + 1)</c>.
+    /// Eşik karşılanmadıysa, symbol takip edilmiyorsa veya parametre &lt;= 0 ise
+    /// <c>null</c> döner.
+    /// </summary>
+    public BbMeanReversionIndicatorSnapshot? TryGetBbMeanReversionSnapshot(
+        string symbol,
+        int bbPeriod,
+        decimal bbStdMultiplier,
+        int rsiPeriod,
+        int volumeWindow,
+        int atrPeriod)
+    {
+        if (string.IsNullOrWhiteSpace(symbol))
+        {
+            return null;
+        }
+        if (bbPeriod <= 0 || rsiPeriod <= 0 || volumeWindow <= 0 || atrPeriod <= 0)
+        {
+            return null;
+        }
+
+        if (!_state.TryGetValue(symbol, out var state))
+        {
+            return null;
+        }
+
+        lock (state.SyncRoot)
+        {
+            var bars = state.FifteenMinute.Snapshot();
+
+            // BB / VolumeAvg / VolumeStd current bar dahil son N bar üzerinde
+            // hesaplanır → minimum N bar yeter. RSI ve ATR period+1 bar ister.
+            var minBars = Math.Max(
+                Math.Max(bbPeriod, volumeWindow),
+                Math.Max(rsiPeriod + 1, atrPeriod + 1));
+            if (bars.Count < minBars)
+            {
+                return null;
+            }
+
+            var klines = ToKlineList(bars);
+            var current = klines[^1];
+
+            // BB pencere: current dahil son bbPeriod bar (closes).
+            var bbWindow = klines.GetRange(klines.Count - bbPeriod, bbPeriod);
+            var (bbMean, bbUpper, bbLower) =
+                Evaluators.Indicators.BollingerBands(bbWindow, bbPeriod, bbStdMultiplier);
+
+            // RSI: Wilder period bar'lık rolling — Indicators.Rsi son period bar
+            // close-to-close diff üzerinden hesaplar (+1 prev bar gerek).
+            var rsiWindow = klines.GetRange(klines.Count - (rsiPeriod + 1), rsiPeriod + 1);
+            var rsi14 = Evaluators.Indicators.Rsi(rsiWindow, rsiPeriod);
+
+            // Volume mean + population std, current bar dahil.
+            var volWindow = klines.GetRange(klines.Count - volumeWindow, volumeWindow);
+            var volAvg = Evaluators.Indicators.VolumeSma(volWindow, volumeWindow);
+            var volStd = Evaluators.Indicators.VolumeStdev(volWindow, volumeWindow, volAvg);
+
+            // ATR: period+1 bar (Indicators.Atr içeride period TR hesabı yapar).
+            var atrWindow = klines.GetRange(klines.Count - (atrPeriod + 1), atrPeriod + 1);
+            var atr14 = Evaluators.Indicators.Atr(atrWindow, atrPeriod);
+
+            return new BbMeanReversionIndicatorSnapshot(
+                BbUpper: bbUpper,
+                BbMiddle: bbMean,
+                BbLower: bbLower,
+                Rsi14: rsi14,
+                VolumeAvg20: volAvg,
+                VolumeStd20: volStd,
+                CurrentVolume: current.Volume,
+                Atr14: atr14,
+                CurrentClose: current.ClosePrice,
+                BarClosed: true,
+                LastBarOpenTime: current.OpenTime,
+                AsOf: current.CloseTime);
+        }
+    }
+
+    /// <summary>
     /// Test-friendly injection path — infrastructure tests seed the buffers directly
     /// without starting the hosted service. Returns <c>true</c> when the symbol is
     /// known (added via <c>Symbols</c> config) and the bar was upserted.
@@ -297,6 +477,8 @@ public sealed class MarketIndicatorService : IMarketIndicatorService, IHostedSer
             KlineInterval.ThirtySeconds => state.ThirtySecond,
             // Loop 37 — 5m bar buffer (AtrScalper timeframe migration).
             KlineInterval.FiveMinutes => state.FiveMinute,
+            // Loop 41 — 15m bar buffer (Donchian Breakout 15m).
+            KlineInterval.FifteenMinutes => state.FifteenMinute,
             _ => null,
         };
 
@@ -329,7 +511,8 @@ public sealed class MarketIndicatorService : IMarketIndicatorService, IHostedSer
                 if (payload.Interval != KlineInterval.OneMinute
                     && payload.Interval != KlineInterval.OneHour
                     && payload.Interval != KlineInterval.ThirtySeconds
-                    && payload.Interval != KlineInterval.FiveMinutes)
+                    && payload.Interval != KlineInterval.FiveMinutes
+                    && payload.Interval != KlineInterval.FifteenMinutes)
                 {
                     continue;
                 }
@@ -376,6 +559,10 @@ public sealed class MarketIndicatorService : IMarketIndicatorService, IHostedSer
             // Loop 37 — 5m bar warmup (AtrScalper timeframe migration). 100 bar
             // REST backfill ile anında doldur; WS @kline_5m stream ile live tutulur.
             await WarmupOneAsync(marketData, symbol, KlineInterval.FiveMinutes, FiveMinuteBufferCapacity, ct);
+            // Loop 41 — 15m bar warmup (Donchian Breakout 15m). 80 bar REST backfill;
+            // WS @kline_15m stream ile live tutulur. Donchian/Volume/ATR warmup için
+            // yeterli (max gereksinim 21 bar).
+            await WarmupOneAsync(marketData, symbol, KlineInterval.FifteenMinutes, FifteenMinuteBufferCapacity, ct);
             // Loop 24 bug-fix: 30s bar path deprecated — Binance SPOT WS does NOT
             // support @kline_30s (SPOT valid intervals: 1s,1m,3m,…). TryGetMicroScalperSnapshot
             // OneMinute default'u state.OneMinute'dan okur, 30s warmup gerekmez.
@@ -571,6 +758,8 @@ public sealed class MarketIndicatorService : IMarketIndicatorService, IHostedSer
         public IndicatorRollingBuffer ThirtySecond { get; } = new(ThirtySecondBufferCapacity);
         // Loop 37 — 5m bar buffer for AtrScalper 5m timeframe migration.
         public IndicatorRollingBuffer FiveMinute { get; } = new(FiveMinuteBufferCapacity);
+        // Loop 41 — 15m bar buffer for Donchian Breakout 15m strategy.
+        public IndicatorRollingBuffer FifteenMinute { get; } = new(FifteenMinuteBufferCapacity);
 
         // ADR-0016 §16.9.6 — one-shot latch: when warmup budget crosses threshold
         // we publish IndicatorWarmupCompletedEvent exactly once per symbol.

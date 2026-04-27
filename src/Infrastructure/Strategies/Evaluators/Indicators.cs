@@ -161,6 +161,54 @@ internal static class Indicators
     }
 
     /// <summary>
+    /// Loop 41 — Donchian channel: highest high &amp; lowest low over the most recent
+    /// <paramref name="period"/> bars (current bar dahil değil, kapanmış pencereyi
+    /// hesaplayan caller'dan beklenir). Yetersiz history (&lt; period) ⇒ <c>(0, 0)</c>;
+    /// caller no-signal olarak ele almalıdır.
+    /// </summary>
+    public static (decimal High, decimal Low) Donchian(IReadOnlyList<Kline> bars, int period)
+    {
+        if (period <= 0 || bars.Count < period)
+        {
+            return (0m, 0m);
+        }
+
+        var start = bars.Count - period;
+        var high = bars[start].HighPrice;
+        var low = bars[start].LowPrice;
+        for (var i = start + 1; i < bars.Count; i++)
+        {
+            if (bars[i].HighPrice > high) high = bars[i].HighPrice;
+            if (bars[i].LowPrice < low) low = bars[i].LowPrice;
+        }
+        return (high, low);
+    }
+
+    /// <summary>
+    /// Loop 41 — population standard deviation of <c>Volume</c> across the most recent
+    /// <paramref name="period"/> bars; <paramref name="mean"/> caller tarafından
+    /// hesaplanmış değer (örn. <see cref="VolumeSma"/>). Yetersiz history ⇒ <c>0</c>;
+    /// caller bu durumda Z-Score üretmemelidir.
+    /// </summary>
+    public static decimal VolumeStdev(IReadOnlyList<Kline> bars, int period, decimal mean)
+    {
+        if (period <= 0 || bars.Count < period)
+        {
+            return 0m;
+        }
+
+        decimal sqSum = 0m;
+        var start = bars.Count - period;
+        for (var i = start; i < bars.Count; i++)
+        {
+            var d = bars[i].Volume - mean;
+            sqSum += d * d;
+        }
+        var variance = sqSum / period;
+        return variance <= 0m ? 0m : (decimal)Math.Sqrt((double)variance);
+    }
+
+    /// <summary>
     /// Bollinger Bands (mean ± stdDev * multiplier) over the most recent <paramref name="period"/> closes.
     /// Falls back to a flat band centred on the latest close when history is insufficient.
     /// </summary>

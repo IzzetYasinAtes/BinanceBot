@@ -26,6 +26,21 @@ public enum StrategyStatus
 /// 1m kline VWAP reclaim + EMA20 slope + ATR14 çarpanlı dinamik TP/SL — fee/gross
 /// oranını yüksek-volatiliteli semboller (SOL, ADA) üzerinden %85 yerine %24'e
 /// indirir. MicroScalper ile aynı filtre geometrisi; tek fark TP/SL ATR-adaptif.
+///
+/// Loop 41 AR-GE: <see cref="DonchianBreakout15m"/> value <c>4</c> added. 15m kline
+/// Donchian 20-bar üst kırılım + Volume Z-Score &gt; 1.5 filtresi. ATR14 tabanlı
+/// dinamik TP/SL (TP 2.0×ATR clip [%0.5, %1.2], SL 0.65×ATR clip [%0.2, %0.5]),
+/// MaxHold 90dk, BE WR ~%36.5 hedef. AtrScalperVwapEma1m enum ordinali korunur
+/// (Activate=false ile DB'de yedekte kalır), kod yüzeyinde evaluator class'ı
+/// silinmez — backward-compat (loop rollback için referans).
+///
+/// Loop 44 AR-GE: <see cref="BbMeanReversion15m"/> value <c>5</c> added. 15m kline
+/// Bollinger Bands lower kapışı + RSI oversold (&lt; 30) + Volume Z-Score &gt; 1.0
+/// (panik hacmi) + MinAtrPct filtresi. ATR14 tabanlı dinamik TP/SL (TP 1.5×ATR
+/// clip [%0.4, %1.0], SL 1.0×ATR clip [%0.3, %0.6]), MaxHold 90dk. Loop 41-42-43
+/// DonchianBreakout %0 WR sonrası counter-trend pivot (binance-expert spec onaylı).
+/// DonchianBreakout15m enum ordinali korunur (Activate=false ile yedekte), kod
+/// yüzeyinde evaluator class'ı silinmez — backward-compat (loop rollback için).
 /// </summary>
 public enum StrategyType
 {
@@ -44,6 +59,24 @@ public enum StrategyType
     /// MicroScalperVwapEma30s geometrisi korunur.
     /// </summary>
     AtrScalperVwapEma1m = 3,
+
+    /// <summary>
+    /// Loop 41 AR-GE — 15m kline Donchian 20-bar üst kırılım + Volume Z-Score &gt; 1.5
+    /// + ATR14 tabanlı TP/SL geometrisi (R:R 2.67:1, BE WR ~%36.5). Evaluator:
+    /// <c>DonchianBreakoutEvaluator</c>. Long-only spot paper. Sessiz piyasa filtresi
+    /// (MinAtrPct=0.0006), aynı sembolde sinyal sonrası 4 bar (60dk) cooldown.
+    /// </summary>
+    DonchianBreakout15m = 4,
+
+    /// <summary>
+    /// Loop 44 AR-GE — 15m kline Bollinger Bands counter-trend mean reversion.
+    /// Giriş AND: <c>currentClose &lt; BbLower(20, 2σ)</c> + <c>RSI14 &lt; 30</c>
+    /// + Volume Z-Score &gt; 1.0 (panik satış teyidi) + <c>ATR14/Close &gt;= 0.0007</c>.
+    /// ATR14 tabanlı TP/SL (TP 1.5×ATR clip [%0.4, %1.0], SL 1.0×ATR clip
+    /// [%0.3, %0.6]), MaxHold 90dk, sinyal sonrası 4 bar (60dk) cooldown.
+    /// Evaluator: <c>BbMeanReversionEvaluator</c>. Long-only spot paper.
+    /// </summary>
+    BbMeanReversion15m = 5,
 }
 
 public enum StrategySignalDirection

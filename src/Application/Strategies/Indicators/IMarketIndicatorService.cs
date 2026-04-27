@@ -31,4 +31,43 @@ public interface IMarketIndicatorService
     MicroScalperIndicatorSnapshot? TryGetMicroScalperSnapshot(
         string symbol,
         KlineInterval interval = KlineInterval.OneMinute);
+
+    /// <summary>
+    /// Loop 41 AR-GE — Donchian Channel Breakout (15m) snapshot. Donchian periyodu,
+    /// volume penceresi ve ATR periyodu evaluator parametrelerinden gelir; service
+    /// tarafı yalnızca <see cref="KlineInterval.FifteenMinutes"/> rolling buffer'ından
+    /// hesaplama yapar. Warmup eşiği <c>max(donchianPeriod, volumeWindow, atrPeriod+1)</c>
+    /// karşılanmadan ⇒ <c>null</c>. Buffer yoksa veya symbol takip edilmiyorsa
+    /// ⇒ <c>null</c>.
+    /// </summary>
+    DonchianBreakoutIndicatorSnapshot? TryGetDonchianBreakoutSnapshot(
+        string symbol,
+        int donchianPeriod,
+        int volumeWindow,
+        int atrPeriod);
+
+    /// <summary>
+    /// Loop 44 AR-GE — Bollinger Bands Mean Reversion (15m) snapshot. BB periyodu +
+    /// std multiplier, RSI periyodu, volume penceresi ve ATR periyodu evaluator
+    /// parametrelerinden gelir; service tarafı yalnızca
+    /// <see cref="KlineInterval.FifteenMinutes"/> rolling buffer'ından hesaplama
+    /// yapar.
+    ///
+    /// Donchian'dan farklı pencere semantiği: Donchian "current bar pencerede DEĞİL"
+    /// (closed-window breakout), BB "current bar pencerede VAR" (standard BB period
+    /// = son N bar dahil). Aynı şekilde VolumeAvg/Std ve RSI hesabında da current
+    /// bar dahildir; yalnız ATR (period+1 bar gerektirir) önceki bar'ı önek olarak
+    /// kullanır.
+    ///
+    /// Warmup eşiği: <c>max(bbPeriod, rsiPeriod+1, volumeWindow, atrPeriod+1)</c>
+    /// karşılanmadan ⇒ <c>null</c>. Buffer yoksa, symbol takip edilmiyorsa veya
+    /// herhangi bir parametre &lt;= 0 ise ⇒ <c>null</c>.
+    /// </summary>
+    BbMeanReversionIndicatorSnapshot? TryGetBbMeanReversionSnapshot(
+        string symbol,
+        int bbPeriod,
+        decimal bbStdMultiplier,
+        int rsiPeriod,
+        int volumeWindow,
+        int atrPeriod);
 }
