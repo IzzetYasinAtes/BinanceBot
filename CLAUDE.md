@@ -28,6 +28,7 @@ Bu dosya **her session başında otomatik yüklenir**. Projenin altın kurallar�
 7. **Her agent karar verince `agent-bus` MCP `append_decision` çağırır.** Log kontratı.
 8. **Kripto/trade/WS ile ilgili her iş, başlamadan önce `binance-expert` agent'ına danışılır.** PM'in sorumluluğu.
 9. **Feature "done" denmeden `tester` agent'ı Playwright ile gezmek zorunda.** Reviewer bu olmadan "ready" onayı vermez.
+10. **Branch + PR YOK — tüm iş `development` branch'ına doğrudan commit + push.** Feature branch açma, PR oluşturma yasak. Akış: `git checkout development && git pull && <değişiklik> && git add -A && git commit && git push origin development`. Main'e geçiş sadece kullanıcı "main'e al" derse.
 
 ## PM Protokolü (kullanıcı ile konuşan tek agent)
 
