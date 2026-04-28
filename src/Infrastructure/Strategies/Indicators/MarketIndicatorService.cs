@@ -446,6 +446,99 @@ public sealed class MarketIndicatorService : IMarketIndicatorService, IHostedSer
     }
 
     /// <summary>
+    /// Loop 46 AR-GE — EMA9/EMA21 crossover scalper (1m) snapshot. 1m rolling
+    /// buffer'dan EMA9/EMA21 (now + prev), Wilder RSI14, VolumeSMA20 ve ATR14
+    /// hesaplar; "current bar" buffer'daki son kapalı 1m bar'dır.
+    ///
+    /// Pencere semantiği:
+    ///   - Ema*Now : current bar dahil son <c>period</c> bar üzerinde EMA.
+    ///   - Ema*Prev: current bar HARİÇ son <c>period</c> bar (yani indeks
+    ///     <c>Count-2</c> son bar) üzerinde EMA — slope/cross trace.
+    ///   - Rsi14   : son <c>rsiPeriod+1</c> bar close-to-close diff (Wilder).
+    ///   - VolumeSma20: son <c>volumeWindow</c> bar volume aritmetik ortalama
+    ///     (current bar dahil).
+    ///   - Atr14   : son <c>atrPeriod+1</c> bar TR (Indicators.Atr içeride
+    ///     son <c>atrPeriod</c> bar üzerinde TR hesabı yapar; prev-close
+    ///     referansı için +1).
+    ///
+    /// Warmup eşiği:
+    /// <c>max(emaSlowPeriod + 1, rsiPeriod + 1, volumeWindow, atrPeriod + 1)</c>.
+    /// Eşik karşılanmadıysa veya parametre &lt;= 0 ise <c>null</c>.
+    /// </summary>
+    public EmaScalperIndicatorSnapshot? TryGetEmaScalperSnapshot(
+        string symbol,
+        int emaFastPeriod,
+        int emaSlowPeriod,
+        int rsiPeriod,
+        int volumeWindow,
+        int atrPeriod)
+    {
+        if (string.IsNullOrWhiteSpace(symbol))
+        {
+            return null;
+        }
+        if (emaFastPeriod <= 0 || emaSlowPeriod <= 0
+            || rsiPeriod <= 0 || volumeWindow <= 0 || atrPeriod <= 0)
+        {
+            return null;
+        }
+
+        if (!_state.TryGetValue(symbol, out var state))
+        {
+            return null;
+        }
+
+        lock (state.SyncRoot)
+        {
+            var bars = state.OneMinute.Snapshot();
+
+            // EMA*Prev için Count-2 indeksli bar gerekir → +1 ekstra bar şart.
+            // Slow EMA period kadar history bekleriz (kısa-EMA period zaten daha küçük).
+            var minBars = Math.Max(
+                Math.Max(emaSlowPeriod + 1, volumeWindow),
+                Math.Max(rsiPeriod + 1, atrPeriod + 1));
+            if (bars.Count < minBars)
+            {
+                return null;
+            }
+
+            var klines = ToKlineList(bars);
+            var current = klines[^1];
+
+            var emaFastNow = Evaluators.Indicators.Ema(klines, period: emaFastPeriod, endIndex: klines.Count - 1);
+            var emaFastPrev = Evaluators.Indicators.Ema(klines, period: emaFastPeriod, endIndex: klines.Count - 2);
+            var emaSlowNow = Evaluators.Indicators.Ema(klines, period: emaSlowPeriod, endIndex: klines.Count - 1);
+            var emaSlowPrev = Evaluators.Indicators.Ema(klines, period: emaSlowPeriod, endIndex: klines.Count - 2);
+
+            // RSI: son rsiPeriod+1 bar close-to-close diff.
+            var rsiWindow = klines.GetRange(klines.Count - (rsiPeriod + 1), rsiPeriod + 1);
+            var rsi14 = Evaluators.Indicators.Rsi(rsiWindow, rsiPeriod);
+
+            // VolumeSMA: current bar dahil son volumeWindow bar.
+            var volWindow = klines.GetRange(klines.Count - volumeWindow, volumeWindow);
+            var volumeSma = Evaluators.Indicators.VolumeSma(volWindow, volumeWindow);
+
+            // ATR: period+1 bar.
+            var atrWindow = klines.GetRange(klines.Count - (atrPeriod + 1), atrPeriod + 1);
+            var atr14 = Evaluators.Indicators.Atr(atrWindow, atrPeriod);
+
+            return new EmaScalperIndicatorSnapshot(
+                Ema9Now: emaFastNow,
+                Ema9Prev: emaFastPrev,
+                Ema21Now: emaSlowNow,
+                Ema21Prev: emaSlowPrev,
+                Rsi14: rsi14,
+                VolumeSma20: volumeSma,
+                CurrentVolume: current.Volume,
+                Atr14: atr14,
+                CurrentClose: current.ClosePrice,
+                BarClosed: true,
+                LastBarOpenTime: current.OpenTime,
+                AsOf: current.CloseTime);
+        }
+    }
+
+    /// <summary>
     /// Test-friendly injection path — infrastructure tests seed the buffers directly
     /// without starting the hosted service. Returns <c>true</c> when the symbol is
     /// known (added via <c>Symbols</c> config) and the bar was upserted.

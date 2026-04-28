@@ -183,6 +183,11 @@ public static class DependencyInjection
         // (TryGetBbMeanReversionSnapshot). DonchianBreakout %0 WR pivot;
         // appsettings seed Activate flag ile aktif kümeyi belirler.
         services.AddSingleton<IStrategyEvaluator, BbMeanReversionEvaluator>();
+        // Loop 46 AR-GE — 1m EMA9/EMA21 crossover scalper. OneMinute rolling
+        // buffer üzerinden EmaScalperIndicatorSnapshot tüketir. BbMeanReversion15m
+        // düşük frekans pivot (kullanıcı 20-30 trade/saat hedefi). Per-coin 2dk
+        // cooldown + ATR14 dinamik TP/SL (R:R 1.875:1, BE WR ~%34.8).
+        services.AddSingleton<IStrategyEvaluator, EmaScalper1mEvaluator>();
         services.AddSingleton<StrategyEvaluatorRegistry>();
 
         services.AddOptions<StrategySeedOptions>()

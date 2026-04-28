@@ -70,4 +70,29 @@ public interface IMarketIndicatorService
         int rsiPeriod,
         int volumeWindow,
         int atrPeriod);
+
+    /// <summary>
+    /// Loop 46 AR-GE — EMA9/EMA21 crossover scalper (1m) snapshot. EMA fast/slow
+    /// periyotları, RSI periyodu, volume penceresi ve ATR periyodu evaluator
+    /// parametrelerinden gelir; service yalnızca <see cref="KlineInterval.OneMinute"/>
+    /// rolling buffer'ından hesaplama yapar (1m WS @kline_1m + REST 1440-bar
+    /// warmup zaten doludur).
+    ///
+    /// BB / Donchian semantiğinden farklı: tüm indikatörler current bar DAHİL
+    /// hesaplanır (EMA "now" current bar dahil son N bar üzerinde, EMA "prev"
+    /// current bar HARİÇ son N bar üzerinde — slope/cross trace için). RSI ve
+    /// ATR period+1 bar gerektirir (close-to-close diff / TR prev-close).
+    ///
+    /// Warmup eşiği:
+    /// <c>max(emaSlowPeriod + 1, rsiPeriod + 1, volumeWindow, atrPeriod + 1)</c>.
+    /// Eşik karşılanmadıysa, symbol takip edilmiyorsa veya parametre &lt;= 0 ise
+    /// <c>null</c> döner.
+    /// </summary>
+    EmaScalperIndicatorSnapshot? TryGetEmaScalperSnapshot(
+        string symbol,
+        int emaFastPeriod,
+        int emaSlowPeriod,
+        int rsiPeriod,
+        int volumeWindow,
+        int atrPeriod);
 }

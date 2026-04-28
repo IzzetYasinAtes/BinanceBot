@@ -41,6 +41,15 @@ public enum StrategyStatus
 /// DonchianBreakout %0 WR sonrası counter-trend pivot (binance-expert spec onaylı).
 /// DonchianBreakout15m enum ordinali korunur (Activate=false ile yedekte), kod
 /// yüzeyinde evaluator class'ı silinmez — backward-compat (loop rollback için).
+///
+/// Loop 46 AR-GE: <see cref="EmaScalper1m"/> value <c>6</c> added. 1m kline
+/// EMA9/EMA21 crossover scalper + RSI14 nötr aralık (40-65) + gevşek hacim teyidi
+/// + MinAtrPct filtresi. ATR14 tabanlı dinamik TP/SL (TP 1.5×ATR clip
+/// [%0.30, %0.80], SL 0.8×ATR clip [%0.20, %0.50] — R:R 1.875:1, BE WR ~%34.8),
+/// MaxHold 8dk (8 bar × 1m), per-coin 2 bar (2dk) cooldown. Loop 45 BbMeanRev15m
+/// 6h'da 2 trade düşük frekans tespiti sonrası işlem hacmi pivot (kullanıcı talebi
+/// 20-30 trade/saat). BbMeanReversion15m enum ordinali korunur (Activate=false
+/// ile yedekte), kod yüzeyinde evaluator class'ı silinmez — backward-compat.
 /// </summary>
 public enum StrategyType
 {
@@ -77,6 +86,21 @@ public enum StrategyType
     /// Evaluator: <c>BbMeanReversionEvaluator</c>. Long-only spot paper.
     /// </summary>
     BbMeanReversion15m = 5,
+
+    /// <summary>
+    /// Loop 46 AR-GE — 1m kline EMA9/EMA21 crossover scalper.
+    /// Giriş AND: <c>EMA9 &gt; EMA21</c> (kısa-vade trend) + <c>currentClose &gt; EMA9</c>
+    /// (fiyat momentum üstünde) + <c>RSI14 ∈ [40, 65]</c> (nötr) +
+    /// <c>currentVolume &gt; volumeSma20 × 0.8</c> (gevşek hacim teyidi) +
+    /// <c>ATR14/Close &gt;= MinAtrPct</c> (sessiz piyasa engeli) + bar kapandı.
+    /// ATR14 tabanlı TP/SL (TP 1.5×ATR clip [%0.30, %0.80], SL 0.8×ATR clip
+    /// [%0.20, %0.50] — R:R 1.875:1, BE WR ~%34.8), MaxHold 8dk (8 bar × 1m),
+    /// per-coin sinyal sonrası 2 bar (2dk) cooldown. Long-only spot paper.
+    /// Evaluator: <c>EmaScalper1mEvaluator</c>. Snapshot:
+    /// <c>EmaScalperIndicatorSnapshot</c> üzerinden 1m FifteenMinute olmayan
+    /// OneMinute buffer kaynağı.
+    /// </summary>
+    EmaScalper1m = 6,
 }
 
 public enum StrategySignalDirection
