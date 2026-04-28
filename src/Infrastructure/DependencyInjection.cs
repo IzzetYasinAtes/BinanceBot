@@ -188,6 +188,12 @@ public static class DependencyInjection
         // düşük frekans pivot (kullanıcı 20-30 trade/saat hedefi). Per-coin 2dk
         // cooldown + ATR14 dinamik TP/SL (R:R 1.875:1, BE WR ~%34.8).
         services.AddSingleton<IStrategyEvaluator, EmaScalper1mEvaluator>();
+        // Loop 50 AR-GE — Hibrit 1m frekans tetiği + 15m kalite kapısı.
+        // OneMinute + FifteenMinute rolling buffer'larından birleşik
+        // HybridMomentum1mIndicatorSnapshot tüketir (15m BB lower kapışı +
+        // RSI yukarı dönüş + 1m EMA crossover + volume surge + ATR aktif).
+        // Per-coin 3dk cooldown + ATR15m dinamik TP/SL (R:R 1.875:1).
+        services.AddSingleton<IStrategyEvaluator, HybridMomentum1mEvaluator>();
         services.AddSingleton<StrategyEvaluatorRegistry>();
 
         services.AddOptions<StrategySeedOptions>()

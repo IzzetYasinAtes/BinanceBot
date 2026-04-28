@@ -95,4 +95,37 @@ public interface IMarketIndicatorService
         int rsiPeriod,
         int volumeWindow,
         int atrPeriod);
+
+    /// <summary>
+    /// Loop 50 AR-GE — Hybrid 1m frekans tetiği + 15m kalite kapısı snapshot.
+    /// Service hem <see cref="KlineInterval.OneMinute"/> hem
+    /// <see cref="KlineInterval.FifteenMinutes"/> rolling buffer'ından okur ve
+    /// tek snapshot'ta birleştirir; evaluator iki timeframe parametresini bir
+    /// metod çağrısıyla alır.
+    ///
+    /// 1m semantiği: tüm indikatörler current 1m bar dahil hesaplanır
+    /// (EMA9/EMA21 now + prev = endIndex/endIndex-1; VolumeMa20 = son 20 bar
+    /// dahil; ATR14 = son 14 bar TR + prev-close referansı için +1).
+    ///
+    /// 15m semantiği: BB(20,σ×mult) current bar dahil; RSI14 current bar dahil
+    /// (curr) + bir önceki 15m bar dahil (prev — momentum yukarı dönüş trace);
+    /// ATR14 son 14 bar TR + prev-close referansı için +1.
+    ///
+    /// Warmup eşiği:
+    /// <c>1m: max(emaSlowPeriod_1m + 1, volumeWindow_1m, atrPeriod_1m + 1)</c>,
+    /// <c>15m: max(bbPeriod_15m, rsiPeriod_15m + 2, atrPeriod_15m + 1)</c>
+    /// (RSI prev hesabı için +2: Indicators.Rsi son period bar üzerinde diff
+    /// yapar, prev RSI için bir bar daha geriye gider). Eşik karşılanmadıysa,
+    /// symbol takip edilmiyorsa veya parametre &lt;= 0 ise <c>null</c> döner.
+    /// </summary>
+    HybridMomentum1mIndicatorSnapshot? TryGetHybridMomentum1mSnapshot(
+        string symbol,
+        int emaFastPeriod,           // 9
+        int emaSlowPeriod,           // 21
+        int volumeWindow_1m,         // 20
+        int atrPeriod_1m,            // 14
+        int bbPeriod_15m,            // 20
+        decimal bbStdMultiplier_15m, // 2.0
+        int rsiPeriod_15m,           // 14
+        int atrPeriod_15m);          // 14
 }

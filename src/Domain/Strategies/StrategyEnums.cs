@@ -50,6 +50,17 @@ public enum StrategyStatus
 /// 6h'da 2 trade düşük frekans tespiti sonrası işlem hacmi pivot (kullanıcı talebi
 /// 20-30 trade/saat). BbMeanReversion15m enum ordinali korunur (Activate=false
 /// ile yedekte), kod yüzeyinde evaluator class'ı silinmez — backward-compat.
+///
+/// Loop 50 AR-GE: <see cref="HybridMomentum1m"/> value <c>7</c> added. Hibrit
+/// kalite kapısı + frekans tetiği — 15m BB lower kapışı (kalite/dip yakalama)
+/// + 15m RSI14 yukarı dönüş (momentum) + 1m EMA9/EMA21 crossover (frekans
+/// tetiği) + 1m hacim sürpriz (×1.2) + 1m MinAtrPct (%0.03) + per-coin 3 bar
+/// (3dk) cooldown. ATR15m tabanlı dinamik TP/SL (TP 1.5×ATR15 clip [%0.40,
+/// %1.00], SL 0.8×ATR15 clip [%0.20, %0.40] — R:R 1.875:1, BE WR ~%34.8),
+/// MaxHold 30dk. Long-only spot paper. Evaluator: <c>HybridMomentum1mEvaluator</c>.
+/// Snapshot: <c>HybridMomentum1mIndicatorSnapshot</c> hem OneMinute hem
+/// FifteenMinute buffer'ından okur (2 timeframe birleşik). Önceki tüm strateji
+/// enum ordinalleri korunur (Activate=false ile yedekte) — backward-compat.
 /// </summary>
 public enum StrategyType
 {
@@ -101,6 +112,25 @@ public enum StrategyType
     /// OneMinute buffer kaynağı.
     /// </summary>
     EmaScalper1m = 6,
+
+    /// <summary>
+    /// Loop 50 AR-GE — Hibrit 15m kalite kapısı + 1m frekans tetiği.
+    /// Giriş AND (kapalı 15m bar sonrası, 1m bar bazında polled):
+    ///   1. 15m BB lower kapışı: <c>currentClose_15m &lt; BbLower_15m(20, 2σ)</c>.
+    ///   2. 15m RSI14 yukarı dönüş: <c>Rsi14_15m_curr &lt; 40 AND
+    ///      Rsi14_15m_curr &gt; Rsi14_15m_prev</c>.
+    ///   3. 1m EMA crossover/üstü: <c>Ema9_1m &gt; Ema21_1m</c> (crossover veya
+    ///      sustained).
+    ///   4. 1m volume surge: <c>currentVolume_1m &gt; VolumeSma20_1m × 1.2</c>.
+    ///   5. 1m ATR aktif: <c>Atr14_1m / currentClose_1m &gt;= 0.0003</c>.
+    ///   6. 15m bar kapanmış (<see cref="HybridMomentum1mIndicatorSnapshot"/>
+    ///      <c>BarClosed_15m == true</c>).
+    ///   7. Cooldown: per-coin 3 bar × 1dk = 3dk (<see cref="ICooldownService"/>).
+    /// ATR15m tabanlı TP/SL (TP 1.5×ATR15m clip [%0.40, %1.00], SL 0.8×ATR15m
+    /// clip [%0.20, %0.40] — R:R 1.875:1, BE WR ~%34.8), MaxHold 30dk.
+    /// Long-only spot paper. Evaluator: <c>HybridMomentum1mEvaluator</c>.
+    /// </summary>
+    HybridMomentum1m = 7,
 }
 
 public enum StrategySignalDirection

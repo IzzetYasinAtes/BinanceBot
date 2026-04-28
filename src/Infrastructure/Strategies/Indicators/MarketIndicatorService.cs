@@ -539,6 +539,144 @@ public sealed class MarketIndicatorService : IMarketIndicatorService, IHostedSer
     }
 
     /// <summary>
+    /// Loop 50 AR-GE — Hybrid 1m frekans tetiği + 15m kalite kapısı snapshot.
+    /// Hem <c>state.OneMinute</c> hem <c>state.FifteenMinute</c> buffer'ından
+    /// okur, iki timeframe değerlerini tek snapshot'ta birleştirir.
+    ///
+    /// 1m pencere semantiği: EMA9/EMA21 now (endIndex = Count-1) ve prev
+    /// (endIndex = Count-2); VolumeMa20 son <c>volumeWindow_1m</c> bar
+    /// dahil; ATR14 son <c>atrPeriod_1m+1</c> bar (prev-close referansı).
+    ///
+    /// 15m pencere semantiği: BB(period, std×mult) current bar dahil;
+    /// RSI14 curr son <c>rsiPeriod_15m+1</c> bar (close-to-close diff),
+    /// RSI14 prev current bar HARİÇ son <c>rsiPeriod_15m+1</c> bar (yani
+    /// indeks <c>Count-2</c> son bar) — momentum yukarı dönüş trace için;
+    /// ATR14 son <c>atrPeriod_15m+1</c> bar.
+    ///
+    /// Warmup eşiği:
+    ///   1m: <c>max(emaSlowPeriod_1m + 1, volumeWindow_1m, atrPeriod_1m + 1)</c>
+    ///   15m: <c>max(bbPeriod_15m, rsiPeriod_15m + 2, atrPeriod_15m + 1)</c>
+    /// Eşik karşılanmadıysa, symbol takip edilmiyorsa veya parametre &lt;= 0
+    /// ise <c>null</c> döner.
+    /// </summary>
+    public HybridMomentum1mIndicatorSnapshot? TryGetHybridMomentum1mSnapshot(
+        string symbol,
+        int emaFastPeriod,
+        int emaSlowPeriod,
+        int volumeWindow_1m,
+        int atrPeriod_1m,
+        int bbPeriod_15m,
+        decimal bbStdMultiplier_15m,
+        int rsiPeriod_15m,
+        int atrPeriod_15m)
+    {
+        if (string.IsNullOrWhiteSpace(symbol))
+        {
+            return null;
+        }
+        if (emaFastPeriod <= 0 || emaSlowPeriod <= 0
+            || volumeWindow_1m <= 0 || atrPeriod_1m <= 0
+            || bbPeriod_15m <= 0 || rsiPeriod_15m <= 0 || atrPeriod_15m <= 0)
+        {
+            return null;
+        }
+
+        if (!_state.TryGetValue(symbol, out var state))
+        {
+            return null;
+        }
+
+        lock (state.SyncRoot)
+        {
+            var bars1m = state.OneMinute.Snapshot();
+            var bars15m = state.FifteenMinute.Snapshot();
+
+            // Loop 50 — 1m warmup eşiği. EMA prev (Count-2) için +1 bar şart;
+            // Slow EMA period kadar history bekleriz.
+            var minBars1m = Math.Max(
+                Math.Max(emaSlowPeriod + 1, volumeWindow_1m),
+                atrPeriod_1m + 1);
+            if (bars1m.Count < minBars1m)
+            {
+                return null;
+            }
+
+            // Loop 50 — 15m warmup eşiği. RSI prev hesabı için +2 bar
+            // (Indicators.Rsi son rsiPeriod bar üzerinde close-to-close diff
+            // yapar; prev için bir bar daha geriye git).
+            var minBars15m = Math.Max(
+                Math.Max(bbPeriod_15m, rsiPeriod_15m + 2),
+                atrPeriod_15m + 1);
+            if (bars15m.Count < minBars15m)
+            {
+                return null;
+            }
+
+            // ── 1m hesapları ───────────────────────────────────────────────
+            var klines1m = ToKlineList(bars1m);
+            var current1m = klines1m[^1];
+
+            var ema9_1m = Evaluators.Indicators.Ema(klines1m, period: emaFastPeriod, endIndex: klines1m.Count - 1);
+            var ema21_1m = Evaluators.Indicators.Ema(klines1m, period: emaSlowPeriod, endIndex: klines1m.Count - 1);
+            var ema9Prev_1m = Evaluators.Indicators.Ema(klines1m, period: emaFastPeriod, endIndex: klines1m.Count - 2);
+            var ema21Prev_1m = Evaluators.Indicators.Ema(klines1m, period: emaSlowPeriod, endIndex: klines1m.Count - 2);
+
+            var volWindow_1m = klines1m.GetRange(klines1m.Count - volumeWindow_1m, volumeWindow_1m);
+            var volumeMa20_1m = Evaluators.Indicators.VolumeSma(volWindow_1m, volumeWindow_1m);
+
+            var atrWindow_1m = klines1m.GetRange(klines1m.Count - (atrPeriod_1m + 1), atrPeriod_1m + 1);
+            var atr14_1m = Evaluators.Indicators.Atr(atrWindow_1m, atrPeriod_1m);
+
+            // ── 15m hesapları ──────────────────────────────────────────────
+            var klines15m = ToKlineList(bars15m);
+            var current15m = klines15m[^1];
+
+            // BB current bar dahil son bbPeriod bar.
+            var bbWindow_15m = klines15m.GetRange(klines15m.Count - bbPeriod_15m, bbPeriod_15m);
+            var (bbMean_15m, bbUpper_15m, bbLower_15m) =
+                Evaluators.Indicators.BollingerBands(bbWindow_15m, bbPeriod_15m, bbStdMultiplier_15m);
+
+            // RSI curr — son rsiPeriod+1 bar üzerinde close-to-close diff.
+            var rsiWindowCurr_15m = klines15m.GetRange(klines15m.Count - (rsiPeriod_15m + 1), rsiPeriod_15m + 1);
+            var rsi14_15m = Evaluators.Indicators.Rsi(rsiWindowCurr_15m, rsiPeriod_15m);
+
+            // RSI prev — current bar HARİÇ; bir önceki bar son üye olacak şekilde
+            // pencereyi bir bar geriye kaydır. (Count-1) son bar; prev penceresi
+            // (Count-2) son bar dahil son rsiPeriod+1 bar.
+            var rsiWindowPrev_15m = klines15m.GetRange(klines15m.Count - 1 - (rsiPeriod_15m + 1), rsiPeriod_15m + 1);
+            var rsi14Prev_15m = Evaluators.Indicators.Rsi(rsiWindowPrev_15m, rsiPeriod_15m);
+
+            // ATR — son atrPeriod+1 bar (prev-close referansı için +1).
+            var atrWindow_15m = klines15m.GetRange(klines15m.Count - (atrPeriod_15m + 1), atrPeriod_15m + 1);
+            var atr14_15m = Evaluators.Indicators.Atr(atrWindow_15m, atrPeriod_15m);
+
+            return new HybridMomentum1mIndicatorSnapshot(
+                // 1m
+                Ema9_1m: ema9_1m,
+                Ema21_1m: ema21_1m,
+                Ema9Prev_1m: ema9Prev_1m,
+                Ema21Prev_1m: ema21Prev_1m,
+                CurrentVolume_1m: current1m.Volume,
+                VolumeMa20_1m: volumeMa20_1m,
+                Atr14_1m: atr14_1m,
+                CurrentClose_1m: current1m.ClosePrice,
+                BarClosed_1m: true,
+                LastBarOpenTime_1m: current1m.OpenTime,
+                // 15m
+                BbUpper_15m: bbUpper_15m,
+                BbMiddle_15m: bbMean_15m,
+                BbLower_15m: bbLower_15m,
+                Rsi14_15m: rsi14_15m,
+                Rsi14Prev_15m: rsi14Prev_15m,
+                Atr14_15m: atr14_15m,
+                CurrentClose_15m: current15m.ClosePrice,
+                BarClosed_15m: true,
+                LastBarOpenTime_15m: current15m.OpenTime,
+                AsOf: current1m.CloseTime);
+        }
+    }
+
+    /// <summary>
     /// Test-friendly injection path — infrastructure tests seed the buffers directly
     /// without starting the hosted service. Returns <c>true</c> when the symbol is
     /// known (added via <c>Symbols</c> config) and the bar was upserted.
