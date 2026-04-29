@@ -37,6 +37,12 @@ namespace BinanceBot.Application.Strategies.Indicators;
 /// evaluator yine de kontrol eder.</param>
 /// <param name="LastBarOpenTime">Son kapalı bar OpenTime — cooldown referansı.</param>
 /// <param name="AsOf">Son kapalı 15m bar close time.</param>
+/// <param name="Ema200_15m">Loop 58 disaster recovery — 200-period EMA close
+/// üzerinde 15m bar bazında. Trend filtresi: <c>currentClose &gt; Ema200_15m</c>
+/// ⇒ uptrend (long sinyallerine izin); aksi halde downtrend → evaluator
+/// "downtrend_skip" reason ile atar. EMA200 anlamlı olması için service
+/// tarafında minimum 200 bar warmup eşiği zorunlu (FifteenMinuteBufferCapacity
+/// ≥ 200). Pre-warmup ⇒ snapshot null döner.</param>
 public sealed record BbMeanReversionIndicatorSnapshot(
     decimal BbUpper,
     decimal BbMiddle,
@@ -49,4 +55,5 @@ public sealed record BbMeanReversionIndicatorSnapshot(
     decimal CurrentClose,
     bool BarClosed,
     DateTimeOffset LastBarOpenTime,
-    DateTimeOffset AsOf);
+    DateTimeOffset AsOf,
+    decimal Ema200_15m);

@@ -88,7 +88,11 @@ public class BbMeanReversionEvaluatorTests
         decimal volumeStd20 = 50m,
         decimal currentVolume = 200m,
         decimal atr14 = 0.20m,
-        bool barClosed = true)
+        bool barClosed = true,
+        // Loop 58 — EMA200 trend filtresi default uptrend: close=99 > ema200=90.
+        // Mevcut happy path testleri trend filtresinden geçmek için bu varsayım
+        // ile tutarlı kalır. Downtrend testi explicit ema200 > close ile yazılır.
+        decimal ema200_15m = 90m)
     {
         return new BbMeanReversionIndicatorSnapshot(
             BbUpper: bbUpper,
@@ -102,7 +106,8 @@ public class BbMeanReversionEvaluatorTests
             CurrentClose: currentClose,
             BarClosed: barClosed,
             LastBarOpenTime: DateTimeOffset.UtcNow.AddMinutes(-15),
-            AsOf: DateTimeOffset.UtcNow);
+            AsOf: DateTimeOffset.UtcNow,
+            Ema200_15m: ema200_15m);
     }
 
     [Fact]
@@ -252,6 +257,47 @@ public class BbMeanReversionEvaluatorTests
     public async Task BarNotClosed_ReturnsNull()
     {
         var snap = HappySnapshot(barClosed: false);
+        var (sut, _) = Build(snap);
+
+        var result = await sut.EvaluateAsync(
+            StrategyId, DefaultParams, Symbol,
+            closedBars: Array.Empty<Kline>(), CancellationToken.None);
+
+        result.Should().BeNull();
+    }
+
+    /// <summary>
+    /// Loop 58 disaster recovery — EMA200 trend filtresi PASS branch.
+    /// currentClose &gt; Ema200_15m ⇒ uptrend ⇒ trend filtresi sinyale izin verir
+    /// (diğer tüm AND koşulları sağlanmış olduğunda emit).
+    /// </summary>
+    [Fact]
+    public async Task CloseAboveEma200_TrendFilterPasses_AllowsSignal()
+    {
+        // currentClose=99.0 > ema200=90.0 → uptrend.
+        var snap = HappySnapshot(currentClose: 99.0m, ema200_15m: 90.0m);
+        var (sut, _) = Build(snap);
+
+        var result = await sut.EvaluateAsync(
+            StrategyId, DefaultParams, Symbol,
+            closedBars: Array.Empty<Kline>(), CancellationToken.None);
+
+        result.Should().NotBeNull();
+        result!.Direction.Should().Be(StrategySignalDirection.Long);
+    }
+
+    /// <summary>
+    /// Loop 58 disaster recovery — EMA200 trend filtresi BLOCK branch.
+    /// currentClose &lt;= Ema200_15m ⇒ downtrend ⇒ "düşen bıçağı tutmak" anti-
+    /// pattern'i; sinyal üretilmez. BB lower kapışı + RSI oversold + Vol Z koşulları
+    /// sağlansa bile downtrend filtresi tek başına bloke eder.
+    /// </summary>
+    [Fact]
+    public async Task CloseBelowEma200_TrendFilterBlocks_DowntrendSkip()
+    {
+        // currentClose=99.0 < ema200=110.0 → downtrend ("düşen bıçak"). Diğer tüm
+        // koşullar happy snapshot ile sağlanır; sinyal yine de bloke olmalı.
+        var snap = HappySnapshot(currentClose: 99.0m, ema200_15m: 110.0m);
         var (sut, _) = Build(snap);
 
         var result = await sut.EvaluateAsync(

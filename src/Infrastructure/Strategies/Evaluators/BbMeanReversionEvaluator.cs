@@ -134,6 +134,22 @@ public sealed class BbMeanReversionEvaluator : IStrategyEvaluator
             return Task.FromResult<StrategyEvaluation?>(null);
         }
 
+        // 0) Loop 58 disaster recovery — EMA200 trend filtresi. Long-only
+        // counter-trend mean reversion sadece BÜYÜK trend yönü ile uyumlu
+        // ise giriş yap (currentClose > Ema200_15m ⇒ uptrend). Downtrend'de
+        // BB lower kapışı yakalama denemeleri "düşen bıçağı tutmak" anti-
+        // pattern'i — Loop 56-57 backtest sonuçları (binance-expert spec).
+        // Snapshot 200-bar warmup eşiği geçmeden null döner; bu noktaya
+        // gelinmişse Ema200_15m anlamlıdır.
+        if (snapshot.Ema200_15m > 0m && snapshot.CurrentClose <= snapshot.Ema200_15m)
+        {
+            _logger.LogInformation(
+                "BbMeanReversion downtrend_skip symbol={Symbol} strategyId={StrategyId} " +
+                "close={Close} ema200_15m={Ema200} decision=Skip reason=downtrend_skip",
+                symbol, strategyId, snapshot.CurrentClose, snapshot.Ema200_15m);
+            return Task.FromResult<StrategyEvaluation?>(null);
+        }
+
         // 1) BB lower kapışı.
         var bbBreachOk = snapshot.CurrentClose < snapshot.BbLower;
 
@@ -214,6 +230,8 @@ public sealed class BbMeanReversionEvaluator : IStrategyEvaluator
             volumeZScore,
             atr14 = snapshot.Atr14,
             atrPct,
+            // Loop 58 — EMA200 trend filtre değeri (uptrend doğrulaması).
+            ema200_15m = snapshot.Ema200_15m,
             tpAtrMultiplier = p.TpAtrMultiplier,
             slAtrMultiplier = p.SlAtrMultiplier,
             tpPct,

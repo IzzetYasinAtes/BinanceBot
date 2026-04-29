@@ -64,8 +64,15 @@ public sealed class MarketIndicatorService : IMarketIndicatorService, IHostedSer
     //   - VolumeAvg+Std 20: 20 bar
     //   - ATR14: 15 bar
     //   - +1 current bar
-    // 80 bar safety (~20 saat geçmiş). 1 sayfa REST yeter (limit 1000).
-    internal const int FifteenMinuteBufferCapacity = 80;
+    //
+    // Loop 58 disaster recovery — BB MeanRev 15m'e EMA200 trend filtresi
+    // eklendi (binance-expert spec, ADR PR'ı). EMA200 anlamlı çıkması için
+    // pencerede minimum 200 KAPANMIŞ bar gerekir (Indicators.Ema endIndex
+    // < period-1 olduğunda close-fallback döner — sessizce yanlış değer).
+    // 200 bar (~50 saat 15m geçmişi) buffer + warmup eşiği EMA200'ün
+    // matematiksel anlamlılığını garanti eder. 1 sayfa REST hala yeter
+    // (limit 1000 ≥ 200).
+    internal const int FifteenMinuteBufferCapacity = 200;
 
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly IBinanceMarketStream _stream;
@@ -399,9 +406,18 @@ public sealed class MarketIndicatorService : IMarketIndicatorService, IHostedSer
 
             // BB / VolumeAvg / VolumeStd current bar dahil son N bar üzerinde
             // hesaplanır → minimum N bar yeter. RSI ve ATR period+1 bar ister.
+            //
+            // Loop 58 disaster recovery — EMA200 trend filtresi (binance-expert
+            // spec). Indicators.Ema endIndex < period-1 olduğunda close-fallback
+            // döner (sessizce yanlış değer). EMA200'ün matematiksel anlamlılığını
+            // garanti etmek için minimum 200 bar warmup eşiği zorunlu — bu yüzden
+            // FifteenMinuteBufferCapacity = 200.
+            const int Ema200Period = 200;
             var minBars = Math.Max(
                 Math.Max(bbPeriod, volumeWindow),
-                Math.Max(rsiPeriod + 1, atrPeriod + 1));
+                Math.Max(
+                    Math.Max(rsiPeriod + 1, atrPeriod + 1),
+                    Ema200Period));
             if (bars.Count < minBars)
             {
                 return null;
@@ -429,6 +445,11 @@ public sealed class MarketIndicatorService : IMarketIndicatorService, IHostedSer
             var atrWindow = klines.GetRange(klines.Count - (atrPeriod + 1), atrPeriod + 1);
             var atr14 = Evaluators.Indicators.Atr(atrWindow, atrPeriod);
 
+            // Loop 58 — EMA200 close üzerinde, current bar dahil son 200 bar
+            // pencere üzerinden hesaplanır. Warmup eşiği yukarıda 200 bar şartını
+            // zorunlu kıldığı için Ema() close-fallback path'i tetiklenmez.
+            var ema200_15m = Evaluators.Indicators.Ema(klines, Ema200Period, klines.Count - 1);
+
             return new BbMeanReversionIndicatorSnapshot(
                 BbUpper: bbUpper,
                 BbMiddle: bbMean,
@@ -441,7 +462,8 @@ public sealed class MarketIndicatorService : IMarketIndicatorService, IHostedSer
                 CurrentClose: current.ClosePrice,
                 BarClosed: true,
                 LastBarOpenTime: current.OpenTime,
-                AsOf: current.CloseTime);
+                AsOf: current.CloseTime,
+                Ema200_15m: ema200_15m);
         }
     }
 
