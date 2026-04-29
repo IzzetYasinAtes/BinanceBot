@@ -202,6 +202,38 @@ public class BbMeanReversionEvaluatorTests
         result.Should().BeNull();
     }
 
+    /// <summary>
+    /// Loop 56 hotfix — testnet düz hacim rejiminde (VolumeStd20 ≈ 0)
+    /// <c>VolumeZScoreThreshold = 0.0</c> config ile volume filtresinin
+    /// tamamen devre dışı bırakılabilmesi. Daha önce
+    /// <c>VolumeStd20 &gt; 0m</c> guard threshold ne olursa olsun bypass'a
+    /// izin vermiyordu → tüm sinyaller bloke. Fix: threshold &lt;= 0 ⇒
+    /// volumeOk her zaman true.
+    /// </summary>
+    [Fact]
+    public async Task Threshold0_VolumeFilterOff_AllowsSignal()
+    {
+        // VolumeStd20 = 0 (flat hacim, Z hesaplanamaz) AMA threshold=0 ⇒ filter off.
+        var snap = HappySnapshot(volumeStd20: 0m, currentVolume: 100m);
+        var (sut, _) = Build(snap);
+
+        // Threshold = 0.0 — diğer tüm parametreler default.
+        var paramsThresholdOff =
+            "{\"KlineInterval\":\"15m\",\"BbPeriod\":20,\"BbStdMultiplier\":2.0," +
+            "\"RsiPeriod\":14,\"RsiOversoldThreshold\":30,\"VolumeWindow\":20," +
+            "\"VolumeZScoreThreshold\":0.0,\"AtrPeriod\":14,\"TpAtrMultiplier\":1.5," +
+            "\"SlAtrMultiplier\":1.0,\"MinTpPct\":0.004,\"MaxTpPct\":0.010," +
+            "\"MinSlPct\":0.003,\"MaxSlPct\":0.006,\"MaxHoldMinutes\":90," +
+            "\"MinAtrPct\":0.0007,\"CooldownBarsAfterSignal\":4}";
+
+        var result = await sut.EvaluateAsync(
+            StrategyId, paramsThresholdOff, Symbol,
+            closedBars: Array.Empty<Kline>(), CancellationToken.None);
+
+        result.Should().NotBeNull();
+        result!.Direction.Should().Be(StrategySignalDirection.Long);
+    }
+
     [Fact]
     public async Task AtrPctBelowMin_SilentMarket_ReturnsNull()
     {

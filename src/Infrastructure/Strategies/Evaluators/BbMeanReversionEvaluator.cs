@@ -144,8 +144,8 @@ public sealed class BbMeanReversionEvaluator : IStrategyEvaluator
         var volumeZScore = snapshot.VolumeStd20 > 0m
             ? (snapshot.CurrentVolume - snapshot.VolumeAvg20) / snapshot.VolumeStd20
             : 0m;
-        var volumeOk = snapshot.VolumeStd20 > 0m
-            && volumeZScore > p.VolumeZScoreThreshold;
+        var volumeOk = p.VolumeZScoreThreshold <= 0m
+            || (snapshot.VolumeStd20 > 0m && volumeZScore > p.VolumeZScoreThreshold);
 
         // 4) MinAtr filtresi (sessiz piyasa engeli).
         var atrPct = snapshot.CurrentClose > 0m
