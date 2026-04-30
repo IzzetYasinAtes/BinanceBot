@@ -209,6 +209,29 @@ internal static class Indicators
     }
 
     /// <summary>
+    /// Loop 67 KMS — arithmetic mean of <c>TradeCount</c> across the most recent
+    /// <paramref name="period"/> bars. Used by KlineMomentumSpread5m for the
+    /// "trade count surge" filter (currentTradeCount &gt; avgTradeCount × N).
+    /// Returns <c>0</c> when history is insufficient (caller treats that as
+    /// "warmup not done — skip").
+    /// </summary>
+    public static decimal TradeCountAvg(IReadOnlyList<Kline> bars, int period)
+    {
+        if (period <= 0 || bars.Count < period)
+        {
+            return 0m;
+        }
+
+        decimal sum = 0m;
+        var start = bars.Count - period;
+        for (var i = start; i < bars.Count; i++)
+        {
+            sum += bars[i].TradeCount;
+        }
+        return sum / period;
+    }
+
+    /// <summary>
     /// Bollinger Bands (mean ± stdDev * multiplier) over the most recent <paramref name="period"/> closes.
     /// Falls back to a flat band centred on the latest close when history is insufficient.
     /// </summary>

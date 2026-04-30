@@ -159,42 +159,24 @@ public static class DependencyInjection
         services.AddHostedService(sp => sp.GetRequiredService<MarketIndicatorService>());
 
         // Loop 42 P0 fix — evaluator-level signal cooldown enforcement (in-memory
-        // singleton). Loop 41 t=210 HALT root cause: V1 stateless cooldown LTC
-        // whipsaw'a açıktı (7 ardışık SL). DonchianBreakoutEvaluator constructor
-        // injection ile tüketir; diğer evaluator'lar adopt etmek için kendi
-        // ParametersJson kontratını genişletmelidir.
+        // singleton). KMS evaluator (Loop 67) constructor injection ile tüketir.
         services.AddSingleton<ICooldownService, CooldownService>();
 
-        services.AddSingleton<IStrategyEvaluator, VwapEmaStrategyEvaluator>();
-        // ADR-0018 §18.11 — MicroScalper evaluator registered alongside the deprecated
-        // VwapEma evaluator; registry dispatches by StrategyType enum value.
-        services.AddSingleton<IStrategyEvaluator, MicroScalperVwapEma30sEvaluator>();
-        // Loop 33 AR-GE (Strateji D) — AtrScalper evaluator, MicroScalper ile aynı
-        // IMarketIndicatorService snapshot kaynağını tüketir (yeni Atr14 alanı).
-        services.AddSingleton<IStrategyEvaluator, AtrScalperVwapEmaEvaluator>();
-        // Loop 41 AR-GE — Donchian Breakout 15m evaluator. 15m FifteenMinute
-        // rolling buffer üzerinden Donchian + Volume Z-Score + ATR snapshot
-        // tüketir (TryGetDonchianBreakoutSnapshot). AtrScalperVwapEma1m ile
-        // birlikte registry'de yer alır; appsettings seed Activate flag ile
-        // hangi evaluator path'inin canlı olduğunu belirler.
-        services.AddSingleton<IStrategyEvaluator, DonchianBreakoutEvaluator>();
-        // Loop 44 AR-GE — Bollinger Bands counter-trend Mean Reversion 15m
-        // evaluator. Aynı 15m FifteenMinute rolling buffer'ı paylaşır
-        // (TryGetBbMeanReversionSnapshot). DonchianBreakout %0 WR pivot;
-        // appsettings seed Activate flag ile aktif kümeyi belirler.
-        services.AddSingleton<IStrategyEvaluator, BbMeanReversionEvaluator>();
-        // Loop 46 AR-GE — 1m EMA9/EMA21 crossover scalper. OneMinute rolling
-        // buffer üzerinden EmaScalperIndicatorSnapshot tüketir. BbMeanReversion15m
-        // düşük frekans pivot (kullanıcı 20-30 trade/saat hedefi). Per-coin 2dk
-        // cooldown + ATR14 dinamik TP/SL (R:R 1.875:1, BE WR ~%34.8).
-        services.AddSingleton<IStrategyEvaluator, EmaScalper1mEvaluator>();
-        // Loop 50 AR-GE — Hibrit 1m frekans tetiği + 15m kalite kapısı.
-        // OneMinute + FifteenMinute rolling buffer'larından birleşik
-        // HybridMomentum1mIndicatorSnapshot tüketir (15m BB lower kapışı +
-        // RSI yukarı dönüş + 1m EMA crossover + volume surge + ATR aktif).
-        // Per-coin 3dk cooldown + ATR15m dinamik TP/SL (R:R 1.875:1).
-        services.AddSingleton<IStrategyEvaluator, HybridMomentum1mEvaluator>();
+        // Loop 67 KMS pivot — 7 eski evaluator silindi. Tek strateji kalır:
+        // KlineMomentumSpread5m (5m bar RSI recovery + EMA9 slope + TradeCount
+        // surge + spread + ATR). KmsMomentumEvaluator IMarketIndicatorService
+        // (5m snapshot) + IBookTickerReader (canlı spread) + ICooldownService
+        // tüketir.
+        services.AddSingleton<IStrategyEvaluator, KmsMomentumEvaluator>();
         services.AddSingleton<StrategyEvaluatorRegistry>();
+
+        // Loop 67 KMS — in-memory BookTicker latest cache + WS consumer worker.
+        // Cache singleton; worker subscribes to IBinanceMarketStream.SubscribeBookTickers
+        // (dedicated channel, paralel BookTickerIngestionWorker DB persistor ile
+        // race olmaz). KMS evaluator IBookTickerReader üzerinden okur.
+        services.AddSingleton<BookTickerCache>();
+        services.AddSingleton<IBookTickerReader>(sp => sp.GetRequiredService<BookTickerCache>());
+        services.AddHostedService<BookTickerCacheWorker>();
 
         services.AddOptions<StrategySeedOptions>()
             .Bind(configuration.GetSection(StrategySeedOptions.SectionName));
