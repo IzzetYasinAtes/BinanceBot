@@ -307,6 +307,39 @@ public class BbMeanReversionEvaluatorTests
         result.Should().BeNull();
     }
 
+    /// <summary>
+    /// Loop 67 hotfix — <c>UseEma200TrendFilter=false</c> config flag ile EMA200
+    /// trend filtresi tamamen bypass edilir. Sürekli downtrend rejiminde
+    /// (BTC 6h+ 0 emit) "5 coin sürekli işlem" garantisi için seed-level
+    /// kapatılabilir. Default true ⇒ Loop 58 davranışı geriye uyumlu; bu test
+    /// false bayrağıyla close &lt; ema200 olsa bile diğer AND koşulları sağlanırsa
+    /// emit edildiğini doğrular.
+    /// </summary>
+    [Fact]
+    public async Task UseEma200TrendFilter_False_BypassesDowntrendSkip()
+    {
+        // currentClose=99 < ema200=110 ⇒ klasik downtrend ("düşen bıçak"). Filter
+        // off iken diğer happy snapshot koşulları sağlandığı için emit beklenir.
+        var snap = HappySnapshot(currentClose: 99.0m, ema200_15m: 110.0m);
+        var (sut, _) = Build(snap);
+
+        var paramsFilterOff =
+            "{\"KlineInterval\":\"15m\",\"BbPeriod\":20,\"BbStdMultiplier\":2.0," +
+            "\"RsiPeriod\":14,\"RsiOversoldThreshold\":30,\"VolumeWindow\":20," +
+            "\"VolumeZScoreThreshold\":1.0,\"AtrPeriod\":14,\"TpAtrMultiplier\":1.5," +
+            "\"SlAtrMultiplier\":1.0,\"MinTpPct\":0.004,\"MaxTpPct\":0.010," +
+            "\"MinSlPct\":0.003,\"MaxSlPct\":0.006,\"MaxHoldMinutes\":90," +
+            "\"MinAtrPct\":0.0007,\"CooldownBarsAfterSignal\":4," +
+            "\"UseEma200TrendFilter\":false}";
+
+        var result = await sut.EvaluateAsync(
+            StrategyId, paramsFilterOff, Symbol,
+            closedBars: Array.Empty<Kline>(), CancellationToken.None);
+
+        result.Should().NotBeNull();
+        result!.Direction.Should().Be(StrategySignalDirection.Long);
+    }
+
     [Fact]
     public async Task SecondCallWithinCooldown_ReturnsNull()
     {

@@ -141,7 +141,12 @@ public sealed class BbMeanReversionEvaluator : IStrategyEvaluator
         // pattern'i — Loop 56-57 backtest sonuçları (binance-expert spec).
         // Snapshot 200-bar warmup eşiği geçmeden null döner; bu noktaya
         // gelinmişse Ema200_15m anlamlıdır.
-        if (snapshot.Ema200_15m > 0m && snapshot.CurrentClose <= snapshot.Ema200_15m)
+        // Loop 67 — config flag p.UseEma200TrendFilter ile bypass edilebilir
+        // (sürekli downtrend rejiminde 0 emit'e takılma → "5 coin sürekli
+        // işlem" garantisi). Default true ⇒ geriye uyumlu davranış.
+        if (p.UseEma200TrendFilter
+            && snapshot.Ema200_15m > 0m
+            && snapshot.CurrentClose <= snapshot.Ema200_15m)
         {
             _logger.LogInformation(
                 "BbMeanReversion downtrend_skip symbol={Symbol} strategyId={StrategyId} " +
@@ -327,5 +332,11 @@ public sealed class BbMeanReversionEvaluator : IStrategyEvaluator
         // Cooldown — sinyal yayınlandıktan sonra aynı (strategy, symbol) için
         // 4 bar × 15dk = 60dk yeni sinyal bloklanır (whipsaw koruması).
         public int CooldownBarsAfterSignal { get; set; } = 4;
+
+        // Loop 67 — EMA200 trend filtresi config flag. Default true (Loop 58
+        // disaster recovery davranışı geriye uyumlu). Long-only mean-reversion
+        // sürekli downtrend rejiminde 0 emit'e takılırsa (BTC 6h+ skip) seed'de
+        // false ile bypass edilebilir; "5 coin sürekli işlem" garantisi için.
+        public bool UseEma200TrendFilter { get; set; } = true;
     }
 }
