@@ -30,6 +30,7 @@ Bu dosya **her session başında otomatik yüklenir**. Projenin altın kurallar�
 9. **Feature "done" denmeden `tester` agent'ı Playwright ile gezmek zorunda.** Reviewer bu olmadan "ready" onayı vermez.
 10. **Branch + PR YOK — tüm iş `development` branch'ına doğrudan commit + push.** Feature branch açma, PR oluşturma yasak. Akış: `git checkout development && git pull && <değişiklik> && git add -A && git commit && git push origin development`. Main'e geçiş sadece kullanıcı "main'e al" derse.
 11. **Saat dilimi / seans ayrımı YOK.** Stratejiler 24/7 uniform değerlendirilir. "Avrupa pik dilim", "ABD piyasa açılışı", "Asia gece dilimi" gibi yorumlarla parametre değiştirme veya beklenti ayarlama yasak. Crypto piyasası 24/7 — bot da uniform davranır. Saat-bağımlı parametre = gerçek mainnet'te öngörülemez davranış.
+12. **5 coin min + sürekli işlem + kartopu kar.** "Sermaye koruma — 0 emit iyi işaret" YASAK. Bot saatte 30+ işlem yapmak zorunda (ideal 150/h). 5 coin minimum (BTC-only YASAK). 0 emit > 1 saat → ANINDA filtre gevşet veya pivot. Her küçük kar (+$0.05-$0.20) × çok işlem = kartopu büyüme. Muhafazakar "tek coin + sıkı param" anti-pattern.
 
 ## PM Protokolü (kullanıcı ile konuşan tek agent)
 
