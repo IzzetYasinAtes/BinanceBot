@@ -26,3 +26,23 @@ public enum MoveStopResult
     /// <summary>Requested stop is not strictly better than current — no-op (would degrade risk).</summary>
     NotImproving = 3,
 }
+
+/// <summary>
+/// Loop 76 — trailing-stop tick outcome. Returned by
+/// <see cref="Position.UpdatePeakAndCheckTrailing"/> so the caller
+/// (MarkToMarketWorker) stays exception-free for the expected three branches
+/// of trailing flow (BE not yet applied → not eligible, mark made a new high
+/// → peak refreshed, mark dropped past trail → exit dispatch). Combo with
+/// <see cref="MoveStopResult"/>: BE move runs first and "arms" trailing;
+/// once <see cref="Position.BreakEvenAppliedAt"/> is non-null this method
+/// can transition out of <see cref="NotEligible"/>.
+/// </summary>
+public enum TrailingResult
+{
+    /// <summary>BE move not yet applied — trailing dormant, no peak update either.</summary>
+    NotEligible = 1,
+    /// <summary>Mark made a new high — <see cref="Position.PeakMarkPrice"/> updated, no exit.</summary>
+    PeakUpdated = 2,
+    /// <summary>Mark fell below <c>peak × (1 - trailPct)</c> — caller dispatches close.</summary>
+    ExitTriggered = 3,
+}

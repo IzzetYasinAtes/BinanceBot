@@ -41,3 +41,18 @@ public sealed record PositionStopMovedEvent(
     decimal PreviousStopPrice,
     decimal NewStopPrice,
     string Reason) : DomainEventBase;
+
+/// <summary>
+/// Loop 76 — trailing-stop exit trigger audit. Domain method
+/// <c>Position.UpdatePeakAndCheckTrailing</c>, BE applied + mark &lt; peak × (1 − trailPct)
+/// koşulunu gördüğünde raise eder. Aggregate aslında close edilmez; bu sadece
+/// "closer'a haber" event'idir — gerçek close, MarkToMarketWorker'ın
+/// <c>CloseSignalPositionCommand</c> dispatch'iyle StopLoss/TakeProfit pattern'i
+/// üzerinden gerçekleşir. UI ve audit log consumer'ları için aksiyon kayıtlı kalır.
+/// </summary>
+public sealed record PositionTrailingExitTriggeredEvent(
+    long PositionId,
+    string Symbol,
+    decimal PeakPrice,
+    decimal MarkPrice,
+    decimal TrailPct) : DomainEventBase;

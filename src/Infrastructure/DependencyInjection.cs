@@ -52,6 +52,12 @@ public static class DependencyInjection
         services.Configure<BreakEvenOptions>(
             configuration.GetSection(BreakEvenOptions.SectionName));
 
+        // Loop 76 — trailing-stop global toggles. BE move ile zincirli; aynı
+        // worker'da BE sonrası tetiklenir. Hot-reload destekli (binance-expert
+        // quick-win: TrailPct 0.0015 sabit, Loop 77 ATR-bazlı dinamik).
+        services.Configure<TrailingStopOptions>(
+            configuration.GetSection(TrailingStopOptions.SectionName));
+
         var connectionString = configuration.GetConnectionString("Default")
             ?? throw new InvalidOperationException("ConnectionStrings:Default is not configured.");
 

@@ -38,6 +38,10 @@ public class MarkToMarketWorkerBreakEvenTests
         var sc = new ServiceCollection();
         sc.AddSingleton<IApplicationDbContext>(db);
         sc.AddSingleton(clock);
+        // Loop 76 — MarkToMarketWorker artık IMediator scope üzerinden çözüyor.
+        // BE testleri trailing exit dispatch'i tetiklemediği için Loose mock yeterli
+        // (TrailingStopOptions.Enabled=false → mediator hiç çağrılmaz).
+        sc.AddSingleton<MediatR.IMediator>(new Moq.Mock<MediatR.IMediator>().Object);
         return sc.BuildServiceProvider().GetRequiredService<IServiceScopeFactory>();
     }
 
@@ -52,6 +56,11 @@ public class MarkToMarketWorkerBreakEvenTests
     private static IOptionsMonitor<BreakEvenOptions> Opts(BreakEvenOptions value)
     {
         return new StaticOptionsMonitor<BreakEvenOptions>(value);
+    }
+
+    private static IOptionsMonitor<TrailingStopOptions> TrailOpts(TrailingStopOptions value)
+    {
+        return new StaticOptionsMonitor<TrailingStopOptions>(value);
     }
 
     private static Position SeedLong(StubDbContext db, decimal stop)
@@ -104,7 +113,8 @@ public class MarkToMarketWorkerBreakEvenTests
                 Enabled = true,
                 TriggerPct = 0.0010m,
                 OffsetPct = 0.0002m,
-            }));
+            }),
+            TrailOpts(new TrailingStopOptions { Enabled = false }));
 
         await InvokeTickAsync(sut, CancellationToken.None);
 
@@ -129,7 +139,8 @@ public class MarkToMarketWorkerBreakEvenTests
                 Enabled = true,
                 TriggerPct = 0.0010m,
                 OffsetPct = 0.0002m,
-            }));
+            }),
+            TrailOpts(new TrailingStopOptions { Enabled = false }));
 
         await InvokeTickAsync(sut, CancellationToken.None);
 
@@ -155,7 +166,8 @@ public class MarkToMarketWorkerBreakEvenTests
                 Enabled = true,
                 TriggerPct = 0.0010m,
                 OffsetPct = 0.0002m,
-            }));
+            }),
+            TrailOpts(new TrailingStopOptions { Enabled = false }));
 
         await InvokeTickAsync(sut, CancellationToken.None);
 
@@ -177,7 +189,8 @@ public class MarkToMarketWorkerBreakEvenTests
                 Enabled = true,
                 TriggerPct = 0.0010m,
                 OffsetPct = 0.0002m,
-            }));
+            }),
+            TrailOpts(new TrailingStopOptions { Enabled = false }));
 
         await InvokeTickAsync(sut2, CancellationToken.None);
 
@@ -201,7 +214,8 @@ public class MarkToMarketWorkerBreakEvenTests
                 Enabled = false,
                 TriggerPct = 0.0010m,
                 OffsetPct = 0.0002m,
-            }));
+            }),
+            TrailOpts(new TrailingStopOptions { Enabled = false }));
 
         await InvokeTickAsync(sut, CancellationToken.None);
 
@@ -222,3 +236,4 @@ internal sealed class StaticOptionsMonitor<T> : IOptionsMonitor<T>
     public T Get(string? name) => CurrentValue;
     public IDisposable? OnChange(Action<T, string?> listener) => null;
 }
+

@@ -70,6 +70,25 @@ public sealed class Position : AggregateRoot<long>
     /// </summary>
     public DateTimeOffset? BreakEvenAppliedAt { get; private set; }
 
+    /// <summary>
+    /// Loop 76 — trailing-stop running peak. Sadece BE applied sonrası
+    /// (<see cref="BreakEvenAppliedAt"/> non-null) değerlendirilir; ondan önce
+    /// her tick mark'ın yeni high olup olmadığını kontrol etmek anlamsız (BE move
+    /// trailing'i "arm" eder).
+    ///
+    /// Default 0 — yeni open position için yatırılır. İlk
+    /// <see cref="UpdatePeakAndCheckTrailing"/> çağrısında BE applied + mark &gt; 0
+    /// koşulu mutlaka sağlanır (mark &gt; PeakMarkPrice = 0), peak hemen
+    /// güncellenir. Long-only kontrat (KMS Long-only spot); Short eklenirse
+    /// trough mark'a simetrik olarak burada genişler.
+    ///
+    /// Spec (binance-expert): BE move sonra trailing aktif. trailingStop =
+    /// PeakMarkPrice × (1 − TrailPct). Mark &lt; trailingStop görüldüğünde
+    /// <see cref="PositionTrailingExitTriggeredEvent"/> raise edilir; aggregate
+    /// kendisi close olmaz, MarkToMarketWorker dispatch CloseSignalPositionCommand.
+    /// </summary>
+    public decimal PeakMarkPrice { get; private set; }
+
     public long? StrategyId { get; private set; }
     public TradingMode Mode { get; private set; }
     public DateTimeOffset OpenedAt { get; private set; }
@@ -239,6 +258,78 @@ public sealed class Position : AggregateRoot<long>
             Id, Symbol.Value, previous, newStop, "break_even_move"));
 
         return MoveStopResult.Applied;
+    }
+
+    /// <summary>
+    /// Loop 76 — trailing-stop tick. Caller (MarkToMarketWorker) BE move'dan
+    /// SONRA çağırır; BE applied değilse method dormant kalır (NotEligible).
+    /// İki davranış: (1) yeni high → <see cref="PeakMarkPrice"/> güncellenir,
+    /// (2) mark trail seviyesinin altına düştü → exit event raise.
+    ///
+    /// Long-only kontrat: peak = max(prev, mark); trailingStop =
+    /// peak × (1 − trailPct); mark &lt; trailingStop → exit. Short eklenirse
+    /// trough mark + (1 + trailPct) yönlü simetri burada genişler.
+    /// </summary>
+    /// <param name="markPrice">Mid-price tick (positive); aggregate doğrular.</param>
+    /// <param name="trailPct">Trail genişliği oransal (0.0015 = %0.15).
+    /// Pozitif olmalı; aksi halde aggregate <see cref="DomainException"/> atar
+    /// (config invariant ihlali).</param>
+    /// <param name="asOf">Clock-driven event time. Peak güncellenirse
+    /// <see cref="UpdatedAt"/>'a yazılır.</param>
+    /// <returns>
+    /// <see cref="TrailingResult.NotEligible"/> — BE not yet applied;
+    /// <see cref="TrailingResult.PeakUpdated"/> — yeni high (veya ilk tick) → peak yazıldı, exit yok;
+    /// <see cref="TrailingResult.ExitTriggered"/> — mark &lt; peak × (1 − trailPct) → event raised.
+    /// </returns>
+    /// <remarks>
+    /// Throws <see cref="DomainException"/> sadece hard invariant ihlallerinde
+    /// (closed position, non-positive mark, non-positive trailPct). NotEligible /
+    /// PeakUpdated / ExitTriggered üçü de "expected paths" — Result-style enum
+    /// caller'ı exception'sız tutar (CLAUDE.md root rule #5).
+    /// </remarks>
+    public TrailingResult UpdatePeakAndCheckTrailing(
+        decimal markPrice, decimal trailPct, DateTimeOffset asOf)
+    {
+        EnsureOpen();
+        if (markPrice <= 0m)
+        {
+            throw new DomainException("Mark price must be positive.");
+        }
+        if (trailPct <= 0m)
+        {
+            throw new DomainException("Trail percentage must be positive.");
+        }
+
+        // Trailing BE move'a "armed" — BE applied değilse dormant kal. Aggregate
+        // bu kuralı içselleştiriyor; caller tek bir check'e güvenebilir.
+        if (BreakEvenAppliedAt is null)
+        {
+            return TrailingResult.NotEligible;
+        }
+
+        // Long-only path. Yeni high → peak refresh. Default PeakMarkPrice=0
+        // olduğundan ilk eligible tick mutlaka bu dala düşer ve peak'i mark'a yatırır.
+        if (markPrice > PeakMarkPrice)
+        {
+            PeakMarkPrice = markPrice;
+            UpdatedAt = asOf;
+            return TrailingResult.PeakUpdated;
+        }
+
+        // Mevcut peak korunuyor; trail seviyesi altına inilmiş mi kontrol et.
+        var trailingStop = PeakMarkPrice * (1m - trailPct);
+        if (markPrice < trailingStop)
+        {
+            RaiseDomainEvent(new PositionTrailingExitTriggeredEvent(
+                Id, Symbol.Value, PeakMarkPrice, markPrice, trailPct));
+            return TrailingResult.ExitTriggered;
+        }
+
+        // Peak değişmedi, trail seviyesinin üstünde — exit yok, peak da yenilenmedi.
+        // binance-expert spec: "else → PeakUpdated" (üç-state enum). Pratikte
+        // "still tracking, no action" anlamı taşır; UpdatedAt'a dokunmuyoruz
+        // çünkü aggregate state mutate olmadı.
+        return TrailingResult.PeakUpdated;
     }
 
     public void Close(decimal exitPrice, string reason, DateTimeOffset now, decimal exitCommission = 0m)

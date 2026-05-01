@@ -41,6 +41,13 @@ public sealed class PositionConfiguration : IEntityTypeConfiguration<Position>
         // Loop 75 — break-even SL move audit timestamp. Nullable datetimeoffset,
         // null = BE never applied. EF default precision yeterli (datetimeoffset(7)).
         builder.Property(p => p.BreakEvenAppliedAt);
+        // Loop 76 — trailing-stop running peak. NOT NULL DEFAULT 0; BE
+        // applied'tan önce dormant (UpdatePeakAndCheckTrailing erkenden
+        // NotEligible döner). decimal(18,8) Symbol fiyat hassasiyeti ile uyumlu.
+        builder.Property(p => p.PeakMarkPrice)
+            .HasColumnType("decimal(18,8)")
+            .IsRequired()
+            .HasDefaultValue(0m);
         builder.Property(p => p.UnrealizedPnl).HasPrecision(28, 10);
         builder.Property(p => p.RealizedPnl).HasPrecision(28, 10);
         // ADR-0020 §20.6 — fee-aware accounting. Both commissions are quote-denominated
