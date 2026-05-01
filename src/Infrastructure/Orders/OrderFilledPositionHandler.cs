@@ -194,6 +194,22 @@ public sealed class OrderFilledPositionHandler : INotificationHandler<OrderFille
 
                     openPosition.Close(fillPrice, $"order_{notification.ClientOrderId}", now,
                         exitCommission: exitFee);
+
+                    // Loop 73 zombi-position diagnostic guard: Position.Close() sets
+                    // Status=Closed + ClosedAt + ExitPrice atomically inside the
+                    // domain method. Any future refactor that breaks this invariant
+                    // would silently produce "zombi" rows (Status=Closed but
+                    // ClosedAt=NULL). Fail loudly here so a regression surfaces in
+                    // logs immediately rather than leaking to the DB.
+                    if (openPosition.Status != PositionStatus.Closed
+                        || openPosition.ClosedAt is null
+                        || openPosition.ExitPrice is null)
+                    {
+                        _logger.LogError(
+                            "ZOMBI-GUARD Position.Close() left aggregate inconsistent: pos={Pos} status={Status} closedAt={ClosedAt} exitPrice={ExitPrice}",
+                            openPosition.Id, openPosition.Status, openPosition.ClosedAt, openPosition.ExitPrice);
+                    }
+
                     _logger.LogInformation(
                         "Position {Pos} closed by reverse fill {Cid} price={Price} fee={Fee}",
                         openPosition.Id, notification.ClientOrderId, fillPrice, exitFee);
