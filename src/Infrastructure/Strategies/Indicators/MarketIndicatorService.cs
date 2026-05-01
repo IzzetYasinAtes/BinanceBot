@@ -226,6 +226,78 @@ public sealed class MarketIndicatorService : IMarketIndicatorService, IHostedSer
     }
 
     /// <summary>
+    /// Loop 79 — BollingerBandReversal5m snapshot. KMS ile aynı 5m buffer'dan
+    /// okur; pencere bir bar geriye kaydırılarak RSI prev hesaplanır. Warmup
+    /// eşiği <c>max(rsiPeriod + 2, bbPeriod, atrPeriod + 1)</c>.
+    /// </summary>
+    public BbReversalSnapshot? TryGetBbReversalSnapshot(
+        string symbol,
+        int rsiPeriod,
+        int bbPeriod,
+        decimal bbStdDev,
+        int atrPeriod)
+    {
+        if (string.IsNullOrWhiteSpace(symbol)) return null;
+        if (rsiPeriod <= 0 || bbPeriod <= 0 || bbStdDev <= 0m || atrPeriod <= 0)
+        {
+            return null;
+        }
+
+        if (!_state.TryGetValue(symbol, out var state))
+        {
+            return null;
+        }
+
+        lock (state.SyncRoot)
+        {
+            var bars = state.FiveMinute.Snapshot();
+
+            // Warmup eşiği. RSI prev için +2 (Indicators.Rsi son rsiPeriod
+            // close-to-close diff yapar; prev için pencereyi bir bar geriye
+            // kaydır → toplam rsiPeriod + 2 bar gerekli). BB sadece bbPeriod
+            // bar; ATR için +1 (TR önceki close referansı).
+            var minBars = Math.Max(
+                Math.Max(rsiPeriod + 2, bbPeriod),
+                atrPeriod + 1);
+            if (bars.Count < minBars)
+            {
+                return null;
+            }
+
+            var klines = ToKlineList(bars);
+            var current = klines[^1];
+
+            // RSI curr — son (rsiPeriod + 1) bar üzerinde Wilder diff.
+            var rsiCurrWindow = klines.GetRange(klines.Count - (rsiPeriod + 1), rsiPeriod + 1);
+            var rsi14 = Evaluators.Indicators.Rsi(rsiCurrWindow, rsiPeriod);
+
+            // RSI prev — current bar HARİÇ; pencereyi bir bar geriye kaydır.
+            var rsiPrevWindow = klines.GetRange(klines.Count - 1 - (rsiPeriod + 1), rsiPeriod + 1);
+            var rsi14Prev = Evaluators.Indicators.Rsi(rsiPrevWindow, rsiPeriod);
+
+            // Bollinger Bands — son bbPeriod close.
+            var (bbMean, bbUpper, bbLower) = Evaluators.Indicators.BollingerBands(
+                klines, bbPeriod, bbStdDev);
+            var bbw = bbMean > 0m ? (bbUpper - bbLower) / bbMean : 0m;
+
+            // ATR — son (atrPeriod + 1) bar.
+            var atrWindow = klines.GetRange(klines.Count - (atrPeriod + 1), atrPeriod + 1);
+            var atr14 = Evaluators.Indicators.Atr(atrWindow, atrPeriod);
+
+            return new BbReversalSnapshot(
+                CurrentClose: current.ClosePrice,
+                Rsi14: rsi14,
+                Rsi14Prev: rsi14Prev,
+                BollingerLower: bbLower,
+                BollingerMean: bbMean,
+                BollingerBandWidth: bbw,
+                Atr14: atr14,
+                LastBarOpenTime: current.OpenTime,
+                AsOf: current.CloseTime);
+        }
+    }
+
+    /// <summary>
     /// Test-friendly injection path — infrastructure tests seed the buffer
     /// directly without starting the hosted service. Returns <c>true</c> when
     /// the symbol is known (added via <c>Symbols</c> config) and the bar was

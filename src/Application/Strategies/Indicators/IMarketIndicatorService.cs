@@ -34,4 +34,25 @@ public interface IMarketIndicatorService
         int emaPeriod,
         int atrPeriod,
         int tradeCountWindow);
+
+    /// <summary>
+    /// Loop 79 — BollingerBandReversal5m snapshot. KMS ile aynı 5m rolling
+    /// buffer üzerinden hesaplanır; additive surface (KMS'i etkilemez).
+    /// Hesaplananlar:
+    ///   - RSI(<paramref name="rsiPeriod"/>) curr (<c>Count-1</c>) ve prev
+    ///     (<c>Count-2</c>) — Wilder; pencere bir bar geriye kaydırılır.
+    ///   - BB(<paramref name="bbPeriod"/>, <paramref name="bbStdDev"/>) — Lower,
+    ///     Middle, BBW = (Upper - Lower) / Middle.
+    ///   - ATR(<paramref name="atrPeriod"/>) — bilgi amaçlı (audit + future varyant).
+    ///
+    /// Warmup eşiği: <c>max(rsiPeriod + 2, bbPeriod, atrPeriod + 1)</c>.
+    /// Returns <c>null</c> when warmup incomplete, symbol untracked, or any
+    /// parameter ≤ 0.
+    /// </summary>
+    BbReversalSnapshot? TryGetBbReversalSnapshot(
+        string symbol,
+        int rsiPeriod,
+        int bbPeriod,
+        decimal bbStdDev,
+        int atrPeriod);
 }

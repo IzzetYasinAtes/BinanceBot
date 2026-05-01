@@ -179,6 +179,12 @@ public static class DependencyInjection
         // (5m snapshot) + IBookTickerReader (canlı spread) + ICooldownService
         // tüketir.
         services.AddSingleton<IStrategyEvaluator, KmsMomentumEvaluator>();
+
+        // Loop 79 — Multi-regime switch / BB Reversal evaluator (Range ayağı).
+        // KMS (Trending) ile paralel; aynı 5m buffer, farklı snapshot. Registry
+        // her iki evaluator'ı da Type ↔ instance map ile kullanır.
+        services.AddSingleton<IStrategyEvaluator, BbReversalEvaluator>();
+
         services.AddSingleton<StrategyEvaluatorRegistry>();
 
         // Loop 67 KMS — in-memory BookTicker latest cache + WS consumer worker.
