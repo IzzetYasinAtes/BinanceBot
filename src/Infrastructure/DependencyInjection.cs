@@ -47,6 +47,11 @@ public static class DependencyInjection
         // ADR-0011 §11.5 + decision-sizing.md Commit 1: Paper-only slippage config.
         services.Configure<PaperFillOptions>(configuration.GetSection("PaperFill"));
 
+        // Loop 75 — break-even SL move global toggles. MarkToMarketWorker IOptionsMonitor
+        // ile tüketir; runtime hot-reload destekli (appsettings save → next tick).
+        services.Configure<BreakEvenOptions>(
+            configuration.GetSection(BreakEvenOptions.SectionName));
+
         var connectionString = configuration.GetConnectionString("Default")
             ?? throw new InvalidOperationException("ConnectionStrings:Default is not configured.");
 

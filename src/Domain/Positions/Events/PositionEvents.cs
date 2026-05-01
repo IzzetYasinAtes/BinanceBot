@@ -28,3 +28,16 @@ public sealed record PositionClosedEvent(
     decimal RealizedPnl,
     string Reason,
     TradingMode Mode) : DomainEventBase;
+
+/// <summary>
+/// Loop 75 — Break-even SL move audit event. Yayını <see cref="PositionsExtensions"/>
+/// aracılığıyla domain method'undan tetiklenir. UI/audit consumer'lar SystemEvents
+/// hattı üzerinden tüketir; iş kuralı (price-stop trigger) yine
+/// <see cref="Infrastructure.Trading.StopLossMonitorService"/> aktif tutar.
+/// </summary>
+public sealed record PositionStopMovedEvent(
+    long PositionId,
+    string Symbol,
+    decimal PreviousStopPrice,
+    decimal NewStopPrice,
+    string Reason) : DomainEventBase;

@@ -57,6 +57,19 @@ public sealed class Position : AggregateRoot<long>
     /// </summary>
     public decimal ExitCommission { get; private set; }
 
+    /// <summary>
+    /// Loop 75 — break-even SL move audit timestamp (idempotency anchor). Null
+    /// while the position has never had its stop pulled to break-even; once
+    /// <see cref="MoveStopToBreakEven"/> succeeds the field is set and any further
+    /// invocation is a defensive no-op (caller does not need to read this field —
+    /// the method itself enforces "apply once").
+    ///
+    /// Spec (binance-expert): timestop slow-bleed pattern (Loop 72-73 t90 +UPnl
+    /// → t120 −UPnl roundtrip) çözülür. Service hook UPnl &gt;= entry × (1 + BE_TriggerPct)
+    /// görür ve <c>StopPrice</c>'ı entry × (1 + BE_OffsetPct)'e taşır — bir daha tetiklemez.
+    /// </summary>
+    public DateTimeOffset? BreakEvenAppliedAt { get; private set; }
+
     public long? StrategyId { get; private set; }
     public TradingMode Mode { get; private set; }
     public DateTimeOffset OpenedAt { get; private set; }
@@ -167,6 +180,65 @@ public sealed class Position : AggregateRoot<long>
         UpdatedAt = now;
 
         RaiseDomainEvent(new PositionMarkedToMarketEvent(Id, Symbol.Value, markPrice, UnrealizedPnl));
+    }
+
+    /// <summary>
+    /// Loop 75 — break-even SL move. Caller (typically
+    /// <see cref="Infrastructure.Positions.MarkToMarketWorker"/>) decides triggering
+    /// (mark price ≥ entry × (1 + BE_TriggerPct)); domain only enforces invariants
+    /// and idempotency.
+    /// </summary>
+    /// <param name="newStop">Target stop level (must improve current stop for Long;
+    /// pre-computed by caller as entry × (1 + BE_OffsetPct)).</param>
+    /// <param name="asOf">Clock-driven event time.</param>
+    /// <returns>
+    /// <see cref="MoveStopResult.Applied"/> on first successful move,
+    /// <see cref="MoveStopResult.AlreadyApplied"/> if BE was already applied
+    /// (defensive no-op so the worker can stay idempotent without an explicit guard),
+    /// <see cref="MoveStopResult.NotImproving"/> if the requested stop is not
+    /// strictly better than the current one (Long: not higher, Short: not lower).
+    /// </returns>
+    /// <remarks>
+    /// Throws <see cref="DomainException"/> only on hard invariant violations
+    /// (closed position, non-positive stop). Idempotency / no-improve are
+    /// expected paths — Result-style enum return keeps the caller exception-free.
+    /// </remarks>
+    public MoveStopResult MoveStopToBreakEven(decimal newStop, DateTimeOffset asOf)
+    {
+        EnsureOpen();
+        if (newStop <= 0m)
+        {
+            throw new DomainException("Break-even stop price must be positive.");
+        }
+
+        if (BreakEvenAppliedAt is not null)
+        {
+            return MoveStopResult.AlreadyApplied;
+        }
+
+        // Long: yeni stop entry üstüne taşınıyor → mevcut stop (varsa) altında olmalı.
+        // Short: yeni stop entry altına taşınıyor → mevcut stop (varsa) üstünde olmalı.
+        // null current stop (StopPrice never set) → her improvement geçerli.
+        if (StopPrice is decimal current)
+        {
+            var improves = Side == PositionSide.Long
+                ? newStop > current
+                : newStop < current;
+            if (!improves)
+            {
+                return MoveStopResult.NotImproving;
+            }
+        }
+
+        var previous = StopPrice ?? 0m;
+        StopPrice = newStop;
+        BreakEvenAppliedAt = asOf;
+        UpdatedAt = asOf;
+
+        RaiseDomainEvent(new PositionStopMovedEvent(
+            Id, Symbol.Value, previous, newStop, "break_even_move"));
+
+        return MoveStopResult.Applied;
     }
 
     public void Close(decimal exitPrice, string reason, DateTimeOffset now, decimal exitCommission = 0m)

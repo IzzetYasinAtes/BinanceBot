@@ -38,6 +38,9 @@ public sealed class PositionConfiguration : IEntityTypeConfiguration<Position>
             .HasConversion(
                 v => v.HasValue ? (long?)(long)v.Value.TotalSeconds : null,
                 v => v.HasValue ? (TimeSpan?)TimeSpan.FromSeconds(v.Value) : null);
+        // Loop 75 — break-even SL move audit timestamp. Nullable datetimeoffset,
+        // null = BE never applied. EF default precision yeterli (datetimeoffset(7)).
+        builder.Property(p => p.BreakEvenAppliedAt);
         builder.Property(p => p.UnrealizedPnl).HasPrecision(28, 10);
         builder.Property(p => p.RealizedPnl).HasPrecision(28, 10);
         // ADR-0020 §20.6 — fee-aware accounting. Both commissions are quote-denominated

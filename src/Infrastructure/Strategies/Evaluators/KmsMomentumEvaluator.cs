@@ -270,6 +270,8 @@ public sealed class KmsMomentumEvaluator : IStrategyEvaluator
             slPct,
             maxHoldMinutes,
             cooldownBarsAfterSignal = p.CooldownBarsAfterSignal,
+            beMoveTriggerPct = p.BeMoveTriggerPct,
+            beMoveOffsetPct = p.BeMoveOffsetPct,
             lastBarOpenTime = snapshot.LastBarOpenTime,
         });
 
@@ -396,5 +398,13 @@ public sealed class KmsMomentumEvaluator : IStrategyEvaluator
 
         // Cooldown — 3 bar × 5dk = 15dk.
         public int CooldownBarsAfterSignal { get; set; } = 3;
+
+        // Loop 75 — break-even SL move parametreleri. MVP'de strateji-specific
+        // değerler okunmuyor (MarkToMarketWorker global IOptions<BreakEvenOptions>
+        // kullanır); JSON'da audit + future override için tutulur. Loop 76+ Position
+        // aggregate'a parametre push edilirse evaluator bu alanları emit ContextJson'una
+        // koyar ve handler Position.Open'a aktarır.
+        public decimal BeMoveTriggerPct { get; set; } = 0.0010m;
+        public decimal BeMoveOffsetPct { get; set; } = 0.0002m;
     }
 }
