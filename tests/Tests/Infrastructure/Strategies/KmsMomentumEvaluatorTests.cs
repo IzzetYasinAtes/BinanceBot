@@ -23,6 +23,13 @@ namespace BinanceBot.Tests.Infrastructure.Strategies;
 ///   7. RSI Zone 0 puan (RSI ≥ NeutralCeiling) ⇒ skip.
 ///   8. CoinClass "large" ⇒ MinAtrPctLarge eşiği uygulanır (BTC).
 ///   9. CoinClass "alt" ⇒ MinAtrPctAlt eşiği uygulanır (ADA, daha yüksek bar).
+///
+/// Loop 77 ek kontratlar:
+///  10. EMA200 hard-gate: <c>CurrentClose &lt;= Ema200</c> ⇒ skip.
+///  11. EMA200 == 0 (warmup yetersiz) ⇒ gate bypass, normal akış.
+///  12. <c>Ema200GateEnabled=false</c> ⇒ downtrend bile olsa gate bypass.
+///  13. BBW &gt; threshold ⇒ +1 puan, audit'te <c>bbwScore=1</c>.
+///  14. BBW &lt;= threshold ⇒ <c>bbwScore=0</c>, emit yine kalır (nice-to-have).
 /// </summary>
 public class KmsMomentumEvaluatorTests
 {
@@ -42,7 +49,9 @@ public class KmsMomentumEvaluatorTests
         "\"MinTpPct\":0.005,\"MaxTpPct\":0.018," +
         "\"MinSlPct\":0.003,\"MaxSlPct\":0.008," +
         "\"MaxHoldMinutes\":45,\"MaxHoldMinutesLowScore\":30,\"MaxHoldMinutesHighScore\":60," +
-        "\"SpreadThresholdPct\":0.005,\"CooldownBarsAfterSignal\":3}";
+        "\"SpreadThresholdPct\":0.005,\"CooldownBarsAfterSignal\":3," +
+        "\"Ema200GateEnabled\":true,\"BbwScoreEnabled\":true," +
+        "\"BbwThreshold\":0.008,\"BbwScorePoints\":1}";
 
     private const string DefaultParamsAlt =
         "{\"RsiPeriod\":14,\"EmaPeriod\":9,\"AtrPeriod\":14,\"TradeCountWindow\":20," +
@@ -56,7 +65,9 @@ public class KmsMomentumEvaluatorTests
         "\"MinTpPct\":0.005,\"MaxTpPct\":0.018," +
         "\"MinSlPct\":0.003,\"MaxSlPct\":0.008," +
         "\"MaxHoldMinutes\":45,\"MaxHoldMinutesLowScore\":30,\"MaxHoldMinutesHighScore\":60," +
-        "\"SpreadThresholdPct\":0.005,\"CooldownBarsAfterSignal\":3}";
+        "\"SpreadThresholdPct\":0.005,\"CooldownBarsAfterSignal\":3," +
+        "\"Ema200GateEnabled\":true,\"BbwScoreEnabled\":true," +
+        "\"BbwThreshold\":0.008,\"BbwScorePoints\":1}";
 
     private sealed class FixedClock(DateTimeOffset now) : IClock
     {
@@ -72,13 +83,16 @@ public class KmsMomentumEvaluatorTests
     }
 
     /// <summary>
-    /// Snapshot factory — default değerler 6/6 skor için optimize:
+    /// Snapshot factory — default değerler 6/7 skor için optimize:
     ///   - Rsi14 = 35 < OversoldZone(40) AND > Rsi14Prev(33) ⇒ RSI Zone 2 puan
     ///   - Ema9Now(100.20) > Ema9Prev(100.10) ⇒ Slope 1 puan
     ///   - CurrentTradeCount(160) > AvgTradeCount20(100) × 0.8 = 80 ⇒ Surge 1 puan
     ///   - Atr14(0.50) ; CurrentClose(100) ⇒ atrPct 0.005 ≥ MinAtr eşiği (large=0.0002) ⇒ ATR 1 puan
     /// Spread (BookTicker mock) Bid 99.99 / Ask 100 ⇒ spreadPct 0.0001 < 0.005 ⇒ Spread 1 puan
-    /// Toplam 6/6 default. Test'lerde tek tek parametre düşürülerek skor azaltılır.
+    /// Loop 77 yeni alanlar:
+    ///   - Ema200 = 0 default ⇒ EMA200 trend gate bypass (warmup yetersiz semantik).
+    ///   - BollingerBandWidth = 0 default ⇒ BBW skoru 0 puan (toplam 6/7).
+    /// Test'lerde tek tek parametre düşürülerek skor azaltılır veya gate aktive edilir.
     /// </summary>
     private static KmsMomentumSnapshot MakeSnapshot(
         decimal currentClose = 100m,
@@ -88,7 +102,9 @@ public class KmsMomentumEvaluatorTests
         decimal ema9Prev = 100.10m,
         decimal atr14 = 0.50m,
         decimal avgTradeCount20 = 100m,
-        int currentTradeCount = 160)
+        int currentTradeCount = 160,
+        decimal ema200 = 0m,
+        decimal bollingerBandWidth = 0m)
     {
         return new KmsMomentumSnapshot(
             CurrentClose: currentClose,
@@ -99,6 +115,8 @@ public class KmsMomentumEvaluatorTests
             Atr14: atr14,
             AvgTradeCount20: avgTradeCount20,
             CurrentTradeCount: currentTradeCount,
+            Ema200: ema200,
+            BollingerBandWidth: bollingerBandWidth,
             LastBarOpenTime: DateTimeOffset.UtcNow.AddMinutes(-5),
             AsOf: DateTimeOffset.UtcNow);
     }
@@ -393,5 +411,121 @@ public class KmsMomentumEvaluatorTests
             closedBars: Array.Empty<Kline>(),
             cancellationToken: CancellationToken.None);
         second.Should().BeNull();
+    }
+
+    /// <summary>
+    /// Loop 77 Test 12 — EMA200 trend hard-gate: <c>CurrentClose &lt;= Ema200</c>
+    /// (downtrend) ⇒ skip, skor toplama bile bakılmaz. Ema200 = 105 > Close 100,
+    /// gate aktif (default true).
+    /// </summary>
+    [Fact]
+    public async Task Ema200Gate_ClosingBelowEma200_Skip()
+    {
+        var snap = MakeSnapshot(currentClose: 100m, ema200: 105m); // close < ema200 ⇒ downtrend
+        var (sut, _, _) = Build(snap, TightSpreadTicker());
+
+        var result = await sut.EvaluateAsync(
+            StrategyId, DefaultParamsLarge, Symbol,
+            closedBars: Array.Empty<Kline>(),
+            cancellationToken: CancellationToken.None);
+
+        result.Should().BeNull();
+    }
+
+    /// <summary>
+    /// Loop 77 Test 13 — EMA200 hard-gate uptrend bypass: Close 110 > Ema200 100 ⇒
+    /// gate açık, normal akış (6/7 emit, BBW 0).
+    /// </summary>
+    [Fact]
+    public async Task Ema200Gate_ClosingAboveEma200_Emit()
+    {
+        var snap = MakeSnapshot(currentClose: 110m, ema200: 100m, atr14: 0.55m); // 0.55/110≈0.005
+        var (sut, _, _) = Build(snap, TightSpreadTicker(bid: 109.99m, ask: 110m));
+
+        var result = await sut.EvaluateAsync(
+            StrategyId, DefaultParamsLarge, Symbol,
+            closedBars: Array.Empty<Kline>(),
+            cancellationToken: CancellationToken.None);
+
+        result.Should().NotBeNull();
+        result!.ContextJson.Should().Contain("\"score\":6"); // BBW 0, total 6/7
+        result.ContextJson.Should().Contain("\"ema200\":100");
+    }
+
+    /// <summary>
+    /// Loop 77 Test 14 — Ema200GateEnabled=false ⇒ downtrend bile olsa gate
+    /// bypass (0-emit acil sigortası). Close 100 ≤ Ema200 105 ama toggle off
+    /// ⇒ emit beklenir.
+    /// </summary>
+    [Fact]
+    public async Task Ema200Gate_Disabled_Bypass_Emit()
+    {
+        const string ParamsGateOff =
+            "{\"RsiPeriod\":14,\"EmaPeriod\":9,\"AtrPeriod\":14,\"TradeCountWindow\":20," +
+            "\"RsiOversoldZone\":40,\"RsiNeutralCeiling\":52,\"MinScoreThreshold\":4," +
+            "\"CoinClass\":\"large\"," +
+            "\"MinAtrPctLarge\":0.0002,\"MinAtrPctMid\":0.0003,\"MinAtrPctAlt\":0.0004," +
+            "\"TradeCountSurgeMultiplier\":0.8," +
+            "\"TpAtrMultiplier\":1.8,\"SlAtrMultiplier\":0.75," +
+            "\"TpAtrMultiplierLow\":1.5,\"TpAtrMultiplierHigh\":2.2," +
+            "\"SlAtrMultiplierLow\":0.85,\"SlAtrMultiplierHigh\":0.65," +
+            "\"MinTpPct\":0.005,\"MaxTpPct\":0.018," +
+            "\"MinSlPct\":0.003,\"MaxSlPct\":0.008," +
+            "\"MaxHoldMinutes\":45,\"MaxHoldMinutesLowScore\":30,\"MaxHoldMinutesHighScore\":60," +
+            "\"SpreadThresholdPct\":0.005,\"CooldownBarsAfterSignal\":3," +
+            "\"Ema200GateEnabled\":false,\"BbwScoreEnabled\":true," +
+            "\"BbwThreshold\":0.008,\"BbwScorePoints\":1}";
+
+        var snap = MakeSnapshot(currentClose: 100m, ema200: 105m); // downtrend ama gate off
+        var (sut, _, _) = Build(snap, TightSpreadTicker());
+
+        var result = await sut.EvaluateAsync(
+            StrategyId, ParamsGateOff, Symbol,
+            closedBars: Array.Empty<Kline>(),
+            cancellationToken: CancellationToken.None);
+
+        result.Should().NotBeNull();
+    }
+
+    /// <summary>
+    /// Loop 77 Test 15 — BBW > threshold (0.008) ⇒ +1 puan.
+    /// Default snapshot 6/7 (BBW 0). BBW 0.012 > 0.008 ⇒ totalScore 7.
+    /// Audit: <c>"bbwScore":1</c> ve <c>"score":7</c>.
+    /// </summary>
+    [Fact]
+    public async Task BbwScore_AboveThreshold_AddsBonusPoint()
+    {
+        var snap = MakeSnapshot(bollingerBandWidth: 0.012m); // > 0.008
+        var (sut, _, _) = Build(snap, TightSpreadTicker());
+
+        var result = await sut.EvaluateAsync(
+            StrategyId, DefaultParamsLarge, Symbol,
+            closedBars: Array.Empty<Kline>(),
+            cancellationToken: CancellationToken.None);
+
+        result.Should().NotBeNull();
+        result!.ContextJson.Should().Contain("\"bbwScore\":1");
+        result.ContextJson.Should().Contain("\"score\":7");
+    }
+
+    /// <summary>
+    /// Loop 77 Test 16 — BBW &lt;= threshold ⇒ <c>bbwScore=0</c>, ama emit
+    /// kalır (nice-to-have, hard-gate değil). BBW 0.005 &lt; 0.008 ⇒ 0 puan;
+    /// totalScore 6 yine MinScoreThreshold 4 üstünde.
+    /// </summary>
+    [Fact]
+    public async Task BbwScore_BelowThreshold_NoBonus_StillEmits()
+    {
+        var snap = MakeSnapshot(bollingerBandWidth: 0.005m); // < 0.008
+        var (sut, _, _) = Build(snap, TightSpreadTicker());
+
+        var result = await sut.EvaluateAsync(
+            StrategyId, DefaultParamsLarge, Symbol,
+            closedBars: Array.Empty<Kline>(),
+            cancellationToken: CancellationToken.None);
+
+        result.Should().NotBeNull();
+        result!.ContextJson.Should().Contain("\"bbwScore\":0");
+        result.ContextJson.Should().Contain("\"score\":6");
     }
 }

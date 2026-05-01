@@ -15,14 +15,26 @@ namespace BinanceBot.Infrastructure.Strategies.Evaluators;
 /// gate-skorlama; min 4/6 emit + spread/MinAtr hard skip + RSI Zone hard
 /// gate (≥1 puan zorunlu).
 ///
-/// Gate skor tablosu (binance-expert spec):
+/// Loop 77 — EMA200 trend gate + BBW (Bollinger band-width) regime filter.
+/// Loop 76 trailing-stop deploy başarılı oldu ama entry kalitesi hâlâ
+/// problemli (downtrend long entry'leri büyük SL'lere yol açıyor). EMA200
+/// hard-gate <c>closePrice &gt; EMA200</c> şartını skor hesabı ÖNCESİ
+/// koyarak downtrend long'ları eler; <c>Ema200GateEnabled</c> toggle
+/// 0-emit sigortası olarak korunur. BBW skor sistemine 1 puan nice-to-have
+/// olarak girer (yüksek band-width = breakout dostu rejim) — hard-gate
+/// DEĞİL, frekans korunur.
+///
+/// Gate skor tablosu (binance-expert spec, Loop 77):
 /// <list type="bullet">
 ///   <item>RSI Zone (oversold + momentum) 0–2 puan — must-have (≥1).</item>
 ///   <item>EMA9 pozitif slope 0–1 puan — nice-to-have.</item>
 ///   <item>TradeCount surge 0–1 puan — nice-to-have.</item>
 ///   <item>Spread filtresi 0–1 puan — hard-gate (0 ⇒ skip).</item>
 ///   <item>MinAtrPct (CoinClass-aware) 0–1 puan — hard-gate (0 ⇒ skip).</item>
+///   <item>BBW regime 0–1 puan — nice-to-have (Loop 77).</item>
 /// </list>
+/// Toplam tavan 7 puan; <c>MinScoreThreshold</c> default 4 (Loop 76 ile
+/// hizalı, frekans korunur).
 ///
 /// RSI Zone (continuous, cross değil):
 /// <list type="bullet">
@@ -117,6 +129,21 @@ public sealed class KmsMomentumEvaluator : IStrategyEvaluator
             return Task.FromResult<StrategyEvaluation?>(null);
         }
 
+        // Loop 77 — EMA200 trend hard-gate (skor öncesi). Spec:
+        //   if (Ema200GateEnabled && Ema200 > 0 && CurrentClose <= Ema200) skip.
+        //   Ema200 == 0 ⇒ warmup yetersiz (200 bar dolmadı) ⇒ gate açık.
+        //   Toggle false ⇒ acil 0-emit sigortası, gate bypass.
+        if (p.Ema200GateEnabled
+            && snapshot.Ema200 > 0m
+            && snapshot.CurrentClose <= snapshot.Ema200)
+        {
+            _logger.LogInformation(
+                "KMS skip ema200_gate symbol={Symbol} strategyId={StrategyId} " +
+                "close={Close} ema200={Ema200} decision=Ema200GateSkip",
+                symbol, strategyId, snapshot.CurrentClose, snapshot.Ema200);
+            return Task.FromResult<StrategyEvaluation?>(null);
+        }
+
         // CoinClass asimetri çözümü — BTC/ETH (large) düşük ATR'da bile likit;
         // altcoin (alt) çok düşük ATR = trend yok / pump-dump tuzağı, daha
         // yüksek MinAtr aranır. Bilinmeyen sınıf "alt" varsayılır (en
@@ -175,7 +202,14 @@ public sealed class KmsMomentumEvaluator : IStrategyEvaluator
             : 0m;
         var atrScore = (snapshot.Atr14 > 0m && atrPct >= minAtrPct) ? 1 : 0;
 
-        var totalScore = rsiZoneScore + slopeScore + surgeScore + spreadScore + atrScore;
+        // Loop 77 — BBW (Bollinger band-width) regime nice-to-have skoru.
+        // Yüksek BBW = volatilite genişliyor, breakout dostu rejim. Hard-gate
+        // değil — toggle off veya threshold altı = 0 puan, emit kalır.
+        var bbwScore = (p.BbwScoreEnabled && snapshot.BollingerBandWidth > p.BbwThreshold)
+            ? p.BbwScorePoints
+            : 0;
+
+        var totalScore = rsiZoneScore + slopeScore + surgeScore + spreadScore + atrScore + bbwScore;
 
         // Streak guard — Loop 72'de dinamikleşir; şimdilik 4 sabit.
         var requiredScore = _cooldown.GetCurrentScoreThreshold(strategyId, symbol);
@@ -193,13 +227,14 @@ public sealed class KmsMomentumEvaluator : IStrategyEvaluator
         {
             _logger.LogDebug(
                 "KMS skip score symbol={Symbol} totalScore={Total} required={Req} " +
-                "rsiZone={RsiZone} slope={Slope} surge={Surge} spread={Spread} atr={Atr} " +
+                "rsiZone={RsiZone} slope={Slope} surge={Surge} spread={Spread} atr={Atr} bbw={Bbw} " +
                 "rsi={Rsi} rsiPrev={RsiPrev} spreadPct={SpreadPct} atrPct={AtrPct} " +
-                "minAtrPct={MinAtr} coinClass={CoinClass} decision=Skip",
+                "minAtrPct={MinAtr} coinClass={CoinClass} ema200={Ema200} bbwValue={BbwValue} " +
+                "decision=Skip",
                 symbol, totalScore, requiredScore,
-                rsiZoneScore, slopeScore, surgeScore, spreadScore, atrScore,
+                rsiZoneScore, slopeScore, surgeScore, spreadScore, atrScore, bbwScore,
                 snapshot.Rsi14, snapshot.Rsi14Prev, spreadPct, atrPct,
-                minAtrPct, coinClass);
+                minAtrPct, coinClass, snapshot.Ema200, snapshot.BollingerBandWidth);
             return Task.FromResult<StrategyEvaluation?>(null);
         }
 
@@ -251,13 +286,17 @@ public sealed class KmsMomentumEvaluator : IStrategyEvaluator
             surgeScore,
             spreadScore,
             atrScore,
+            bbwScore,
             rsi14 = snapshot.Rsi14,
             rsi14Prev = snapshot.Rsi14Prev,
             ema9Now = snapshot.Ema9Now,
             ema9Prev = snapshot.Ema9Prev,
+            ema200 = snapshot.Ema200,
             atr14 = snapshot.Atr14,
             atrPct,
             minAtrPct,
+            bbw = snapshot.BollingerBandWidth,
+            bbwThreshold = p.BbwThreshold,
             tradeCountAvg20 = snapshot.AvgTradeCount20,
             currentTradeCount = snapshot.CurrentTradeCount,
             askPrice = ticker.AskPrice,
@@ -276,17 +315,19 @@ public sealed class KmsMomentumEvaluator : IStrategyEvaluator
         });
 
         _logger.LogInformation(
-            "KMS emit symbol={Symbol} score={Score}/6 coinClass={CoinClass} " +
-            "rsiZone={RsiZone} slope={Slope} surge={Surge} spread={Spread} atr={Atr} " +
+            "KMS emit symbol={Symbol} score={Score}/7 coinClass={CoinClass} " +
+            "rsiZone={RsiZone} slope={Slope} surge={Surge} spread={Spread} atr={Atr} bbw={Bbw} " +
             "entry={Entry} stop={Stop} tp={Tp} tpMul={TpMul} slMul={SlMul} " +
             "tpPct={TpPct} slPct={SlPct} maxHold={MaxHold} " +
             "rsi={Rsi} rsiPrev={RsiPrev} spreadPct={SpreadPct} atrPct={AtrPct} " +
+            "ema200={Ema200} bbwValue={BbwValue} " +
             "decision=Emit",
             symbol, totalScore, coinClass,
-            rsiZoneScore, slopeScore, surgeScore, spreadScore, atrScore,
+            rsiZoneScore, slopeScore, surgeScore, spreadScore, atrScore, bbwScore,
             entryPrice, stopPrice, takeProfit, tpMul, slMul,
             tpPct, slPct, maxHoldMinutes,
-            snapshot.Rsi14, snapshot.Rsi14Prev, spreadPct, atrPct);
+            snapshot.Rsi14, snapshot.Rsi14Prev, spreadPct, atrPct,
+            snapshot.Ema200, snapshot.BollingerBandWidth);
 
         // Sinyal yayını öncesi cooldown timestamp kaydı. Geometri valid (Emit
         // path); skip path'lerinde kayıt yapılmaz, böylece reddedilmiş
@@ -406,5 +447,23 @@ public sealed class KmsMomentumEvaluator : IStrategyEvaluator
         // koyar ve handler Position.Open'a aktarır.
         public decimal BeMoveTriggerPct { get; set; } = 0.0010m;
         public decimal BeMoveOffsetPct { get; set; } = 0.0002m;
+
+        // Loop 77 — EMA200 trend gate. Hard-gate: closePrice <= EMA200 ise
+        // emit yok (downtrend long elenir). Toggle false ⇒ gate bypass
+        // (0-emit acil sigortası). EMA200 == 0 ⇒ warmup yetersiz, gate açık.
+        public bool Ema200GateEnabled { get; set; } = true;
+
+        // Loop 77 — Bollinger band-width skor sistemine bonus puan ekler.
+        // Hard-gate DEĞİL; toggle false ile sıfır puan döner ama emit'i
+        // engellemez (frekans koruma).
+        public bool BbwScoreEnabled { get; set; } = true;
+
+        // Loop 77 — BBW eşiği. (Upper - Lower) / Middle > BbwThreshold ⇒
+        // BbwScorePoints. Default 0.008 = %0.8 bant genişliği — sıkışmadan
+        // yeni çıkmış, breakout dostu rejimi yakalar.
+        public decimal BbwThreshold { get; set; } = 0.008m;
+
+        // Loop 77 — BBW puan ağırlığı (default 1, totalScore tavanı 7'ye çıkar).
+        public int BbwScorePoints { get; set; } = 1;
     }
 }

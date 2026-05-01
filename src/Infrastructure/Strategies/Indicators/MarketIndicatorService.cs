@@ -43,9 +43,27 @@ public sealed class MarketIndicatorService : IMarketIndicatorService, IHostedSer
     //   - EMA9 now/prev: 10 bar
     //   - ATR14: 15 bar
     //   - TradeCountAvg(20): 20 bar
-    //   - Önceden uzun history için 200 bar emniyet (~16.6 saat)
+    //   - Loop 77 — EMA200 trend gate: 200 bar (16.67h history) zorunlu
+    //   - Loop 77 — Bollinger(20,2) BBW: 20 bar
     // Binance REST limit 1 sayfa yeter (limit 1000 ≥ 200).
     internal const int FiveMinuteBufferCapacity = 200;
+
+    // Loop 77 — EMA200 trend gate sabit periyodu. Snapshot her zaman 200
+    // dener; warmup yetersizse 0 döner ve evaluator gate'i "unavailable"
+    // (açık) olarak yorumlar.
+    internal const int Ema200Period = 200;
+
+    // Loop 77 — Bollinger Bands sabit periyod + stdDev katsayısı. KMS
+    // snapshot BBW (band width) hesabı için kullanır; klasik Bollinger
+    // ayarları (20, 2.0).
+    internal const int BollingerPeriod = 20;
+    internal const decimal BollingerStdDev = 2.0m;
+
+    // Loop 77 — IndicatorWarmupCompleted publish eşiği. Loop 67'de 30 bar
+    // yeterliydi (RSI/EMA9/ATR14 için ~22 bar). EMA200 trend gate için
+    // tam 200 bar gerekli; warmup eventi de bu eşikte yayılmalı ki
+    // downstream "evaluator hazır" varsayımı doğru kalsın.
+    internal const int WarmupCompletedBarThreshold = 200;
 
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly IBinanceMarketStream _stream;
@@ -173,6 +191,24 @@ public sealed class MarketIndicatorService : IMarketIndicatorService, IHostedSer
             var tcWindow = klines.GetRange(klines.Count - tradeCountWindow, tradeCountWindow);
             var tradeCountAvg = Evaluators.Indicators.TradeCountAvg(tcWindow, tradeCountWindow);
 
+            // Loop 77 — EMA200 trend gate. Buffer 200 bar dolduğunda anlamlı;
+            // erken aşamada 0 döner ve evaluator gate'i "unavailable / açık"
+            // sayar. Indicators.Ema endIndex < period-1 durumunda close fallback
+            // dönüyor (gerçek EMA200 değil) — burada minBars eşik kontrolü
+            // yapıyoruz, fallback'i bilinçli olarak engelle.
+            var ema200 = klines.Count >= Ema200Period
+                ? Evaluators.Indicators.Ema(klines, period: Ema200Period, endIndex: klines.Count - 1)
+                : 0m;
+
+            // Loop 77 — Bollinger Band Width (BBW) regime filter:
+            //   BBW = (Upper - Lower) / Middle
+            // Yetersiz bar (<20) durumunda BollingerBands flat band döner
+            // (Upper == Lower == Middle), BBW 0 olur ve skor sistemi 0 puan
+            // verir; emit'i tek başına engellemez.
+            var (bbMid, bbUpper, bbLower) = Evaluators.Indicators.BollingerBands(
+                klines, BollingerPeriod, BollingerStdDev);
+            var bbw = bbMid > 0m ? (bbUpper - bbLower) / bbMid : 0m;
+
             return new KmsMomentumSnapshot(
                 CurrentClose: current.ClosePrice,
                 Rsi14: rsi14,
@@ -182,6 +218,8 @@ public sealed class MarketIndicatorService : IMarketIndicatorService, IHostedSer
                 Atr14: atr14,
                 AvgTradeCount20: tradeCountAvg,
                 CurrentTradeCount: current.TradeCount,
+                Ema200: ema200,
+                BollingerBandWidth: bbw,
                 LastBarOpenTime: current.OpenTime,
                 AsOf: current.CloseTime);
         }
@@ -289,8 +327,10 @@ public sealed class MarketIndicatorService : IMarketIndicatorService, IHostedSer
         {
             if (state.WarmupEventPublished) return;
             fiveMinCount = state.FiveMinute.Count;
-            // KMS warmup eşiği max 22 bar (RSI+2). 30 bar fazlasıyla yeter.
-            if (fiveMinCount < 30) return;
+            // Loop 77 — EMA200 trend gate aktif. Warmup eventi tam 200 bar
+            // dolduğunda yayılır; 200'ün altında EMA200 fallback (close)
+            // değeri döneceği için trend yorumu yanıltıcı olur.
+            if (fiveMinCount < WarmupCompletedBarThreshold) return;
             state.WarmupEventPublished = true;
         }
 
