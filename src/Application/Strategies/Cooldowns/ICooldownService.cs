@@ -48,4 +48,16 @@ public interface ICooldownService
     /// Sonraki <see cref="IsCooldown"/> çağrıları bu zamanı baz alır.
     /// </summary>
     void RecordSignal(long strategyId, string symbol, DateTimeOffset now);
+
+    /// <summary>
+    /// Loop 71 KMS skorlama protokolü — bir (strategyId, symbol) için anlık
+    /// olarak uygulanması gereken minimum skor eşiğini döner. Default 4
+    /// (KMS evaluator 6 puan üstünden 4/6 emit). İleride streak-guard ile
+    /// dinamikleşir: ardışık SL'den sonra eşik geçici olarak yükseltilir
+    /// (örn. 5 veya 6) — daha kaliteli setup beklenir.
+    ///
+    /// Şimdilik stub: tüm çağrılar 4 döner. Loop 72'de streak storage +
+    /// adaptive bump implementasyonu eklenecek.
+    /// </summary>
+    int GetCurrentScoreThreshold(long strategyId, string symbol);
 }

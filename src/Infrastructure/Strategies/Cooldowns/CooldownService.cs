@@ -70,6 +70,14 @@ public sealed class CooldownService : ICooldownService
             strategyId, key.Item2, now);
     }
 
+    /// <summary>
+    /// Loop 71 KMS — şimdilik stub: tüm (strategyId, symbol) çiftleri için
+    /// sabit 4 döner (KMS evaluator min skor eşiği). Loop 72: streak guard
+    /// implementasyonu burada — ardışık SL sonrası eşik 5/6'ya bump edilir,
+    /// kazançtan sonra 4'e döner.
+    /// </summary>
+    public int GetCurrentScoreThreshold(long strategyId, string symbol) => 4;
+
     private static string Normalize(string symbol) =>
         string.IsNullOrEmpty(symbol) ? string.Empty : symbol.ToUpperInvariant();
 }

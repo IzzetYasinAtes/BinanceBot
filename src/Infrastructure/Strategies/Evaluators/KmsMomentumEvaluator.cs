@@ -9,38 +9,46 @@ using Microsoft.Extensions.Logging;
 namespace BinanceBot.Infrastructure.Strategies.Evaluators;
 
 /// <summary>
-/// Loop 67 KMS — KlineMomentumSpread5m evaluator. Long-only spot paper.
+/// Loop 71 KMS — KlineMomentumSpread5m skor-tabanlı evaluator. Long-only spot
+/// paper. Loop 70 sonu: AND gate yapısı parametre tune ile saatte 5-15 emit
+/// hedefine ulaşamadı (over-restrictive). Yeni model: 6 puan üzerinden
+/// gate-skorlama; min 4/6 emit + spread/MinAtr hard skip + RSI Zone hard
+/// gate (≥1 puan zorunlu).
 ///
-/// Mantık (binance-expert spec): 5m bar kapanışında — RSI oversold recovery
-/// + EMA9 pozitif slope + TradeCount surge + BookTicker spread kontrol +
-/// MinAtrPct → mikro long entry.
-///
-/// Giriş AND koşulları (5):
-/// <list type="number">
-///   <item>RSI Recovery — <c>Rsi14 &gt; RsiRecoveryThreshold AND
-///         Rsi14Prev &lt; RsiRecoveryThreshold</c>. Önceki bar oversold,
-///         mevcut bar çıkış sinyali.</item>
-///   <item>EMA9 Slope — <c>Ema9Now &gt; Ema9Prev</c>. Kısa-erim pozitif
-///         eğim.</item>
-///   <item>TradeCount Surge — <c>CurrentTradeCount &gt;
-///         AvgTradeCount20 × TradeCountMultiplier</c>.</item>
-///   <item>Spread Filter — <c>(Ask − Bid) / Ask &lt; SpreadThresholdPct</c>.
-///         Canlı <see cref="IBookTickerReader"/> okumasından; testnet
-///         likiditesi düşük olduğu için eşik appsettings'te 0.0015.</item>
-///   <item>MinAtrPct — <c>Atr14 / CurrentClose &gt;= MinAtrPct</c>. Sessiz
-///         piyasa engeli.</item>
+/// Gate skor tablosu (binance-expert spec):
+/// <list type="bullet">
+///   <item>RSI Zone (oversold + momentum) 0–2 puan — must-have (≥1).</item>
+///   <item>EMA9 pozitif slope 0–1 puan — nice-to-have.</item>
+///   <item>TradeCount surge 0–1 puan — nice-to-have.</item>
+///   <item>Spread filtresi 0–1 puan — hard-gate (0 ⇒ skip).</item>
+///   <item>MinAtrPct (CoinClass-aware) 0–1 puan — hard-gate (0 ⇒ skip).</item>
 /// </list>
 ///
-/// Çıkış (ATR-tabanlı adaptif geometri):
-///   - Take-Profit: <c>entry × (1 + clamp(Atr14 × TpAtrMultiplier / entry,
-///     MinTpPct, MaxTpPct))</c> → default %0.50–1.80.
-///   - Stop-Loss  : <c>entry × (1 − clamp(Atr14 × SlAtrMultiplier / entry,
-///     MinSlPct, MaxSlPct))</c> → default %0.30–0.80.
-///   - Time-Stop  : <c>MaxHoldMinutes</c> default 45 (9 bar × 5m); ContextJson
-///     <c>maxHoldMinutes</c> anahtarına yazılır (ADR-0017 §17.7).
+/// RSI Zone (continuous, cross değil):
+/// <list type="bullet">
+///   <item>2 puan: <c>Rsi14 &lt; RsiOversoldZone &amp;&amp; Rsi14 &gt; Rsi14Prev</c>.</item>
+///   <item>1 puan: <c>Rsi14 &lt; RsiNeutralCeiling &amp;&amp; Rsi14 &gt; Rsi14Prev</c>.</item>
+///   <item>0 puan: diğer (RSI çok yüksek veya momentum negatif).</item>
+/// </list>
 ///
-/// Cooldown: <see cref="ICooldownService"/> singleton üzerinden evaluator-level
-/// enforce edilir. Default 3 bar (15dk) — 5m timeframe ile uyumlu.
+/// CoinClass asimetri (BTC/ETH vs alt):
+/// <list type="bullet">
+///   <item>"large" ⇒ <c>MinAtrPctLarge</c> (default 0.0002) — BTC, ETH.</item>
+///   <item>"mid"   ⇒ <c>MinAtrPctMid</c>   (default 0.0003) — SOL.</item>
+///   <item>"alt"   ⇒ <c>MinAtrPctAlt</c>   (default 0.0004) — XRP, ADA.</item>
+/// </list>
+///
+/// Skor-bazlı dinamik TP/SL/MaxHold (entry sonrası geometri kalitesi skor ile
+/// ölçeklenir — yüksek skor ⇒ geniş TP, dar SL, uzun hold):
+/// <list type="bullet">
+///   <item>4/6 ⇒ TpMul=Low(1.5), SlMul=Low(0.85), MaxHold=30dk.</item>
+///   <item>5/6 ⇒ TpMul=Mid(1.8), SlMul=Mid(0.75), MaxHold=45dk.</item>
+///   <item>6/6 ⇒ TpMul=High(2.2), SlMul=High(0.65), MaxHold=60dk.</item>
+/// </list>
+///
+/// Streak guard: <see cref="ICooldownService.GetCurrentScoreThreshold"/> aktif
+/// minimum skor eşiğini döner. Şimdilik sabit 4 (Loop 72: ardışık SL sonrası
+/// 5/6'ya bump).
 ///
 /// Result-flow: skip ⇒ <c>null</c>; signal ⇒ <see cref="StrategyEvaluation"/>.
 /// Exception kontrol akışı için kullanılmaz — invalid geometry / yetersiz
@@ -109,38 +117,21 @@ public sealed class KmsMomentumEvaluator : IStrategyEvaluator
             return Task.FromResult<StrategyEvaluation?>(null);
         }
 
-        // 1) RSI Recovery — önceki bar threshold altı, current üstü.
-        var rsiRecoveryOk =
-            snapshot.Rsi14 > p.RsiRecoveryThreshold
-            && snapshot.Rsi14Prev < p.RsiRecoveryThreshold;
-
-        // 2) EMA9 pozitif slope.
-        var slopeOk = snapshot.Ema9Now > snapshot.Ema9Prev;
-
-        // 3) TradeCount surge.
-        var surgeOk = snapshot.CurrentTradeCount >
-            snapshot.AvgTradeCount20 * p.TradeCountMultiplier;
-
-        // 5) MinAtr filtresi (4 spread için ayrı blok aşağıda).
-        var atrPct = snapshot.CurrentClose > 0m
-            ? snapshot.Atr14 / snapshot.CurrentClose
-            : 0m;
-        var atrOk = snapshot.Atr14 > 0m && atrPct >= p.MinAtrPct;
-
-        if (!rsiRecoveryOk || !slopeOk || !surgeOk || !atrOk)
+        // CoinClass asimetri çözümü — BTC/ETH (large) düşük ATR'da bile likit;
+        // altcoin (alt) çok düşük ATR = trend yok / pump-dump tuzağı, daha
+        // yüksek MinAtr aranır. Bilinmeyen sınıf "alt" varsayılır (en
+        // muhafazakar).
+        var coinClass = NormalizeCoinClass(p.CoinClass);
+        var minAtrPct = coinClass switch
         {
-            _logger.LogDebug(
-                "KMS skip filters symbol={Symbol} rsi={Rsi} rsiPrev={RsiPrev} thr={Thr} " +
-                "ema9={Ema9} ema9Prev={Ema9Prev} tcCur={TcCur} tcAvg={TcAvg} mult={Mult} " +
-                "atrPct={AtrPct} minAtr={MinAtr} decision=Skip",
-                symbol, snapshot.Rsi14, snapshot.Rsi14Prev, p.RsiRecoveryThreshold,
-                snapshot.Ema9Now, snapshot.Ema9Prev,
-                snapshot.CurrentTradeCount, snapshot.AvgTradeCount20, p.TradeCountMultiplier,
-                atrPct, p.MinAtrPct);
-            return Task.FromResult<StrategyEvaluation?>(null);
-        }
+            "large" => p.MinAtrPctLarge,
+            "mid" => p.MinAtrPctMid,
+            _ => p.MinAtrPctAlt,
+        };
 
-        // 4) Spread filter — canlı BookTicker okuması; payload yoksa skip.
+        // ── GATE SKORLAMA ─────────────────────────────────────────────────
+        // Spread payload'ı önceden çekilir — BookTicker yoksa skip; "yetersiz
+        // veri" durumunda emit yasak (defensive). Spread skoru aşağıda hesaplanır.
         var ticker = _bookTickers.GetLatest(symbol);
         if (ticker is null || ticker.AskPrice <= 0m || ticker.BidPrice <= 0m)
         {
@@ -151,11 +142,64 @@ public sealed class KmsMomentumEvaluator : IStrategyEvaluator
         }
 
         var spreadPct = (ticker.AskPrice - ticker.BidPrice) / ticker.AskPrice;
-        if (spreadPct >= p.SpreadThresholdPct)
+        var spreadScore = spreadPct < p.SpreadThresholdPct ? 1 : 0;
+
+        // RSI Zone (continuous + momentum) — 0/1/2 puan.
+        var rsiMomentumPositive = snapshot.Rsi14 > snapshot.Rsi14Prev;
+        int rsiZoneScore;
+        if (snapshot.Rsi14 < p.RsiOversoldZone && rsiMomentumPositive)
+        {
+            rsiZoneScore = 2;
+        }
+        else if (snapshot.Rsi14 < p.RsiNeutralCeiling && rsiMomentumPositive)
+        {
+            rsiZoneScore = 1;
+        }
+        else
+        {
+            rsiZoneScore = 0;
+        }
+
+        // EMA9 slope — 0/1.
+        var slopeScore = snapshot.Ema9Now > snapshot.Ema9Prev ? 1 : 0;
+
+        // TradeCount surge — 0/1. Eşik düşürüldü (0.8 default) — surge zorunlu
+        // değil, bonus.
+        var surgeScore = snapshot.CurrentTradeCount >
+            snapshot.AvgTradeCount20 * p.TradeCountSurgeMultiplier
+                ? 1 : 0;
+
+        // MinAtr (CoinClass-aware) — 0/1, hard-gate.
+        var atrPct = snapshot.CurrentClose > 0m
+            ? snapshot.Atr14 / snapshot.CurrentClose
+            : 0m;
+        var atrScore = (snapshot.Atr14 > 0m && atrPct >= minAtrPct) ? 1 : 0;
+
+        var totalScore = rsiZoneScore + slopeScore + surgeScore + spreadScore + atrScore;
+
+        // Streak guard — Loop 72'de dinamikleşir; şimdilik 4 sabit.
+        var requiredScore = _cooldown.GetCurrentScoreThreshold(strategyId, symbol);
+        if (requiredScore <= 0)
+        {
+            requiredScore = p.MinScoreThreshold;
+        }
+
+        // Hard-gate: spread veya MinAtr 0 ⇒ direkt skip (skor toplam ne olursa
+        // olsun likidite/volatilite anti-disaster).
+        // RSI Zone hard-gate: ≥1 zorunlu (rsiZoneScore == 0 ise emit yok).
+        var hardGateOk = spreadScore > 0 && atrScore > 0 && rsiZoneScore > 0;
+
+        if (!hardGateOk || totalScore < requiredScore)
         {
             _logger.LogDebug(
-                "KMS skip wide spread symbol={Symbol} bid={Bid} ask={Ask} spreadPct={Spread} thr={Thr}",
-                symbol, ticker.BidPrice, ticker.AskPrice, spreadPct, p.SpreadThresholdPct);
+                "KMS skip score symbol={Symbol} totalScore={Total} required={Req} " +
+                "rsiZone={RsiZone} slope={Slope} surge={Surge} spread={Spread} atr={Atr} " +
+                "rsi={Rsi} rsiPrev={RsiPrev} spreadPct={SpreadPct} atrPct={AtrPct} " +
+                "minAtrPct={MinAtr} coinClass={CoinClass} decision=Skip",
+                symbol, totalScore, requiredScore,
+                rsiZoneScore, slopeScore, surgeScore, spreadScore, atrScore,
+                snapshot.Rsi14, snapshot.Rsi14Prev, spreadPct, atrPct,
+                minAtrPct, coinClass);
             return Task.FromResult<StrategyEvaluation?>(null);
         }
 
@@ -172,12 +216,15 @@ public sealed class KmsMomentumEvaluator : IStrategyEvaluator
             return Task.FromResult<StrategyEvaluation?>(null);
         }
 
+        // ── SKOR-BAZLI DİNAMİK TP/SL/MaxHold ──────────────────────────────
+        var (tpMul, slMul, maxHoldMinutes) = ResolveGeometryByScore(totalScore, p);
+
         var entryPrice = snapshot.CurrentClose;
 
         // ATR-tabanlı TP/SL geometrisi + Min/Max clip. Atr14 > 0 garanti
-        // (atrOk true).
-        var rawTpPct = snapshot.Atr14 * p.TpAtrMultiplier / entryPrice;
-        var rawSlPct = snapshot.Atr14 * p.SlAtrMultiplier / entryPrice;
+        // (atrScore == 1 hard-gate).
+        var rawTpPct = snapshot.Atr14 * tpMul / entryPrice;
+        var rawSlPct = snapshot.Atr14 * slMul / entryPrice;
         var tpPct = Clamp(rawTpPct, p.MinTpPct, p.MaxTpPct);
         var slPct = Clamp(rawSlPct, p.MinSlPct, p.MaxSlPct);
 
@@ -195,37 +242,49 @@ public sealed class KmsMomentumEvaluator : IStrategyEvaluator
         var ctx = EvaluatorParameterHelper.SerializeContext(new
         {
             type = "kms-momentum-5m",
-            entryReason = "rsi_recovery_ema_slope_tc_surge",
+            entryReason = "score_gate",
+            score = totalScore,
+            requiredScore,
+            coinClass,
+            rsiZoneScore,
+            slopeScore,
+            surgeScore,
+            spreadScore,
+            atrScore,
             rsi14 = snapshot.Rsi14,
             rsi14Prev = snapshot.Rsi14Prev,
             ema9Now = snapshot.Ema9Now,
             ema9Prev = snapshot.Ema9Prev,
             atr14 = snapshot.Atr14,
             atrPct,
+            minAtrPct,
             tradeCountAvg20 = snapshot.AvgTradeCount20,
             currentTradeCount = snapshot.CurrentTradeCount,
             askPrice = ticker.AskPrice,
             bidPrice = ticker.BidPrice,
             spreadPct,
             currentClose = snapshot.CurrentClose,
-            tpAtrMultiplier = p.TpAtrMultiplier,
-            slAtrMultiplier = p.SlAtrMultiplier,
+            tpAtrMultiplier = tpMul,
+            slAtrMultiplier = slMul,
             tpPct,
             slPct,
-            maxHoldMinutes = p.MaxHoldMinutes,
+            maxHoldMinutes,
             cooldownBarsAfterSignal = p.CooldownBarsAfterSignal,
             lastBarOpenTime = snapshot.LastBarOpenTime,
         });
 
         _logger.LogInformation(
-            "KMS emit symbol={Symbol} entry={Entry} stop={Stop} tp={Tp} " +
-            "rsi={Rsi} rsiPrev={RsiPrev} ema9={Ema9} ema9Prev={Ema9Prev} " +
-            "tcCur={TcCur} tcAvg={TcAvg} spreadPct={Spread} atr14={Atr} " +
-            "tpPct={TpPct} slPct={SlPct} decision=Emit",
-            symbol, entryPrice, stopPrice, takeProfit,
-            snapshot.Rsi14, snapshot.Rsi14Prev, snapshot.Ema9Now, snapshot.Ema9Prev,
-            snapshot.CurrentTradeCount, snapshot.AvgTradeCount20, spreadPct,
-            snapshot.Atr14, tpPct, slPct);
+            "KMS emit symbol={Symbol} score={Score}/6 coinClass={CoinClass} " +
+            "rsiZone={RsiZone} slope={Slope} surge={Surge} spread={Spread} atr={Atr} " +
+            "entry={Entry} stop={Stop} tp={Tp} tpMul={TpMul} slMul={SlMul} " +
+            "tpPct={TpPct} slPct={SlPct} maxHold={MaxHold} " +
+            "rsi={Rsi} rsiPrev={RsiPrev} spreadPct={SpreadPct} atrPct={AtrPct} " +
+            "decision=Emit",
+            symbol, totalScore, coinClass,
+            rsiZoneScore, slopeScore, surgeScore, spreadScore, atrScore,
+            entryPrice, stopPrice, takeProfit, tpMul, slMul,
+            tpPct, slPct, maxHoldMinutes,
+            snapshot.Rsi14, snapshot.Rsi14Prev, spreadPct, atrPct);
 
         // Sinyal yayını öncesi cooldown timestamp kaydı. Geometri valid (Emit
         // path); skip path'lerinde kayıt yapılmaz, böylece reddedilmiş
@@ -243,6 +302,34 @@ public sealed class KmsMomentumEvaluator : IStrategyEvaluator
             SuggestedTakeProfit: takeProfit));
     }
 
+    /// <summary>
+    /// Skor → geometri eşleştirme. 4/5/6 paketleri:
+    ///   4 ⇒ Low (dar TP, geniş SL, kısa hold) — düşük güven, hızlı kapat.
+    ///   5 ⇒ Mid (default).
+    ///   6 ⇒ High (geniş TP, dar SL, uzun hold) — yüksek güven, kar büyüt.
+    /// 4'ün altı zaten skip path'te (requiredScore koruması).
+    /// </summary>
+    private static (decimal TpMul, decimal SlMul, int MaxHoldMinutes) ResolveGeometryByScore(
+        int score, Parameters p) => score switch
+        {
+            >= 6 => (p.TpAtrMultiplierHigh, p.SlAtrMultiplierHigh, p.MaxHoldMinutesHighScore),
+            5 => (p.TpAtrMultiplier, p.SlAtrMultiplier, p.MaxHoldMinutes),
+            _ => (p.TpAtrMultiplierLow, p.SlAtrMultiplierLow, p.MaxHoldMinutesLowScore),
+        };
+
+    private static string NormalizeCoinClass(string? raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw)) return "alt";
+        var lower = raw.Trim().ToLowerInvariant();
+        return lower switch
+        {
+            "large" => "large",
+            "mid" => "mid",
+            "alt" => "alt",
+            _ => "alt",
+        };
+    }
+
     private static decimal Clamp(decimal value, decimal min, decimal max)
     {
         if (min > 0m && value < min) return min;
@@ -251,41 +338,61 @@ public sealed class KmsMomentumEvaluator : IStrategyEvaluator
     }
 
     /// <summary>
-    /// binance-expert spec kontratı — parametre tipi. Serialised as
-    /// <c>Strategies.Seed[].ParametersJson</c>. Default'lar testnet 5m
-    /// baseline (RSI threshold 32, TradeCount × 1.1 testnet, Spread 0.0015).
+    /// Loop 71 KMS skor-bazlı parametre kontratı. Serialised as
+    /// <c>Strategies.Seed[].ParametersJson</c>. Default'lar binance-expert
+    /// spec baseline.
     /// </summary>
     private sealed class Parameters
     {
-        // RSI oversold recovery cross.
+        // Periyotlar.
         public int RsiPeriod { get; set; } = 14;
-        public decimal RsiRecoveryThreshold { get; set; } = 32m;
-
-        // EMA9 slope.
         public int EmaPeriod { get; set; } = 9;
-
-        // TradeCount surge.
-        public int TradeCountWindow { get; set; } = 20;
-        public decimal TradeCountMultiplier { get; set; } = 1.5m;
-
-        // ATR ve TP/SL geometrisi.
         public int AtrPeriod { get; set; } = 14;
+        public int TradeCountWindow { get; set; } = 20;
+
+        // RSI Zone (continuous, cross değil).
+        public decimal RsiOversoldZone { get; set; } = 40m;
+        public decimal RsiNeutralCeiling { get; set; } = 52m;
+
+        // Skor eşiği (min emit). 4/6 default.
+        public int MinScoreThreshold { get; set; } = 4;
+
+        // CoinClass — strategy seed'ten string ("large"/"mid"/"alt").
+        public string? CoinClass { get; set; }
+
+        // CoinClass-aware MinAtr eşikleri.
+        public decimal MinAtrPctLarge { get; set; } = 0.0002m;
+        public decimal MinAtrPctMid { get; set; } = 0.0003m;
+        public decimal MinAtrPctAlt { get; set; } = 0.0004m;
+
+        // TradeCount surge — 0.8 default (gevşetildi, sadece bonus puan).
+        public decimal TradeCountSurgeMultiplier { get; set; } = 0.8m;
+
+        // ATR çarpanları — skor 5/6 (mid) baseline.
         public decimal TpAtrMultiplier { get; set; } = 1.8m;
         public decimal SlAtrMultiplier { get; set; } = 0.75m;
 
+        // Skor 4 (low) — dar TP, geniş SL.
+        public decimal TpAtrMultiplierLow { get; set; } = 1.5m;
+        public decimal SlAtrMultiplierLow { get; set; } = 0.85m;
+
+        // Skor 6 (high) — geniş TP, dar SL.
+        public decimal TpAtrMultiplierHigh { get; set; } = 2.2m;
+        public decimal SlAtrMultiplierHigh { get; set; } = 0.65m;
+
+        // TP/SL clamp (binance-expert anti-disaster).
         public decimal MinTpPct { get; set; } = 0.005m;
         public decimal MaxTpPct { get; set; } = 0.018m;
         public decimal MinSlPct { get; set; } = 0.003m;
         public decimal MaxSlPct { get; set; } = 0.008m;
 
-        // Time-Stop — 9 bar × 5m = 45dk.
+        // Time-Stop (skora göre değişir).
         public int MaxHoldMinutes { get; set; } = 45;
+        public int MaxHoldMinutesLowScore { get; set; } = 30;
+        public int MaxHoldMinutesHighScore { get; set; } = 60;
 
-        // Sessiz piyasa filtresi: ATR/Close < %0.05 ⇒ sinyal yok.
-        public decimal MinAtrPct { get; set; } = 0.0005m;
-
-        // Spread filter — testnet liquidity düşük; eşik appsettings 0.0015.
-        public decimal SpreadThresholdPct { get; set; } = 0.0005m;
+        // Spread filter.
+        public decimal SpreadThresholdPct { get; set; } = 0.005m;
 
         // Cooldown — 3 bar × 5dk = 15dk.
         public int CooldownBarsAfterSignal { get; set; } = 3;
