@@ -528,4 +528,78 @@ public class KmsMomentumEvaluatorTests
         result!.ContextJson.Should().Contain("\"bbwScore\":0");
         result.ContextJson.Should().Contain("\"score\":6");
     }
+
+    /// <summary>
+    /// Loop 78 Test 17 — BBW hard-gate aktif + BBW &lt; threshold ⇒ skip.
+    /// Loop 77 t120 post-mortem: BBW=0/zayıf bant emit'leri 4 ardışık big SL ile
+    /// CB'yi tripletti. Hard-gate <c>BbwHardGate=true</c> + bant 0.003 &lt; 0.008
+    /// ⇒ EMA200 sonrası skip; skor toplama bakılmaz.
+    /// </summary>
+    [Fact]
+    public async Task BbwHardGate_BelowThreshold_Skip()
+    {
+        const string ParamsHardGateOn =
+            "{\"RsiPeriod\":14,\"EmaPeriod\":9,\"AtrPeriod\":14,\"TradeCountWindow\":20," +
+            "\"RsiOversoldZone\":40,\"RsiNeutralCeiling\":52,\"MinScoreThreshold\":4," +
+            "\"CoinClass\":\"large\"," +
+            "\"MinAtrPctLarge\":0.0002,\"MinAtrPctMid\":0.0003,\"MinAtrPctAlt\":0.0004," +
+            "\"TradeCountSurgeMultiplier\":0.8," +
+            "\"TpAtrMultiplier\":1.8,\"SlAtrMultiplier\":0.75," +
+            "\"TpAtrMultiplierLow\":1.5,\"TpAtrMultiplierHigh\":2.2," +
+            "\"SlAtrMultiplierLow\":0.85,\"SlAtrMultiplierHigh\":0.65," +
+            "\"MinTpPct\":0.005,\"MaxTpPct\":0.018," +
+            "\"MinSlPct\":0.003,\"MaxSlPct\":0.008," +
+            "\"MaxHoldMinutes\":45,\"MaxHoldMinutesLowScore\":30,\"MaxHoldMinutesHighScore\":60," +
+            "\"SpreadThresholdPct\":0.005,\"CooldownBarsAfterSignal\":3," +
+            "\"Ema200GateEnabled\":true,\"BbwScoreEnabled\":true," +
+            "\"BbwThreshold\":0.008,\"BbwScorePoints\":1,\"BbwHardGate\":true}";
+
+        var snap = MakeSnapshot(bollingerBandWidth: 0.003m); // 0.003 < 0.008 threshold
+        var (sut, _, _) = Build(snap, TightSpreadTicker());
+
+        var result = await sut.EvaluateAsync(
+            StrategyId, ParamsHardGateOn, Symbol,
+            closedBars: Array.Empty<Kline>(),
+            cancellationToken: CancellationToken.None);
+
+        result.Should().BeNull();
+    }
+
+    /// <summary>
+    /// Loop 78 Test 18 — BBW hard-gate aktif + BBW &gt; threshold ⇒ emit OK
+    /// (bypass). Hard-gate sadece zayıf bant'ta tetiklenir; sağlıklı volatilite
+    /// rejiminde normal akış. BBW 0.012 &gt; 0.008 ⇒ +1 puan, totalScore 7.
+    /// </summary>
+    [Fact]
+    public async Task BbwHardGate_AboveThreshold_Emit()
+    {
+        const string ParamsHardGateOn =
+            "{\"RsiPeriod\":14,\"EmaPeriod\":9,\"AtrPeriod\":14,\"TradeCountWindow\":20," +
+            "\"RsiOversoldZone\":40,\"RsiNeutralCeiling\":52,\"MinScoreThreshold\":4," +
+            "\"CoinClass\":\"large\"," +
+            "\"MinAtrPctLarge\":0.0002,\"MinAtrPctMid\":0.0003,\"MinAtrPctAlt\":0.0004," +
+            "\"TradeCountSurgeMultiplier\":0.8," +
+            "\"TpAtrMultiplier\":1.8,\"SlAtrMultiplier\":0.75," +
+            "\"TpAtrMultiplierLow\":1.5,\"TpAtrMultiplierHigh\":2.2," +
+            "\"SlAtrMultiplierLow\":0.85,\"SlAtrMultiplierHigh\":0.65," +
+            "\"MinTpPct\":0.005,\"MaxTpPct\":0.018," +
+            "\"MinSlPct\":0.003,\"MaxSlPct\":0.008," +
+            "\"MaxHoldMinutes\":45,\"MaxHoldMinutesLowScore\":30,\"MaxHoldMinutesHighScore\":60," +
+            "\"SpreadThresholdPct\":0.005,\"CooldownBarsAfterSignal\":3," +
+            "\"Ema200GateEnabled\":true,\"BbwScoreEnabled\":true," +
+            "\"BbwThreshold\":0.008,\"BbwScorePoints\":1,\"BbwHardGate\":true}";
+
+        var snap = MakeSnapshot(bollingerBandWidth: 0.012m); // 0.012 > 0.008 threshold
+        var (sut, _, _) = Build(snap, TightSpreadTicker());
+
+        var result = await sut.EvaluateAsync(
+            StrategyId, ParamsHardGateOn, Symbol,
+            closedBars: Array.Empty<Kline>(),
+            cancellationToken: CancellationToken.None);
+
+        result.Should().NotBeNull();
+        result!.ContextJson.Should().Contain("\"bbwScore\":1");
+        result.ContextJson.Should().Contain("\"score\":7");
+        result.ContextJson.Should().Contain("\"bbwHardGate\":true");
+    }
 }

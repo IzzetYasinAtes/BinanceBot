@@ -144,6 +144,22 @@ public sealed class KmsMomentumEvaluator : IStrategyEvaluator
             return Task.FromResult<StrategyEvaluation?>(null);
         }
 
+        // Loop 78 — BBW hard-gate (Loop 77 t120 4 ardışık big SL → CB tripped post-mortem).
+        // Pratikte BBW=0 (sıkışık bant, zayıf trend) emit'leri sürekli loss veriyor:
+        // EMA200 üstü uptrend filtresinden geçen ama BBW < threshold (volatilite yok)
+        // sinyaller "false breakout" tuzağı oluşturuyor. Bu kontrol BBW score
+        // hesabından önce gelir; <c>BbwHardGate=true</c> ⇒ <c>BollingerBandWidth</c>
+        // <c>BbwThreshold</c>'un altındaysa skip (skor toplama bakılmaz).
+        // Default false (geriye uyumluluk); appsettings seed'lerde true ile deploy.
+        if (p.BbwHardGate && snapshot.BollingerBandWidth < p.BbwThreshold)
+        {
+            _logger.LogInformation(
+                "KMS skip bbw_hard_gate symbol={Symbol} strategyId={StrategyId} " +
+                "bbw={Bbw} threshold={Threshold} decision=BbwHardGateSkip",
+                symbol, strategyId, snapshot.BollingerBandWidth, p.BbwThreshold);
+            return Task.FromResult<StrategyEvaluation?>(null);
+        }
+
         // CoinClass asimetri çözümü — BTC/ETH (large) düşük ATR'da bile likit;
         // altcoin (alt) çok düşük ATR = trend yok / pump-dump tuzağı, daha
         // yüksek MinAtr aranır. Bilinmeyen sınıf "alt" varsayılır (en
@@ -297,6 +313,7 @@ public sealed class KmsMomentumEvaluator : IStrategyEvaluator
             minAtrPct,
             bbw = snapshot.BollingerBandWidth,
             bbwThreshold = p.BbwThreshold,
+            bbwHardGate = p.BbwHardGate,
             tradeCountAvg20 = snapshot.AvgTradeCount20,
             currentTradeCount = snapshot.CurrentTradeCount,
             askPrice = ticker.AskPrice,
@@ -465,5 +482,12 @@ public sealed class KmsMomentumEvaluator : IStrategyEvaluator
 
         // Loop 77 — BBW puan ağırlığı (default 1, totalScore tavanı 7'ye çıkar).
         public int BbwScorePoints { get; set; } = 1;
+
+        // Loop 78 — BBW hard-gate. Loop 77 t120 post-mortem: BBW=0 emit'leri
+        // ardışık big SL'lere yol açtı (sıkışık bant + EMA200 üstü = false
+        // breakout tuzağı). True ⇒ <c>BollingerBandWidth &lt; BbwThreshold</c>
+        // ise skip (EMA200 gate'in hemen sonrası, skor öncesi). Default false
+        // geriye uyumluluk; production seed'lerde true ile deploy.
+        public bool BbwHardGate { get; set; } = false;
     }
 }
