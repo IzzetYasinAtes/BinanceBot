@@ -16,7 +16,7 @@ namespace BinanceBot.Infrastructure.Positions;
 
 public sealed class MarkToMarketWorker : BackgroundService
 {
-    private static readonly TimeSpan Cycle = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan Cycle = TimeSpan.FromSeconds(5);
 
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly ILogger<MarkToMarketWorker> _logger;

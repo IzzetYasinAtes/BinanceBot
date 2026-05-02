@@ -78,6 +78,9 @@ public sealed class GetPortfolioSummaryQueryHandler
         // Open positions — unrealized PnL + cost basis. We compute the MTM value
         // as cost-basis + unrealized so the UI reads a "what's parked in open
         // positions" figure that ties out against Position.MarkPrice.
+        // Loop 84 cash-bug fix: `OpenCommission` is summed separately so the
+        // ledger-derived cash formula can deduct it explicitly (entry fee leaves
+        // cash before exit fee shows up on Close).
         var openAgg = await _db.Positions
             .AsNoTracking()
             .Where(p => p.Mode == mode && p.Status == PositionStatus.Open)
@@ -87,15 +90,15 @@ public sealed class GetPortfolioSummaryQueryHandler
                 Count = g.Count(),
                 CostBasis = g.Sum(p => p.AverageEntryPrice * p.Quantity),
                 Unrealized = g.Sum(p => p.UnrealizedPnl),
+                OpenCommission = g.Sum(p => p.EntryCommission),
             })
             .FirstOrDefaultAsync(ct);
 
         var openCount = openAgg?.Count ?? 0;
         var openCostBasis = openAgg?.CostBasis ?? 0m;
         var unrealizedTotal = openAgg?.Unrealized ?? 0m;
+        var openCommission = openAgg?.OpenCommission ?? 0m;
         var openPositionsValue = openCostBasis + unrealizedTotal;
-
-        var trueEquity = balance.CurrentBalance + openPositionsValue;
 
         // Closed positions — realized PnL aggregates and win/loss bucketing.
         var todayStart = new DateTimeOffset(now.UtcDateTime.Date, TimeSpan.Zero);
@@ -108,12 +111,14 @@ public sealed class GetPortfolioSummaryQueryHandler
             {
                 Count = g.Count(),
                 RealizedAllTime = g.Sum(p => p.RealizedPnl),
+                ClosedCommission = g.Sum(p => p.EntryCommission + p.ExitCommission),
                 Winning = g.Count(p => p.RealizedPnl > 0m),
                 Losing = g.Count(p => p.RealizedPnl < 0m),
             })
             .FirstOrDefaultAsync(ct);
 
         var realizedAllTime = closedAgg?.RealizedAllTime ?? 0m;
+        var closedCommission = closedAgg?.ClosedCommission ?? 0m;
         var winningTrades = closedAgg?.Winning ?? 0;
         var losingTrades = closedAgg?.Losing ?? 0;
         var closedCount = closedAgg?.Count ?? 0;
@@ -131,27 +136,52 @@ public sealed class GetPortfolioSummaryQueryHandler
         // SUM over OrderFills.Commission mixed BUY fees (base asset) and SELL fees
         // (quote asset) into one numeric column — the result was not meaningful in
         // any single currency (see loop 32 diagnosis §4.4 for the exact breakage).
-        var totalCommission = await _db.Positions
-            .AsNoTracking()
-            .Where(p => p.Mode == mode)
-            .SumAsync(p => (decimal?)(p.EntryCommission + p.ExitCommission), ct) ?? 0m;
+        // Open positions yet to close still contribute via EntryCommission so the
+        // metric is comparable across iterations regardless of close timing.
+        var totalCommission = closedCommission + openCommission;
+
+        // ---- Loop 84 cash-bug fix (phantom +$157 on UI Toplam Net K/Z) ---------
+        // Single source of truth: the position ledger. Even when
+        // VirtualBalance.CurrentBalance drifts (paper iterations crossing a
+        // PaperFillSimulator semantic change, or an in-flight reset interleaving
+        // with fills), the ledger-derived cash + equity are exact:
+        //
+        //   ledgerCash = StartingBalance
+        //              + Σ closed.RealizedPnl     // already net of entry+exit fees
+        //              − Σ open.cost-basis         // settled for the open BUY leg
+        //              − Σ open.EntryCommission    // entry fee for still-open positions
+        //
+        //   trueEquity = ledgerCash + Σ open.cost-basis + Σ open.UnrealizedPnl
+        //              = StartingBalance
+        //              + Σ closed.RealizedPnl
+        //              + Σ open.UnrealizedPnl
+        //              − Σ open.EntryCommission
+        //
+        // This formulation never reads CurrentBalance/Equity for the headline
+        // numbers, so the UI heals automatically from a stale snapshot. The
+        // VirtualBalance row is still maintained for backwards-compat callers
+        // (sizer/peak-tracker read the realized formulation directly from
+        // Positions; see EquitySnapshotProvider).
+        var ledgerCash = balance.StartingBalance
+                       + realizedAllTime
+                       - openCostBasis
+                       - openCommission;
+        var trueEquity = ledgerCash + openPositionsValue;
 
         // Cash-grounded net: trueEquity - starting. Component metrikleri
         // (RealizedPnlAllTime, UnrealizedPnlTotal) UI'a ayrı alanlar olarak gider
         // ama hero "Net K/Z" bu tek tutarlılık sağlanan değerle gösterilir.
-        // PaperFillSimulator fee asimetrisi (ADR-0020 tracklenen) nedeniyle gross
-        // component toplamı trueEquity'den ~fee_quote kadar sapabilir; tek kaynak cash.
         var netPnl = trueEquity - balance.StartingBalance;
         var netPct = balance.StartingBalance > 0m
             ? netPnl / balance.StartingBalance
             : 0m;
 
         // ADR-0020 §20.8 — Position.Close artık RealizedPnl'i fee-net yazıyor.
-        // NetProfitAfterFees realizedAllTime + unrealizedTotal toplamı: kapalı
-        // işlemlerin fee-net realized + açık pozisyonların gross unrealized.
-        // Cash-grounded netPnl (trueEquity − starting) matematiksel identite
-        // olarak bu değere eşit olmalı; reviewer invariant skill'i bunu denetler.
-        var netAfterFees = realizedAllTime + unrealizedTotal;
+        // NetProfitAfterFees realizedAllTime + unrealizedTotal − openCommission:
+        // kapalı işlemlerin fee-net realized + açık pozisyonların unrealized −
+        // open BUY-leg fees (henüz Close çağrılmadığından RealizedPnl içine
+        // henüz girmedi). Cash-grounded netPnl ile birebir eşit olmalı.
+        var netAfterFees = realizedAllTime + unrealizedTotal - openCommission;
 
         var decided = winningTrades + losingTrades;
         var winRate = decided > 0
@@ -162,7 +192,7 @@ public sealed class GetPortfolioSummaryQueryHandler
             Mode: mode,
             ModeName: mode.ToString(),
             StartingBalance: balance.StartingBalance,
-            CurrentCash: balance.CurrentBalance,
+            CurrentCash: ledgerCash,
             OpenPositionsValue: openPositionsValue,
             TrueEquity: trueEquity,
             RealizedPnl24h: realizedToday,

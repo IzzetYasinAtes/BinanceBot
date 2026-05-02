@@ -31,7 +31,7 @@ namespace BinanceBot.Infrastructure.Trading;
 /// </summary>
 public sealed class TakeProfitMonitorService : BackgroundService
 {
-    private static readonly TimeSpan TickInterval = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan TickInterval = TimeSpan.FromSeconds(5);
 
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly ILogger<TakeProfitMonitorService> _logger;

@@ -94,10 +94,13 @@ public class GetPortfolioSummaryQueryTests
     }
 
     /// <summary>
-    /// Loop 19 acceptance — the cash and equity columns must NOT collapse to the
-    /// same number when an open position has unrealized PnL. Cash is the settled
-    /// VirtualBalance; equity is cash + open MTM. The /api/balances endpoint
-    /// returned both equal because VirtualBalance.Equity raced unrealized writes.
+    /// Loop 84 cash-bug fix — the cash and equity columns must NOT collapse to the
+    /// same number when an open position has unrealized PnL. Cash is the
+    /// ledger-derived settled cash (start + realized − open notional − open fees);
+    /// equity is cash + open MTM. The handler no longer reads
+    /// VirtualBalance.CurrentBalance for the headline numbers because that snapshot
+    /// drifted across iterations crossing PaperFillSimulator semantic changes
+    /// (loop 84 phantom +$157 trace).
     /// </summary>
     [Fact]
     public async Task OpenPositionWithUnrealizedPnl_TrueEquityExceedsCash()
@@ -114,17 +117,20 @@ public class GetPortfolioSummaryQueryTests
             new GetPortfolioSummaryQuery(TradingMode.Paper), CancellationToken.None);
 
         var dto = result.Value;
-        dto.CurrentCash.Should().Be(100m);                  // cash untouched (no fill applied)
+        // Loop 84 — ledger-driven cash: 100 start + 0 realized − 20 open notional
+        // − 0 open commission = 80. Snapshot CurrentBalance (still 100m on the
+        // VirtualBalance row because no fill applied via PaperFillSimulator) is
+        // intentionally bypassed.
+        dto.CurrentCash.Should().Be(80m);
         dto.UnrealizedPnlTotal.Should().Be(5m);
         dto.OpenPositionsValue.Should().Be(25m);            // 20 cost + 5 unrealized
-        dto.TrueEquity.Should().Be(125m);                   // cash + open value
+        dto.TrueEquity.Should().Be(105m);                   // ledgerCash 80 + open 25
         dto.OpenPositionCount.Should().Be(1);
-        // Loop 32 fix-a: netPnl cash-grounded (trueEquity - starting).
-        // Bu senaryoda fill yok, cash=100, trueEquity=125, starting=100 → netPnl=25.
-        // Component gross toplamı (0 realized + 5 unrealized = 5) artık hero
-        // metriği değil; UI ayrı `UnrealizedPnlTotal` alanından gösterecek.
-        dto.NetPnl.Should().Be(25m);
-        dto.NetPnlPct.Should().Be(0.25m);
+        // Cash-grounded netPnl = trueEquity − starting = 105 − 100 = 5 (matches
+        // the +5 unrealized; closed leg fees would normally net out via
+        // RealizedPnl, here zero because no Close was issued).
+        dto.NetPnl.Should().Be(5m);
+        dto.NetPnlPct.Should().Be(0.05m);
     }
 
     [Fact]
@@ -153,14 +159,13 @@ public class GetPortfolioSummaryQueryTests
         dto.WinRate.Should().BeApproximately(2m / 3m, 1e-6m);
         dto.RealizedPnlAllTime.Should().Be(3.5m);
         dto.RealizedPnl24h.Should().Be(3.5m);
-        // Loop 32 fix-a: netPnl cash-grounded. Bu testte Position.Close çağırılıyor
-        // ama fill oluşturulmuyor; StubDbContext'te cash (VirtualBalance.CurrentBalance)
-        // 100 kalıyor, trueEquity=100, starting=100 → netPnl=0. Bu senaryo tam olarak
-        // ADR-0020'nin adresleyeceği gap'i sergiliyor: RealizedPnl 3.5 component'i
-        // hero'ya değil, UI'a "RealizedPnlAllTime" alanından gidiyor. ADR-0020 ile
-        // Position.Close cash etkisi simulator içinde netleşince netPnl bu senaryoda
-        // da 3.5m'e yaklaşacak.
-        dto.NetPnl.Should().Be(0m);
+        // Loop 84 cash-bug fix: ledger-driven cash = 100 start + 3.5 realized − 0
+        // open notional − 0 open commission = 103.5. trueEquity = 103.5 + 0 open
+        // value = 103.5. netPnl = 3.5 (= sum realized). The previous test pinned
+        // 0m because the handler read the unmoved VirtualBalance.CurrentBalance
+        // snapshot — exactly the drift mode the fix eliminates.
+        dto.CurrentCash.Should().Be(103.5m);
+        dto.NetPnl.Should().Be(3.5m);
     }
 
     /// <summary>
@@ -238,6 +243,129 @@ public class GetPortfolioSummaryQueryTests
 
         result.IsSuccess.Should().BeFalse();
         result.Status.Should().Be(Ardalis.Result.ResultStatus.NotFound);
+    }
+
+    /// <summary>
+    /// Loop 84 cash-bug regression — the user reported a phantom +$157 on the UI
+    /// "Toplam Net K/Z" hero (start $500, 8 closed trades realized −$0.61, 3 open
+    /// positions notional $300.53, open commission −$0.23 → expected cash $197.43,
+    /// snapshot showed $355.14). Root cause: <see cref="GetPortfolioSummaryQuery"/>
+    /// previously read <c>VirtualBalance.CurrentBalance</c> directly. When that
+    /// snapshot drifted (paper iterations crossing PaperFillSimulator semantic
+    /// changes, or in-flight reset interleaving with fills) the equity formula
+    /// double-counted open notional. Fix: ledger-derived cash (start + realized
+    /// − open cost basis − open commission) is now the single source of truth.
+    /// This test pins the exact arithmetic so a regression cannot reintroduce
+    /// the snapshot-drift codepath.
+    /// </summary>
+    [Fact]
+    public async Task LedgerCash_DerivesFromPositions_NotFromVirtualBalanceSnapshot()
+    {
+        var db = NewDb();
+        var vb = SeedPaper(db, 500m);
+
+        // Simulate the exact user scenario: 8 closed trades net realized −$0.61
+        // (entry+exit commission already baked into Position.RealizedPnl per
+        // ADR-0020 §20.6). Aggregated as 1 representative closed position.
+        var closed = Position.Open(
+            Symbol.From("BTCUSDT"),
+            PositionSide.Long,
+            quantity: 0.01m,
+            entryPrice: 100m,            // notional 1.00
+            stopPrice: null,
+            strategyId: null,
+            mode: TradingMode.Paper,
+            now: T0,
+            entryCommission: 0.60m);
+        closed.Close(
+            exitPrice: 100m,             // gross PnL 0; net = 0 − 0.60 − 0.60 = −1.20
+            reason: "test",
+            now: T0.AddMinutes(5),
+            exitCommission: 0.60m);
+        // Sanity: this puts realized at −1.20. Adjust to match the −0.61 figure
+        // by adding a small winning trade (gross +0.59).
+        var winner = Position.Open(
+            Symbol.From("ETHUSDT"),
+            PositionSide.Long,
+            quantity: 1m,
+            entryPrice: 1m,
+            stopPrice: null,
+            strategyId: null,
+            mode: TradingMode.Paper,
+            now: T0,
+            entryCommission: 0m);
+        winner.Close(
+            exitPrice: 1.59m,
+            reason: "test",
+            now: T0.AddMinutes(6),
+            exitCommission: 0m);
+        db.Positions.Add(closed);
+        db.Positions.Add(winner);
+
+        // 3 open positions: total notional $300.53, total entry commission $0.23.
+        var open1 = Position.Open(
+            Symbol.From("XRPUSDT"),
+            PositionSide.Long,
+            quantity: 100m,
+            entryPrice: 1m,              // notional 100.00
+            stopPrice: null,
+            strategyId: null,
+            mode: TradingMode.Paper,
+            now: T0.AddMinutes(7),
+            entryCommission: 0.10m);
+        var open2 = Position.Open(
+            Symbol.From("BNBUSDT"),
+            PositionSide.Long,
+            quantity: 1m,
+            entryPrice: 100.53m,         // notional 100.53
+            stopPrice: null,
+            strategyId: null,
+            mode: TradingMode.Paper,
+            now: T0.AddMinutes(8),
+            entryCommission: 0.10m);
+        var open3 = Position.Open(
+            Symbol.From("SOLUSDT"),
+            PositionSide.Long,
+            quantity: 2m,
+            entryPrice: 50m,             // notional 100.00
+            stopPrice: null,
+            strategyId: null,
+            mode: TradingMode.Paper,
+            now: T0.AddMinutes(9),
+            entryCommission: 0.03m);
+        db.Positions.Add(open1);
+        db.Positions.Add(open2);
+        db.Positions.Add(open3);
+        db.SaveChanges();
+
+        // Inject the buggy snapshot value the user observed ($355.14). The fix
+        // must ignore this and derive cash from the ledger instead.
+        // Using ApplyFill keeps the domain encapsulation intact (no public setters).
+        var drift = 355.14m - vb.CurrentBalance;
+        vb.ApplyFill(drift, T0.AddMinutes(10));
+        db.SaveChanges();
+
+        var sut = new GetPortfolioSummaryQueryHandler(db, StubClock().Object);
+        var result = await sut.Handle(
+            new GetPortfolioSummaryQuery(TradingMode.Paper), CancellationToken.None);
+
+        result.IsSuccess.Should().BeTrue();
+        var dto = result.Value;
+
+        // Realized = closed.RealizedPnl sum = (−1.20) + 0.59 = −0.61. Confirmed
+        // before asserting cash to keep the test diagnostic on regression.
+        dto.RealizedPnlAllTime.Should().Be(-0.61m);
+
+        // Open ledger: cost basis 100 + 100.53 + 100 = 300.53; open commission
+        // 0.10 + 0.10 + 0.03 = 0.23. Ledger cash = 500 + (−0.61) − 300.53 − 0.23
+        // = 198.63. The user's observed $355.14 snapshot is overwritten.
+        dto.CurrentCash.Should().Be(198.63m);
+        dto.OpenPositionsValue.Should().Be(300.53m);  // no MTM applied
+        dto.TrueEquity.Should().Be(499.16m);          // 198.63 + 300.53
+        dto.NetPnl.Should().Be(-0.84m);               // realized −0.61 − openCommission −0.23
+
+        // Invariant: NetProfitAfterFees == NetPnl when no MTM drift is in play.
+        dto.NetProfitAfterFees.Should().Be(dto.NetPnl);
     }
 
     /// <summary>
