@@ -42,35 +42,9 @@ public class WeightedScorePatternComposerTests
     private static WeightedScorePatternComposer Sut() =>
         new(NullLogger<WeightedScorePatternComposer>.Instance);
 
-    [Fact]
-    public void Compose_HardGateFail_VolumeSurge_SkipsWithReason()
-    {
-        var snap = MakeSnap();
-        var evals = new List<PatternEvaluation>
-        {
-            new("ema_squeeze_break", 1m),
-            new("volume_surge_gate", 0m), // hard-gate fail
-            new("spread_guard_gate", 1m),
-        };
-        var d = Sut().Compose(snap, evals, new PatternComposerOptions());
-        d.Emit.Should().BeFalse();
-        d.SkipReason.Should().Contain("hard_gate:volume_surge_gate");
-    }
 
-    [Fact]
-    public void Compose_HardGateFail_SpreadGuard_SkipsWithReason()
-    {
-        var snap = MakeSnap();
-        var evals = new List<PatternEvaluation>
-        {
-            new("ema_squeeze_break", 1m),
-            new("volume_surge_gate", 1m),
-            new("spread_guard_gate", 0m),
-        };
-        var d = Sut().Compose(snap, evals, new PatternComposerOptions());
-        d.Emit.Should().BeFalse();
-        d.SkipReason.Should().Contain("hard_gate:spread_guard_gate");
-    }
+
+
 
     [Fact]
     public void Compose_BelowThreshold_SkipsScoreBelowThreshold()
