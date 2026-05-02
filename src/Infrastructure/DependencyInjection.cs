@@ -4,6 +4,7 @@ using BinanceBot.Application.Abstractions.Trading;
 using BinanceBot.Application.Strategies.Cooldowns;
 using BinanceBot.Application.Strategies.Evaluation;
 using BinanceBot.Application.Strategies.Indicators;
+using BinanceBot.Application.Strategies.Patterns;
 using BinanceBot.Application.System.Queries.GetSystemStatus;
 using BinanceBot.Application.SystemEvents;
 using BinanceBot.Infrastructure.SystemEvents;
@@ -19,6 +20,8 @@ using BinanceBot.Infrastructure.Strategies;
 using BinanceBot.Infrastructure.Strategies.Cooldowns;
 using BinanceBot.Infrastructure.Strategies.Evaluators;
 using BinanceBot.Infrastructure.Strategies.Indicators;
+using BinanceBot.Infrastructure.Strategies.Patterns;
+using BinanceBot.Infrastructure.Strategies.Patterns.Detectors;
 using BinanceBot.Infrastructure.Risk;
 using BinanceBot.Infrastructure.Time;
 using BinanceBot.Infrastructure.Trading;
@@ -160,30 +163,39 @@ public static class DependencyInjection
         services.AddHostedService<BookTickerIngestionWorker>();
         services.AddHostedService<DepthSnapshotWorker>();
 
-        // ADR-0015 §15.5 — VWAP-EMA hybrid surface. MarketIndicatorService is a
-        // hosted singleton (IHostedService) that owns the rolling 1m/1h buffers and
-        // drains the shared kline Channel; the evaluator is a stateless consumer of
-        // its snapshot API. PatternScalpingEvaluator + 14 detectors removed (ADR-0014
-        // superseded).
+        // Loop 81 — Pattern-composite scalping pivot (ADR-0024). MarketIndicatorService
+        // hosted singleton: 5m rolling buffer (200 bar) + IBookTickerReader inject
+        // ile tek paylaşılan BarSnapshot üretir. PatternCompositeEvaluator stateless
+        // tüketir.
         services.AddSingleton<MarketIndicatorService>();
         services.AddSingleton<IMarketIndicatorService>(sp => sp.GetRequiredService<MarketIndicatorService>());
         services.AddHostedService(sp => sp.GetRequiredService<MarketIndicatorService>());
 
         // Loop 42 P0 fix — evaluator-level signal cooldown enforcement (in-memory
-        // singleton). KMS evaluator (Loop 67) constructor injection ile tüketir.
+        // singleton). PatternCompositeEvaluator (Loop 81) constructor injection ile tüketir.
         services.AddSingleton<ICooldownService, CooldownService>();
 
-        // Loop 67 KMS pivot — 7 eski evaluator silindi. Tek strateji kalır:
-        // KlineMomentumSpread5m (5m bar RSI recovery + EMA9 slope + TradeCount
-        // surge + spread + ATR). KmsMomentumEvaluator IMarketIndicatorService
-        // (5m snapshot) + IBookTickerReader (canlı spread) + ICooldownService
-        // tüketir.
-        services.AddSingleton<IStrategyEvaluator, KmsMomentumEvaluator>();
+        // Loop 81 — Pattern-composite scalping pivot (ADR-0024). KMS+BBR silindi.
+        // 10 skor detector + 2 hard-gate + 1 soft-filter, ortak BarSnapshot
+        // üzerinde çalışır; WeightedScorePatternComposer ağırlıklı toplam skoru
+        // RequiredScore (default 5) ile karşılaştırır.
+        services.AddSingleton<IPatternDetector, EmaSqueezeBreakDetector>();
+        services.AddSingleton<IPatternDetector, VwapBounceDetector>();
+        services.AddSingleton<IPatternDetector, InsideBarBreakoutDetector>();
+        services.AddSingleton<IPatternDetector, RsiOversoldRecoveryDetector>();
+        services.AddSingleton<IPatternDetector, VolumeSpikeDonchianDetector>();
+        services.AddSingleton<IPatternDetector, HigherLowEmaTouchDetector>();
+        services.AddSingleton<IPatternDetector, MacdZeroCrossDetector>();
+        services.AddSingleton<IPatternDetector, BullishEngulfingDetector>();
+        services.AddSingleton<IPatternDetector, HammerReversalDetector>();
+        services.AddSingleton<IPatternDetector, BollingerLowerReversalDetector>();
+        services.AddSingleton<IPatternDetector, VolumeSurgeGate>();
+        services.AddSingleton<IPatternDetector, SpreadGuardGate>();
+        services.AddSingleton<IPatternDetector, AdxRegimeFilter>();
 
-        // Loop 79 — Multi-regime switch / BB Reversal evaluator (Range ayağı).
-        // KMS (Trending) ile paralel; aynı 5m buffer, farklı snapshot. Registry
-        // her iki evaluator'ı da Type ↔ instance map ile kullanır.
-        services.AddSingleton<IStrategyEvaluator, BbReversalEvaluator>();
+        services.AddSingleton<IPatternRegistry, PatternRegistry>();
+        services.AddSingleton<IPatternSignalComposer, WeightedScorePatternComposer>();
+        services.AddSingleton<IStrategyEvaluator, PatternCompositeEvaluator>();
 
         services.AddSingleton<StrategyEvaluatorRegistry>();
 
