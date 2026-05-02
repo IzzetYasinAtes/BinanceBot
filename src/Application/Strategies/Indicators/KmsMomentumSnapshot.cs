@@ -41,6 +41,11 @@ namespace BinanceBot.Application.Strategies.Indicators;
 /// <c>(Upper - Lower) / Middle</c>. Yüksek BBW = volatil/breakout dostu rejim;
 /// düşük BBW = sıkışma. Skor sistemine 1 puan bonus (hard-gate değil — 0
 /// puan emit'i tek başına engellemez, frekans korunur).</param>
+/// <param name="Adx14">Loop 80 — Wilder ADX(14): trend gücü 0–100. KMS için
+/// hard-gate referansı: <c>Adx14 &lt; AdxTrendingThreshold</c> ⇒ skip
+/// (zayıf/yok trend = mean-reversion bölgesi, BBR'nin işi). Warmup
+/// yetersizse <c>0</c>; evaluator 0'ı "gate disabled (unavailable)" olarak
+/// yorumlar.</param>
 /// <param name="LastBarOpenTime">Open time of the current closed 5m bar — log
 /// + cooldown anchor.</param>
 /// <param name="AsOf">Close time of the current 5m bar — snapshot freshness.</param>
@@ -55,5 +60,6 @@ public sealed record KmsMomentumSnapshot(
     int CurrentTradeCount,
     decimal Ema200,
     decimal BollingerBandWidth,
+    decimal Adx14,
     DateTimeOffset LastBarOpenTime,
     DateTimeOffset AsOf);

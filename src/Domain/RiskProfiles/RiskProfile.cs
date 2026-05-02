@@ -168,6 +168,33 @@ public sealed class RiskProfile : AggregateRoot<int>
     }
 
     /// <summary>
+    /// Loop 80 — bot startup auto-reset for the consecutive-loss streak counter.
+    /// <see cref="ResetCircuitBreaker"/> already zeroes <see cref="ConsecutiveLosses"/>
+    /// but exits early when the CB is <c>Healthy</c>; that meant a stale streak
+    /// (e.g. 4 from Loop 78) was persisted across bot restarts and could trip
+    /// the CB on the very first new losing trade. This method is the dedicated
+    /// streak reset path: it leaves <see cref="CircuitBreakerStatus"/>,
+    /// <see cref="CircuitBreakerReason"/>, drawdown and PnL state untouched and
+    /// only zeroes the streak counter. Idempotent — calling with an already-zero
+    /// counter is a no-op (no <see cref="UpdatedAt"/> bump, no event noise) so
+    /// the seeder can call it on every boot without manufacturing churn.
+    /// </summary>
+    public void ResetConsecutiveLossCounter(string reason, DateTimeOffset now)
+    {
+        if (string.IsNullOrWhiteSpace(reason))
+        {
+            throw new DomainException("Reason required for ConsecutiveLosses reset.");
+        }
+        if (ConsecutiveLosses == 0)
+        {
+            return;
+        }
+
+        ConsecutiveLosses = 0;
+        UpdatedAt = now;
+    }
+
+    /// <summary>
     /// Loop 6 → Loop 7 bug #17 fix: PeakEquity must follow the live equity stream
     /// (cash + unrealized PnL), not just realized closes. Otherwise an intraday spike
     /// like Loop 6 t30 ($195 unrealized peak → t90 $56 close) computes drawdown

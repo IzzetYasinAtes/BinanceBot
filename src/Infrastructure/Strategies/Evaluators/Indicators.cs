@@ -232,6 +232,102 @@ internal static class Indicators
     }
 
     /// <summary>
+    /// Loop 80 — Wilder ADX (Average Directional Index). Classic recipe:
+    /// <list type="number">
+    ///   <item>+DM = max(High - prevHigh, 0) when High - prevHigh &gt; prevLow - Low; else 0.</item>
+    ///   <item>-DM = max(prevLow - Low, 0) when prevLow - Low &gt; High - prevHigh; else 0.</item>
+    ///   <item>TR  = max(High-Low, |High-prevClose|, |Low-prevClose|).</item>
+    ///   <item>SmoothedTR / +DM / -DM via Wilder recursion: <c>val = prev - prev/period + curr</c>
+    ///         (seed = arithmetic sum of the first <c>period</c> values).</item>
+    ///   <item>+DI = +DM_smooth / TR_smooth × 100 ; -DI = -DM_smooth / TR_smooth × 100.</item>
+    ///   <item>DX = |+DI - -DI| / (+DI + -DI) × 100.</item>
+    ///   <item>ADX = Wilder EMA-period of DX (seed = arithmetic mean of the first <c>period</c> DX values).</item>
+    /// </list>
+    /// Returns <c>0</c> when history is insufficient (caller treats as
+    /// "warmup not done — gate disabled / unavailable"). Min bars: <c>2 × period</c>
+    /// (period TR + period DX). Pure decimal math throughout.
+    /// </summary>
+    public static decimal Adx(IReadOnlyList<Kline> bars, int period)
+    {
+        if (period <= 0) return 0m;
+        // We need (period+1) raw bars to make `period` TR+DM samples (each needs prev),
+        // then `period` DX values to seed the ADX EMA → 2*period + 1 minimum.
+        var minBars = 2 * period + 1;
+        if (bars.Count < minBars) return 0m;
+
+        // Step 1 — raw +DM, -DM, TR per bar (i = 1..N-1).
+        var n = bars.Count;
+        var plusDm = new decimal[n];
+        var minusDm = new decimal[n];
+        var tr = new decimal[n];
+        for (var i = 1; i < n; i++)
+        {
+            var upMove = bars[i].HighPrice - bars[i - 1].HighPrice;
+            var downMove = bars[i - 1].LowPrice - bars[i].LowPrice;
+            plusDm[i] = (upMove > downMove && upMove > 0m) ? upMove : 0m;
+            minusDm[i] = (downMove > upMove && downMove > 0m) ? downMove : 0m;
+
+            var hl = bars[i].HighPrice - bars[i].LowPrice;
+            var hpc = Math.Abs(bars[i].HighPrice - bars[i - 1].ClosePrice);
+            var lpc = Math.Abs(bars[i].LowPrice - bars[i - 1].ClosePrice);
+            tr[i] = Math.Max(hl, Math.Max(hpc, lpc));
+        }
+
+        // Step 2 — seed Wilder smoothed values at index `period` (sum of i=1..period).
+        decimal trSmooth = 0m;
+        decimal plusDmSmooth = 0m;
+        decimal minusDmSmooth = 0m;
+        for (var i = 1; i <= period; i++)
+        {
+            trSmooth += tr[i];
+            plusDmSmooth += plusDm[i];
+            minusDmSmooth += minusDm[i];
+        }
+
+        // Step 3 — DX series. First DX at index `period` (after seed).
+        // Subsequent: Wilder recursion val = prev - prev/period + curr.
+        var dxValues = new List<decimal>(n - period);
+        var firstDx = ComputeDx(plusDmSmooth, minusDmSmooth, trSmooth);
+        dxValues.Add(firstDx);
+
+        for (var i = period + 1; i < n; i++)
+        {
+            trSmooth = trSmooth - (trSmooth / period) + tr[i];
+            plusDmSmooth = plusDmSmooth - (plusDmSmooth / period) + plusDm[i];
+            minusDmSmooth = minusDmSmooth - (minusDmSmooth / period) + minusDm[i];
+
+            dxValues.Add(ComputeDx(plusDmSmooth, minusDmSmooth, trSmooth));
+        }
+
+        // Step 4 — ADX = Wilder EMA-period of DX, seeded by mean of first period DX values.
+        if (dxValues.Count < period) return 0m;
+
+        decimal adx = 0m;
+        for (var k = 0; k < period; k++)
+        {
+            adx += dxValues[k];
+        }
+        adx /= period;
+
+        for (var k = period; k < dxValues.Count; k++)
+        {
+            adx = (adx * (period - 1) + dxValues[k]) / period;
+        }
+
+        return adx;
+
+        static decimal ComputeDx(decimal pdmS, decimal mdmS, decimal trS)
+        {
+            if (trS <= 0m) return 0m;
+            var plusDi = pdmS / trS * 100m;
+            var minusDi = mdmS / trS * 100m;
+            var sum = plusDi + minusDi;
+            if (sum <= 0m) return 0m;
+            return Math.Abs(plusDi - minusDi) / sum * 100m;
+        }
+    }
+
+    /// <summary>
     /// Bollinger Bands (mean ± stdDev * multiplier) over the most recent <paramref name="period"/> closes.
     /// Falls back to a flat band centred on the latest close when history is insufficient.
     /// </summary>

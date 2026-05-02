@@ -87,7 +87,8 @@ public sealed class BbReversalEvaluator : IStrategyEvaluator
             rsiPeriod: p.RsiPeriod,
             bbPeriod: p.BbPeriod,
             bbStdDev: p.BbStdDev,
-            atrPeriod: p.AtrPeriod);
+            atrPeriod: p.AtrPeriod,
+            tradeCountWindow: p.TradeCountWindow);
 
         if (snapshot is null)
         {
@@ -122,6 +123,19 @@ public sealed class BbReversalEvaluator : IStrategyEvaluator
             return Task.FromResult<StrategyEvaluation?>(null);
         }
 
+        // Loop 80 — ADX hard-gate (BBR sadece zayıf trend/range içinde
+        // çalışır). <c>Adx14 &gt;= AdxRangeMax</c> ⇒ trending rejim, mean
+        // reversion ters yön ⇒ skip. <c>Adx14 == 0</c> warmup yetersiz
+        // semantiği: gate açık (defansif, frekansı koru).
+        if (p.AdxGateEnabled && snapshot.Adx14 > 0m && snapshot.Adx14 >= p.AdxRangeMax)
+        {
+            _logger.LogInformation(
+                "BBR skip adx_gate symbol={Symbol} strategyId={StrategyId} " +
+                "adx14={Adx} adxRangeMax={Max} decision=AdxGateSkip",
+                symbol, strategyId, snapshot.Adx14, p.AdxRangeMax);
+            return Task.FromResult<StrategyEvaluation?>(null);
+        }
+
         // ── Entry koşulları (AND) ─────────────────────────────────────────
         // 1) Lower band yakınlık (false breakdown buffer dahil).
         var lowerEntryThreshold = snapshot.BollingerLower * (1m + p.BufferPctEntry);
@@ -142,6 +156,22 @@ public sealed class BbReversalEvaluator : IStrategyEvaluator
                 symbol, strategyId,
                 snapshot.CurrentClose, snapshot.BollingerLower, lowerEntryThreshold, nearLowerBand,
                 snapshot.Rsi14, snapshot.Rsi14Prev, oversold, rsiRecovery);
+            return Task.FromResult<StrategyEvaluation?>(null);
+        }
+
+        // Loop 80 — Volume surge konfirmasyonu (BBR Loop 79 0/2 trade
+        // post-mortem: RSI rising tek başına yetmiyor; alt band'a değen
+        // bar'ın trade-count'u ortalama × multiplier üstünde olmalı).
+        // <c>AvgTradeCount20 &lt;= 0</c> ⇒ warmup bypass (gate açık).
+        var volumeSurge = snapshot.AvgTradeCount20 <= 0m
+            || snapshot.CurrentTradeCount > snapshot.AvgTradeCount20 * p.TradeCountSurgeMultiplier;
+        if (!volumeSurge)
+        {
+            _logger.LogInformation(
+                "BBR skip volume_surge symbol={Symbol} strategyId={StrategyId} " +
+                "currentTradeCount={Curr} avgTradeCount20={Avg} multiplier={Mul} decision=VolumeSurgeSkip",
+                symbol, strategyId,
+                snapshot.CurrentTradeCount, snapshot.AvgTradeCount20, p.TradeCountSurgeMultiplier);
             return Task.FromResult<StrategyEvaluation?>(null);
         }
 
@@ -208,6 +238,12 @@ public sealed class BbReversalEvaluator : IStrategyEvaluator
             bbwRangeMin = p.BbwRangeMin,
             bbwRangeMax = p.BbwRangeMax,
             atr14 = snapshot.Atr14,
+            adx14 = snapshot.Adx14,
+            adxRangeMax = p.AdxRangeMax,
+            adxGateEnabled = p.AdxGateEnabled,
+            avgTradeCount20 = snapshot.AvgTradeCount20,
+            currentTradeCount = snapshot.CurrentTradeCount,
+            tradeCountSurgeMultiplier = p.TradeCountSurgeMultiplier,
             askPrice = ticker.AskPrice,
             bidPrice = ticker.BidPrice,
             spreadPct,
@@ -277,5 +313,20 @@ public sealed class BbReversalEvaluator : IStrategyEvaluator
 
         // Cooldown.
         public int CooldownBarsAfterSignal { get; set; } = 3;
+
+        // Loop 80 — Volume surge gate (BBR Loop 79 0/2 trade post-mortem:
+        // RSI rising tek başına yetmiyor). Eşik 1.5 BBR için sıkı (KMS 0.8'e
+        // göre çok daha yüksek; alt band'a değen bar gerçekten yüksek
+        // ilgili işlem içermeli). Warmup yetersiz (AvgTradeCount20 == 0)
+        // ise gate açık, yeni bar emit'i bloke olmaz.
+        public int TradeCountWindow { get; set; } = 20;
+        public decimal TradeCountSurgeMultiplier { get; set; } = 1.5m;
+
+        // Loop 80 — ADX hard-gate. BBR sadece zayıf trend / range içinde
+        // çalışır. Adx14 >= AdxRangeMax ⇒ trending rejim, mean reversion
+        // ters yön ⇒ skip. Default 25 (klasik Wilder eşik). Toggle false
+        // ⇒ gate bypass (acil 0-emit sigortası).
+        public bool AdxGateEnabled { get; set; } = true;
+        public decimal AdxRangeMax { get; set; } = 25m;
     }
 }

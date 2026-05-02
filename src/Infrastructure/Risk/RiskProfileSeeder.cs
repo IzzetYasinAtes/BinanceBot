@@ -112,6 +112,22 @@ public sealed class RiskProfileSeeder : IHostedService
                 _logger.LogInformation(
                     "Reconciled RiskProfile mode={Mode} from appsettings", mode);
             }
+
+            // Loop 80 — startup auto-reset for the persisted consecutive-loss
+            // streak counter. Without this, a streak of (e.g.) 4 carried over
+            // from the previous loop (Loop 78 trace) means the very first
+            // losing trade after a bot restart trips the CB at
+            // MaxConsecutiveLosses, killing the new loop before it gets a
+            // chance to recover. CB status, drawdown and PnL accounting are
+            // explicitly preserved — this is a streak-only reset.
+            if (existing is not null && existing.ConsecutiveLosses > 0)
+            {
+                var prior = existing.ConsecutiveLosses;
+                existing.ResetConsecutiveLossCounter("bot_startup_auto_reset", now);
+                _logger.LogInformation(
+                    "Reset RiskProfile streak counter mode={Mode} priorStreak={Prior} reason=bot_startup_auto_reset cbStatus={Status}",
+                    mode, prior, existing.CircuitBreakerStatus);
+            }
         }
 
         await db.SaveChangesAsync(cancellationToken);

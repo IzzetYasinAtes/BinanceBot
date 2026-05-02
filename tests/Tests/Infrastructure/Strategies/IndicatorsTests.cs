@@ -124,4 +124,56 @@ public class IndicatorsTests
         upper.Should().BeGreaterThan(mean);
         mean.Should().BeGreaterThan(lower);
     }
+
+    /// <summary>
+    /// Loop 80 — ADX min bar contract: insufficient history (&lt; 2*period+1)
+    /// must return 0 so the evaluator can treat it as "warmup not done — gate
+    /// open / unavailable" without false-skipping during the first 29 bars.
+    /// </summary>
+    [Fact]
+    public void Adx_NotEnoughBars_ReturnsZero()
+    {
+        var bars = Enumerable.Range(0, 20).Select(i => MakeBar(i, 100m, 100m, 100m)).ToList();
+
+        Indicators.Adx(bars, period: 14).Should().Be(0m);
+    }
+
+    /// <summary>
+    /// Loop 80 — ADX flat-bars contract: zero TR ⇒ DX undefined → returns 0.
+    /// (Pure decimal — no NaN risk; ComputeDx guards trS &lt;= 0.)
+    /// </summary>
+    [Fact]
+    public void Adx_FlatBars_ReturnsZero()
+    {
+        var bars = Enumerable.Range(0, 60).Select(i => MakeBar(i, 100m, 100m, 100m)).ToList();
+
+        Indicators.Adx(bars, period: 14).Should().Be(0m);
+    }
+
+    /// <summary>
+    /// Loop 80 — ADX strong-trend contract: a long monotonic uptrend (every
+    /// bar makes a new high above the previous high, low above the previous
+    /// low, no downward TR) is the textbook "ADX should rise toward 100"
+    /// scenario. We assert &gt; 25 (the canonical "trending" Wilder threshold);
+    /// the actual converged value depends on the smoothing horizon, but the
+    /// monotonic case is well above the gate.
+    /// </summary>
+    [Fact]
+    public void Adx_StrongUptrend_ExceedsTrendingThreshold()
+    {
+        // Monotonic uptrend 60 bars. Each bar: high = (i+1)*1, low = i*1,
+        // close = (i + 0.5). Plenty of bars for warmup + smoothing convergence.
+        var bars = Enumerable.Range(0, 60)
+            .Select(i => MakeBar(
+                seq: i,
+                close: 100m + i + 0.5m,
+                high: 100m + i + 1m,
+                low: 100m + i))
+            .ToList();
+
+        var adx = Indicators.Adx(bars, period: 14);
+
+        adx.Should().BeGreaterThan(25m);
+        adx.Should().BeLessThanOrEqualTo(100m);
+    }
 }

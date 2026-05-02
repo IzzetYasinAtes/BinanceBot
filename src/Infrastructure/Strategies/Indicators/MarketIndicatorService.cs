@@ -59,6 +59,13 @@ public sealed class MarketIndicatorService : IMarketIndicatorService, IHostedSer
     internal const int BollingerPeriod = 20;
     internal const decimal BollingerStdDev = 2.0m;
 
+    // Loop 80 — Wilder ADX(14) sabit periyodu. Hem KMS hem BBR snapshot'ları
+    // tek bir periyod paylaşır (regime classifier ortak referans). Min bar
+    // ihtiyacı 2*period+1 = 29; mevcut 200 bar buffer fazlasıyla yeterli.
+    // Warmup eşiği aşılmazsa Indicators.Adx 0 döner ⇒ evaluator gate'i
+    // "unavailable / açık" olarak yorumlar (downstream defansif).
+    internal const int AdxPeriod = 14;
+
     // Loop 77 — IndicatorWarmupCompleted publish eşiği. Loop 67'de 30 bar
     // yeterliydi (RSI/EMA9/ATR14 için ~22 bar). EMA200 trend gate için
     // tam 200 bar gerekli; warmup eventi de bu eşikte yayılmalı ki
@@ -209,6 +216,11 @@ public sealed class MarketIndicatorService : IMarketIndicatorService, IHostedSer
                 klines, BollingerPeriod, BollingerStdDev);
             var bbw = bbMid > 0m ? (bbUpper - bbLower) / bbMid : 0m;
 
+            // Loop 80 — ADX(14) regime classifier referansı. Wilder min bar
+            // 2*period+1 = 29; warmup yetersiz ⇒ 0 döner ve evaluator gate'i
+            // unavailable/açık sayar (defansif).
+            var adx14 = Evaluators.Indicators.Adx(klines, AdxPeriod);
+
             return new KmsMomentumSnapshot(
                 CurrentClose: current.ClosePrice,
                 Rsi14: rsi14,
@@ -220,6 +232,7 @@ public sealed class MarketIndicatorService : IMarketIndicatorService, IHostedSer
                 CurrentTradeCount: current.TradeCount,
                 Ema200: ema200,
                 BollingerBandWidth: bbw,
+                Adx14: adx14,
                 LastBarOpenTime: current.OpenTime,
                 AsOf: current.CloseTime);
         }
@@ -227,18 +240,22 @@ public sealed class MarketIndicatorService : IMarketIndicatorService, IHostedSer
 
     /// <summary>
     /// Loop 79 — BollingerBandReversal5m snapshot. KMS ile aynı 5m buffer'dan
-    /// okur; pencere bir bar geriye kaydırılarak RSI prev hesaplanır. Warmup
-    /// eşiği <c>max(rsiPeriod + 2, bbPeriod, atrPeriod + 1)</c>.
+    /// okur; pencere bir bar geriye kaydırılarak RSI prev hesaplanır.
+    /// Loop 80 ek alanlar: <c>AvgTradeCount20</c> + <c>CurrentTradeCount</c>
+    /// (volume-surge gate referansı), <c>Adx14</c> (regime classifier referansı).
+    /// Warmup eşiği <c>max(rsiPeriod + 2, bbPeriod, atrPeriod + 1, tradeCountWindow)</c>.
     /// </summary>
     public BbReversalSnapshot? TryGetBbReversalSnapshot(
         string symbol,
         int rsiPeriod,
         int bbPeriod,
         decimal bbStdDev,
-        int atrPeriod)
+        int atrPeriod,
+        int tradeCountWindow)
     {
         if (string.IsNullOrWhiteSpace(symbol)) return null;
-        if (rsiPeriod <= 0 || bbPeriod <= 0 || bbStdDev <= 0m || atrPeriod <= 0)
+        if (rsiPeriod <= 0 || bbPeriod <= 0 || bbStdDev <= 0m || atrPeriod <= 0
+            || tradeCountWindow <= 0)
         {
             return null;
         }
@@ -255,10 +272,11 @@ public sealed class MarketIndicatorService : IMarketIndicatorService, IHostedSer
             // Warmup eşiği. RSI prev için +2 (Indicators.Rsi son rsiPeriod
             // close-to-close diff yapar; prev için pencereyi bir bar geriye
             // kaydır → toplam rsiPeriod + 2 bar gerekli). BB sadece bbPeriod
-            // bar; ATR için +1 (TR önceki close referansı).
+            // bar; ATR için +1 (TR önceki close referansı). Loop 80 — ADX
+            // ek olarak 2*AdxPeriod+1 ister; minBars eşiğine eklenir.
             var minBars = Math.Max(
-                Math.Max(rsiPeriod + 2, bbPeriod),
-                atrPeriod + 1);
+                Math.Max(Math.Max(rsiPeriod + 2, bbPeriod), atrPeriod + 1),
+                tradeCountWindow);
             if (bars.Count < minBars)
             {
                 return null;
@@ -284,6 +302,18 @@ public sealed class MarketIndicatorService : IMarketIndicatorService, IHostedSer
             var atrWindow = klines.GetRange(klines.Count - (atrPeriod + 1), atrPeriod + 1);
             var atr14 = Evaluators.Indicators.Atr(atrWindow, atrPeriod);
 
+            // Loop 80 — TradeCountAvg + current bar trade count: BBR volume
+            // surge gate referansı. Window doğrudan tradeCountWindow bar
+            // (current dahil); warmup yetersiz ⇒ 0 döner, evaluator
+            // "warmup bypass" (gate açık) olarak yorumlar.
+            var tcWindow = klines.GetRange(klines.Count - tradeCountWindow, tradeCountWindow);
+            var tradeCountAvg = Evaluators.Indicators.TradeCountAvg(tcWindow, tradeCountWindow);
+
+            // Loop 80 — ADX(14) regime classifier referansı. Wilder min bar
+            // 2*AdxPeriod+1 = 29; warmup yetersiz ⇒ 0 ve evaluator gate'i
+            // unavailable/açık sayar.
+            var adx14 = Evaluators.Indicators.Adx(klines, AdxPeriod);
+
             return new BbReversalSnapshot(
                 CurrentClose: current.ClosePrice,
                 Rsi14: rsi14,
@@ -292,6 +322,9 @@ public sealed class MarketIndicatorService : IMarketIndicatorService, IHostedSer
                 BollingerMean: bbMean,
                 BollingerBandWidth: bbw,
                 Atr14: atr14,
+                AvgTradeCount20: tradeCountAvg,
+                CurrentTradeCount: current.TradeCount,
+                Adx14: adx14,
                 LastBarOpenTime: current.OpenTime,
                 AsOf: current.CloseTime);
         }

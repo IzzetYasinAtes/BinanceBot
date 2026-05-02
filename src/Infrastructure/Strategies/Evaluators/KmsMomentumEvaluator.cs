@@ -160,6 +160,22 @@ public sealed class KmsMomentumEvaluator : IStrategyEvaluator
             return Task.FromResult<StrategyEvaluation?>(null);
         }
 
+        // Loop 80 — ADX trend hard-gate (KMS sadece trending rejimde
+        // çalışır). <c>Adx14 &lt; AdxTrendingThreshold</c> ⇒ trend yok,
+        // false-breakout riski büyük ⇒ skip. <c>Adx14 == 0</c> warmup
+        // yetersiz semantiği: gate açık (defansif). binance-expert KMS
+        // için 20 (gevşek) önerdi; BBR'nin 25 eşiği ile çakışan 20-25
+        // arası "no-man's-land" iki strateji için de açık (her iki gate
+        // 0-emit'e sebep olmasın diye).
+        if (p.AdxGateEnabled && snapshot.Adx14 > 0m && snapshot.Adx14 < p.AdxTrendingThreshold)
+        {
+            _logger.LogInformation(
+                "KMS skip adx_gate symbol={Symbol} strategyId={StrategyId} " +
+                "adx14={Adx} adxTrendingThreshold={Threshold} decision=AdxGateSkip",
+                symbol, strategyId, snapshot.Adx14, p.AdxTrendingThreshold);
+            return Task.FromResult<StrategyEvaluation?>(null);
+        }
+
         // CoinClass asimetri çözümü — BTC/ETH (large) düşük ATR'da bile likit;
         // altcoin (alt) çok düşük ATR = trend yok / pump-dump tuzağı, daha
         // yüksek MinAtr aranır. Bilinmeyen sınıf "alt" varsayılır (en
@@ -314,6 +330,9 @@ public sealed class KmsMomentumEvaluator : IStrategyEvaluator
             bbw = snapshot.BollingerBandWidth,
             bbwThreshold = p.BbwThreshold,
             bbwHardGate = p.BbwHardGate,
+            adx14 = snapshot.Adx14,
+            adxTrendingThreshold = p.AdxTrendingThreshold,
+            adxGateEnabled = p.AdxGateEnabled,
             tradeCountAvg20 = snapshot.AvgTradeCount20,
             currentTradeCount = snapshot.CurrentTradeCount,
             askPrice = ticker.AskPrice,
@@ -489,5 +508,13 @@ public sealed class KmsMomentumEvaluator : IStrategyEvaluator
         // ise skip (EMA200 gate'in hemen sonrası, skor öncesi). Default false
         // geriye uyumluluk; production seed'lerde true ile deploy.
         public bool BbwHardGate { get; set; } = false;
+
+        // Loop 80 — ADX trend hard-gate. KMS sadece trending rejimde
+        // çalışır (mean reversion = BBR bölgesi). True + Adx14 > 0 +
+        // Adx14 < AdxTrendingThreshold ⇒ skip. Default 20 (binance-expert
+        // gevşek eşik; klasik 25 KMS için fazla muhafazakar — 0 emit
+        // riski). AdxGateEnabled false ⇒ acil sigorta bypass.
+        public bool AdxGateEnabled { get; set; } = true;
+        public decimal AdxTrendingThreshold { get; set; } = 20m;
     }
 }

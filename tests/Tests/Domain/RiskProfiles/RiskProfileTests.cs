@@ -292,4 +292,96 @@ public class RiskProfileTests
         rp.RiskPerTradePct.Should().Be(0.02m);
         rp.MaxPositionSizePct.Should().Be(0.40m);
     }
+
+    /// <summary>
+    /// Loop 80 — <see cref="RiskProfile.ResetConsecutiveLossCounter"/> contract:
+    /// the streak counter is zeroed but every other piece of CB / drawdown /
+    /// PnL state stays untouched, so a bot restart cannot accidentally clear
+    /// a tripped CB or rewrite drawdown history.
+    /// </summary>
+    [Fact]
+    public void ResetConsecutiveLossCounter_ZeroesStreak_AndPreservesEverythingElse()
+    {
+        var rp = RiskProfile.CreateDefault(TradingMode.Paper, T0);
+        // Build up state: 2 losses (streak=2), peak=$100, dd=2%, CB still Healthy.
+        rp.RecordTradeOutcome(0m, 100m, T0);
+        rp.RecordTradeOutcome(-1m, 99m, T0.AddMinutes(1));
+        rp.RecordTradeOutcome(-1m, 98m, T0.AddMinutes(2));
+        rp.ConsecutiveLosses.Should().Be(2);
+        rp.PeakEquity.Should().Be(100m);
+        rp.RealizedPnlAllTime.Should().Be(-2m);
+        rp.CircuitBreakerStatus.Should().Be(CircuitBreakerStatus.Healthy);
+
+        rp.ResetConsecutiveLossCounter("bot_startup_auto_reset", T0.AddMinutes(10));
+
+        rp.ConsecutiveLosses.Should().Be(0);
+        rp.PeakEquity.Should().Be(100m);
+        rp.RealizedPnlAllTime.Should().Be(-2m);
+        rp.CircuitBreakerStatus.Should().Be(CircuitBreakerStatus.Healthy);
+        rp.UpdatedAt.Should().Be(T0.AddMinutes(10));
+    }
+
+    /// <summary>
+    /// Loop 80 — streak reset must NOT clear or alter a tripped circuit breaker.
+    /// Only the operator's <see cref="RiskProfile.ResetCircuitBreaker"/> path
+    /// is allowed to flip the CB back to Healthy (audit + adminNote required).
+    /// </summary>
+    [Fact]
+    public void ResetConsecutiveLossCounter_TrippedCb_KeepsCbTripped()
+    {
+        var rp = RiskProfile.CreateDefault(TradingMode.Paper, T0);
+        rp.RecordTradeOutcome(0m, 100m, T0);
+        rp.RecordTradeOutcome(-1m, 99m, T0.AddMinutes(1));
+        rp.RecordTradeOutcome(-1m, 98m, T0.AddMinutes(2));
+        rp.RecordTradeOutcome(-1m, 97m, T0.AddMinutes(3)); // 3rd loss → trip
+        rp.CircuitBreakerStatus.Should().Be(CircuitBreakerStatus.Tripped);
+        rp.CircuitBreakerReason.Should().StartWith("consecutive_losses=");
+
+        rp.ResetConsecutiveLossCounter("bot_startup_auto_reset", T0.AddMinutes(10));
+
+        rp.ConsecutiveLosses.Should().Be(0);
+        rp.CircuitBreakerStatus.Should().Be(CircuitBreakerStatus.Tripped);
+        rp.CircuitBreakerReason.Should().StartWith("consecutive_losses=");
+    }
+
+    /// <summary>
+    /// Loop 80 — streak reset is idempotent: when the counter is already 0,
+    /// the call is a no-op (no <see cref="RiskProfile.UpdatedAt"/> bump,
+    /// no domain-event noise) so the seeder can fire it on every boot
+    /// without manufacturing churn.
+    /// </summary>
+    [Fact]
+    public void ResetConsecutiveLossCounter_AlreadyZero_IsNoOp()
+    {
+        var rp = RiskProfile.CreateDefault(TradingMode.Paper, T0);
+        rp.ConsecutiveLosses.Should().Be(0);
+        var originalUpdatedAt = rp.UpdatedAt;
+        rp.ClearDomainEvents();
+
+        rp.ResetConsecutiveLossCounter("bot_startup_auto_reset", T0.AddMinutes(10));
+
+        rp.ConsecutiveLosses.Should().Be(0);
+        rp.UpdatedAt.Should().Be(originalUpdatedAt);
+        rp.DomainEvents.Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// Loop 80 — empty / whitespace reason rejected. Keeps audit trail
+    /// non-empty so log scans can group by reason code.
+    /// </summary>
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void ResetConsecutiveLossCounter_BlankReason_Throws(string? badReason)
+    {
+        var rp = RiskProfile.CreateDefault(TradingMode.Paper, T0);
+        rp.RecordTradeOutcome(-1m, 99m, T0);
+        rp.ConsecutiveLosses.Should().Be(1);
+
+        var act = () => rp.ResetConsecutiveLossCounter(badReason!, T0.AddMinutes(1));
+
+        act.Should().Throw<BinanceBot.Domain.Common.DomainException>()
+            .WithMessage("*Reason*");
+    }
 }

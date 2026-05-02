@@ -51,7 +51,8 @@ public class KmsMomentumEvaluatorTests
         "\"MaxHoldMinutes\":45,\"MaxHoldMinutesLowScore\":30,\"MaxHoldMinutesHighScore\":60," +
         "\"SpreadThresholdPct\":0.005,\"CooldownBarsAfterSignal\":3," +
         "\"Ema200GateEnabled\":true,\"BbwScoreEnabled\":true," +
-        "\"BbwThreshold\":0.008,\"BbwScorePoints\":1}";
+        "\"BbwThreshold\":0.008,\"BbwScorePoints\":1," +
+        "\"AdxGateEnabled\":true,\"AdxTrendingThreshold\":20}";
 
     private const string DefaultParamsAlt =
         "{\"RsiPeriod\":14,\"EmaPeriod\":9,\"AtrPeriod\":14,\"TradeCountWindow\":20," +
@@ -67,7 +68,8 @@ public class KmsMomentumEvaluatorTests
         "\"MaxHoldMinutes\":45,\"MaxHoldMinutesLowScore\":30,\"MaxHoldMinutesHighScore\":60," +
         "\"SpreadThresholdPct\":0.005,\"CooldownBarsAfterSignal\":3," +
         "\"Ema200GateEnabled\":true,\"BbwScoreEnabled\":true," +
-        "\"BbwThreshold\":0.008,\"BbwScorePoints\":1}";
+        "\"BbwThreshold\":0.008,\"BbwScorePoints\":1," +
+        "\"AdxGateEnabled\":true,\"AdxTrendingThreshold\":20}";
 
     private sealed class FixedClock(DateTimeOffset now) : IClock
     {
@@ -104,7 +106,11 @@ public class KmsMomentumEvaluatorTests
         decimal avgTradeCount20 = 100m,
         int currentTradeCount = 160,
         decimal ema200 = 0m,
-        decimal bollingerBandWidth = 0m)
+        decimal bollingerBandWidth = 0m,
+        // Loop 80 default: Adx14 = 0 ⇒ warmup bypass semantik, ADX gate
+        // açık. Mevcut testler ADX gate semantiği eklenmeden önceki davranışı
+        // korur. ADX-spesifik testler değeri override eder.
+        decimal adx14 = 0m)
     {
         return new KmsMomentumSnapshot(
             CurrentClose: currentClose,
@@ -117,6 +123,7 @@ public class KmsMomentumEvaluatorTests
             CurrentTradeCount: currentTradeCount,
             Ema200: ema200,
             BollingerBandWidth: bollingerBandWidth,
+            Adx14: adx14,
             LastBarOpenTime: DateTimeOffset.UtcNow.AddMinutes(-5),
             AsOf: DateTimeOffset.UtcNow);
     }
@@ -474,7 +481,8 @@ public class KmsMomentumEvaluatorTests
             "\"MaxHoldMinutes\":45,\"MaxHoldMinutesLowScore\":30,\"MaxHoldMinutesHighScore\":60," +
             "\"SpreadThresholdPct\":0.005,\"CooldownBarsAfterSignal\":3," +
             "\"Ema200GateEnabled\":false,\"BbwScoreEnabled\":true," +
-            "\"BbwThreshold\":0.008,\"BbwScorePoints\":1}";
+            "\"BbwThreshold\":0.008,\"BbwScorePoints\":1," +
+        "\"AdxGateEnabled\":true,\"AdxTrendingThreshold\":20}";
 
         var snap = MakeSnapshot(currentClose: 100m, ema200: 105m); // downtrend ama gate off
         var (sut, _, _) = Build(snap, TightSpreadTicker());
@@ -552,7 +560,8 @@ public class KmsMomentumEvaluatorTests
             "\"MaxHoldMinutes\":45,\"MaxHoldMinutesLowScore\":30,\"MaxHoldMinutesHighScore\":60," +
             "\"SpreadThresholdPct\":0.005,\"CooldownBarsAfterSignal\":3," +
             "\"Ema200GateEnabled\":true,\"BbwScoreEnabled\":true," +
-            "\"BbwThreshold\":0.008,\"BbwScorePoints\":1,\"BbwHardGate\":true}";
+            "\"BbwThreshold\":0.008,\"BbwScorePoints\":1,\"BbwHardGate\":true," +
+            "\"AdxGateEnabled\":true,\"AdxTrendingThreshold\":20}";
 
         var snap = MakeSnapshot(bollingerBandWidth: 0.003m); // 0.003 < 0.008 threshold
         var (sut, _, _) = Build(snap, TightSpreadTicker());
@@ -587,7 +596,8 @@ public class KmsMomentumEvaluatorTests
             "\"MaxHoldMinutes\":45,\"MaxHoldMinutesLowScore\":30,\"MaxHoldMinutesHighScore\":60," +
             "\"SpreadThresholdPct\":0.005,\"CooldownBarsAfterSignal\":3," +
             "\"Ema200GateEnabled\":true,\"BbwScoreEnabled\":true," +
-            "\"BbwThreshold\":0.008,\"BbwScorePoints\":1,\"BbwHardGate\":true}";
+            "\"BbwThreshold\":0.008,\"BbwScorePoints\":1,\"BbwHardGate\":true," +
+            "\"AdxGateEnabled\":true,\"AdxTrendingThreshold\":20}";
 
         var snap = MakeSnapshot(bollingerBandWidth: 0.012m); // 0.012 > 0.008 threshold
         var (sut, _, _) = Build(snap, TightSpreadTicker());
@@ -601,5 +611,61 @@ public class KmsMomentumEvaluatorTests
         result!.ContextJson.Should().Contain("\"bbwScore\":1");
         result.ContextJson.Should().Contain("\"score\":7");
         result.ContextJson.Should().Contain("\"bbwHardGate\":true");
+    }
+
+    /// <summary>
+    /// Loop 80 — KMS ADX hard-gate: <c>Adx14 &lt; AdxTrendingThreshold (20)</c>
+    /// (zayıf trend) ⇒ skip. EMA200 + BBW gate'lerinin hemen sonrası, skor
+    /// öncesi sıralanır.
+    /// </summary>
+    [Fact]
+    public async Task KmsAdxGate_BelowThreshold_Skip()
+    {
+        var snap = MakeSnapshot(adx14: 15m); // < 20
+        var (sut, _, _) = Build(snap, TightSpreadTicker());
+
+        var result = await sut.EvaluateAsync(
+            StrategyId, DefaultParamsLarge, Symbol,
+            closedBars: Array.Empty<Kline>(),
+            cancellationToken: CancellationToken.None);
+
+        result.Should().BeNull();
+    }
+
+    /// <summary>
+    /// Loop 80 — KMS ADX hard-gate warmup bypass: Adx14 == 0 (warmup
+    /// yetersiz) ⇒ gate açık, normal akış. Default snapshot zaten Adx14=0.
+    /// </summary>
+    [Fact]
+    public async Task KmsAdxGate_WarmupBypass_AdxZero_Emits()
+    {
+        var snap = MakeSnapshot(adx14: 0m);
+        var (sut, _, _) = Build(snap, TightSpreadTicker());
+
+        var result = await sut.EvaluateAsync(
+            StrategyId, DefaultParamsLarge, Symbol,
+            closedBars: Array.Empty<Kline>(),
+            cancellationToken: CancellationToken.None);
+
+        result.Should().NotBeNull();
+    }
+
+    /// <summary>
+    /// Loop 80 — KMS ADX hard-gate eşik üstü ⇒ emit (trending). 25 ≥ 20
+    /// trend yeterli, normal akış.
+    /// </summary>
+    [Fact]
+    public async Task KmsAdxGate_AboveThreshold_Emits()
+    {
+        var snap = MakeSnapshot(adx14: 25m);
+        var (sut, _, _) = Build(snap, TightSpreadTicker());
+
+        var result = await sut.EvaluateAsync(
+            StrategyId, DefaultParamsLarge, Symbol,
+            closedBars: Array.Empty<Kline>(),
+            cancellationToken: CancellationToken.None);
+
+        result.Should().NotBeNull();
+        result!.ContextJson.Should().Contain("\"adx14\":25");
     }
 }

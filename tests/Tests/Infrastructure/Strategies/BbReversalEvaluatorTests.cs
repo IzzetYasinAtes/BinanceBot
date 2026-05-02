@@ -31,12 +31,15 @@ public class BbReversalEvaluatorTests
     private const string Symbol = "BTCUSDT";
     private const long StrategyId = 99L;
 
-    // binance-expert spec defaults — Loop 79 BB Reversal parametre seti.
+    // binance-expert spec defaults — Loop 79 BB Reversal + Loop 80 (volume
+    // surge gate, ADX hard-gate) parametre seti.
     private const string DefaultParams =
         "{\"RsiPeriod\":14,\"BbPeriod\":20,\"BbStdDev\":2.0,\"AtrPeriod\":14," +
         "\"BbwRangeMin\":0.003,\"BbwRangeMax\":0.010,\"RsiOversoldEntry\":35," +
         "\"BufferPctEntry\":0.0005,\"BufferPctExit\":0.001," +
-        "\"MaxHoldMinutes\":20,\"SpreadThresholdPct\":0.005,\"CooldownBarsAfterSignal\":3}";
+        "\"MaxHoldMinutes\":20,\"SpreadThresholdPct\":0.005,\"CooldownBarsAfterSignal\":3," +
+        "\"TradeCountWindow\":20,\"TradeCountSurgeMultiplier\":1.5," +
+        "\"AdxGateEnabled\":true,\"AdxRangeMax\":25}";
 
     private sealed class FixedClock(DateTimeOffset now) : IClock
     {
@@ -67,7 +70,12 @@ public class BbReversalEvaluatorTests
         decimal bollingerLower = 100m,
         decimal bollingerMean = 101m,
         decimal bollingerBandWidth = 0.005m,
-        decimal atr14 = 0.40m)
+        decimal atr14 = 0.40m,
+        decimal avgTradeCount20 = 100m,
+        // Default 200 > 100 × 1.5 ⇒ volume surge gate açık (emit yolu).
+        int currentTradeCount = 200,
+        // Default ADX 15 < 25 (range rejim) ⇒ ADX gate açık (emit yolu).
+        decimal adx14 = 15m)
     {
         return new BbReversalSnapshot(
             CurrentClose: currentClose,
@@ -77,6 +85,9 @@ public class BbReversalEvaluatorTests
             BollingerMean: bollingerMean,
             BollingerBandWidth: bollingerBandWidth,
             Atr14: atr14,
+            AvgTradeCount20: avgTradeCount20,
+            CurrentTradeCount: currentTradeCount,
+            Adx14: adx14,
             LastBarOpenTime: DateTimeOffset.UtcNow.AddMinutes(-5),
             AsOf: DateTimeOffset.UtcNow);
     }
@@ -91,6 +102,7 @@ public class BbReversalEvaluatorTests
                 It.IsAny<int>(),
                 It.IsAny<int>(),
                 It.IsAny<decimal>(),
+                It.IsAny<int>(),
                 It.IsAny<int>()))
             .Returns(snapshot);
 
@@ -309,5 +321,124 @@ public class BbReversalEvaluatorTests
             cancellationToken: CancellationToken.None);
 
         result.Should().BeNull();
+    }
+
+    /// <summary>
+    /// Loop 80 — Volume surge OK (CurrentTradeCount &gt; AvgTradeCount × 1.5) ⇒ emit.
+    /// 200 &gt; 100 × 1.5 = 150 ⇒ pass.
+    /// </summary>
+    [Fact]
+    public async Task VolumeSurge_AboveThreshold_Emits()
+    {
+        var snap = MakeSnapshot(avgTradeCount20: 100m, currentTradeCount: 200);
+        var (sut, _, _) = Build(snap, TightSpreadTicker());
+
+        var result = await sut.EvaluateAsync(
+            StrategyId, DefaultParams, Symbol,
+            closedBars: Array.Empty<Kline>(),
+            cancellationToken: CancellationToken.None);
+
+        result.Should().NotBeNull();
+        result!.ContextJson.Should().Contain("\"currentTradeCount\":200");
+        result.ContextJson.Should().Contain("\"avgTradeCount20\":100");
+    }
+
+    /// <summary>
+    /// Loop 80 — Volume surge altı (CurrentTradeCount ≤ AvgTradeCount × 1.5) ⇒ skip.
+    /// 120 ≤ 100 × 1.5 = 150 ⇒ false-breakdown koruması; emit yok.
+    /// </summary>
+    [Fact]
+    public async Task VolumeSurge_BelowThreshold_Skip()
+    {
+        var snap = MakeSnapshot(avgTradeCount20: 100m, currentTradeCount: 120);
+        var (sut, _, _) = Build(snap, TightSpreadTicker());
+
+        var result = await sut.EvaluateAsync(
+            StrategyId, DefaultParams, Symbol,
+            closedBars: Array.Empty<Kline>(),
+            cancellationToken: CancellationToken.None);
+
+        result.Should().BeNull();
+    }
+
+    /// <summary>
+    /// Loop 80 — Volume surge warmup bypass: <c>AvgTradeCount20 == 0</c>
+    /// ⇒ gate açık (yeni bar, henüz 20 bar history yok). Emit kalır.
+    /// </summary>
+    [Fact]
+    public async Task VolumeSurge_WarmupBypass_AvgZero_Emits()
+    {
+        var snap = MakeSnapshot(avgTradeCount20: 0m, currentTradeCount: 5);
+        var (sut, _, _) = Build(snap, TightSpreadTicker());
+
+        var result = await sut.EvaluateAsync(
+            StrategyId, DefaultParams, Symbol,
+            closedBars: Array.Empty<Kline>(),
+            cancellationToken: CancellationToken.None);
+
+        result.Should().NotBeNull();
+    }
+
+    /// <summary>
+    /// Loop 80 — ADX hard-gate: <c>Adx14 &gt;= AdxRangeMax (25)</c> ⇒ skip
+    /// (trending rejim, mean-reversion ters yön).
+    /// </summary>
+    [Fact]
+    public async Task AdxGate_AboveRangeMax_Skip()
+    {
+        var snap = MakeSnapshot(adx14: 30m); // > 25
+        var (sut, _, _) = Build(snap, TightSpreadTicker());
+
+        var result = await sut.EvaluateAsync(
+            StrategyId, DefaultParams, Symbol,
+            closedBars: Array.Empty<Kline>(),
+            cancellationToken: CancellationToken.None);
+
+        result.Should().BeNull();
+    }
+
+    /// <summary>
+    /// Loop 80 — ADX hard-gate warmup bypass: <c>Adx14 == 0</c> (warmup
+    /// yetersiz, &lt; 29 bar) ⇒ gate açık. Emit kalır (defansif, frekans
+    /// bozulmaz).
+    /// </summary>
+    [Fact]
+    public async Task AdxGate_WarmupBypass_AdxZero_Emits()
+    {
+        var snap = MakeSnapshot(adx14: 0m);
+        var (sut, _, _) = Build(snap, TightSpreadTicker());
+
+        var result = await sut.EvaluateAsync(
+            StrategyId, DefaultParams, Symbol,
+            closedBars: Array.Empty<Kline>(),
+            cancellationToken: CancellationToken.None);
+
+        result.Should().NotBeNull();
+    }
+
+    /// <summary>
+    /// Loop 80 — <c>AdxGateEnabled=false</c> ile gate bypass: trending ADX
+    /// olsa bile emit kalır (acil 0-emit sigortası).
+    /// </summary>
+    [Fact]
+    public async Task AdxGate_Disabled_TrendingAdx_Emits()
+    {
+        var snap = MakeSnapshot(adx14: 50m); // çok trending ama gate kapalı
+        var (sut, _, _) = Build(snap, TightSpreadTicker());
+
+        var paramsBypass =
+            "{\"RsiPeriod\":14,\"BbPeriod\":20,\"BbStdDev\":2.0,\"AtrPeriod\":14," +
+            "\"BbwRangeMin\":0.003,\"BbwRangeMax\":0.010,\"RsiOversoldEntry\":35," +
+            "\"BufferPctEntry\":0.0005,\"BufferPctExit\":0.001," +
+            "\"MaxHoldMinutes\":20,\"SpreadThresholdPct\":0.005,\"CooldownBarsAfterSignal\":3," +
+            "\"TradeCountWindow\":20,\"TradeCountSurgeMultiplier\":1.5," +
+            "\"AdxGateEnabled\":false,\"AdxRangeMax\":25}";
+
+        var result = await sut.EvaluateAsync(
+            StrategyId, paramsBypass, Symbol,
+            closedBars: Array.Empty<Kline>(),
+            cancellationToken: CancellationToken.None);
+
+        result.Should().NotBeNull();
     }
 }

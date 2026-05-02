@@ -34,6 +34,17 @@ namespace BinanceBot.Application.Strategies.Indicators;
 /// dead (sıkışma) veya trending (geniş bant — KMS bölgesi) olarak skip.</param>
 /// <param name="Atr14">14-bar Average True Range — bilgi/audit amaçlı; default
 /// SL hesabında kullanılmaz (sabit BufferPctExit).</param>
+/// <param name="AvgTradeCount20">Loop 80 — son <c>tradeCountWindow</c> bar için
+/// aritmetik <c>TradeCount</c> ortalaması. BBR volume-surge gate'in
+/// referansı: <c>CurrentTradeCount &gt; AvgTradeCount20 × Multiplier</c> ile
+/// false-breakdown sinyalleri elenir. Warmup yetersizse <c>0</c>; evaluator
+/// 0'ı "warmup bypass" (gate açık) olarak yorumlar.</param>
+/// <param name="CurrentTradeCount">Loop 80 — son kapalı 5m bar üzerindeki
+/// trade sayısı; volume-surge anlık değeri.</param>
+/// <param name="Adx14">Loop 80 — Wilder ADX(14): trend gücü 0–100. BBR için
+/// hard-gate referansı: <c>Adx14 &gt;= AdxRangeMax</c> ⇒ skip (trending
+/// rejim, mean-reversion ters yön). Warmup yetersizse <c>0</c>; evaluator
+/// 0'ı "gate disabled (unavailable)" olarak yorumlar.</param>
 /// <param name="LastBarOpenTime">Son kapalı 5m bar açılış zamanı — log + cooldown anchor.</param>
 /// <param name="AsOf">Son kapalı 5m bar kapanış zamanı — snapshot freshness.</param>
 public sealed record BbReversalSnapshot(
@@ -44,5 +55,8 @@ public sealed record BbReversalSnapshot(
     decimal BollingerMean,
     decimal BollingerBandWidth,
     decimal Atr14,
+    decimal AvgTradeCount20,
+    int CurrentTradeCount,
+    decimal Adx14,
     DateTimeOffset LastBarOpenTime,
     DateTimeOffset AsOf);

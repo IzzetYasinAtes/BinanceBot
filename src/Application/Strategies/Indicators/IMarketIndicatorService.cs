@@ -44,8 +44,10 @@ public interface IMarketIndicatorService
     ///   - BB(<paramref name="bbPeriod"/>, <paramref name="bbStdDev"/>) — Lower,
     ///     Middle, BBW = (Upper - Lower) / Middle.
     ///   - ATR(<paramref name="atrPeriod"/>) — bilgi amaçlı (audit + future varyant).
+    ///   - Loop 80 — TradeCountAvg(<paramref name="tradeCountWindow"/>) +
+    ///     <c>CurrentTradeCount</c>: BBR volume-surge gate referansı.
     ///
-    /// Warmup eşiği: <c>max(rsiPeriod + 2, bbPeriod, atrPeriod + 1)</c>.
+    /// Warmup eşiği: <c>max(rsiPeriod + 2, bbPeriod, atrPeriod + 1, tradeCountWindow)</c>.
     /// Returns <c>null</c> when warmup incomplete, symbol untracked, or any
     /// parameter ≤ 0.
     /// </summary>
@@ -54,5 +56,6 @@ public interface IMarketIndicatorService
         int rsiPeriod,
         int bbPeriod,
         decimal bbStdDev,
-        int atrPeriod);
+        int atrPeriod,
+        int tradeCountWindow);
 }
