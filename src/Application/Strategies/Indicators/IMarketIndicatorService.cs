@@ -1,61 +1,38 @@
+using BinanceBot.Application.Strategies.Patterns;
+
 namespace BinanceBot.Application.Strategies.Indicators;
 
 /// <summary>
-/// Loop 67 KMS pivot — evaluator-facing port for pre-computed market
-/// indicators. Infrastructure impl owns rolling per-(symbol, interval)
-/// buffers and exposes a snapshot per strategy. Evaluator is snapshot-
-/// consumer only: it does not own the buffer, the WS subscription, or the
-/// REST backfill wiring.
-///
-/// Surface reset (Loop 67): all legacy <c>TryGet*</c> methods of the prior
-/// 7-strategy era (VwapEma / MicroScalper / AtrScalper / Donchian / BbMeanRev
-/// / EmaScalper / HybridMomentum) were deleted in favour of the single KMS
-/// snapshot below. Backward-compat is intentionally NOT preserved — the
-/// migration <c>Loop67KmsReset</c> wipes all legacy strategy/seed state in
-/// the same release.
+/// Loop 81 — Pattern-composite scalping pivot. Tek surface method:
+/// <see cref="TryGetBarSnapshot"/>. KMS+BBR (Loop 67-80) dönemine ait
+/// <c>TryGetKmsMomentumSnapshot</c> + <c>TryGetBbReversalSnapshot</c>
+/// methodları kaldırıldı; pattern detector'lar paylaşılan
+/// <see cref="BarSnapshot"/> üzerinden çalışır.
 /// </summary>
 public interface IMarketIndicatorService
 {
     /// <summary>
-    /// Loop 67 KMS — KlineMomentumSpread5m snapshot from the 5m rolling
-    /// buffer. Computes RSI(period) at <c>Count-1</c> and <c>Count-2</c>
-    /// (oversold-recovery cross), EMA(emaPeriod) now/prev (slope), ATR
-    /// (atrPeriod), and <c>TradeCountAvg(tradeCountWindow)</c> + current
-    /// bar trade count.
+    /// Loop 81 — Tek paylaşılan bar snapshot'ı (ADR-0024 §24.7). 5m rolling
+    /// buffer'dan son kapalı barı + indikator setini hesaplar; tüm
+    /// <c>IPatternDetector</c> implementation'ları bu snapshot'ı tüketir.
     ///
-    /// Warmup threshold: <c>max(rsiPeriod + 2, emaPeriod + 1, atrPeriod + 1, tradeCountWindow)</c>
-    /// — the +2 on RSI is required because <c>Rsi14Prev</c> is computed by
-    /// shifting the window one bar back. Returns <c>null</c> when warmup is
-    /// incomplete, the symbol is not tracked, or any parameter &lt;= 0.
-    /// </summary>
-    KmsMomentumSnapshot? TryGetKmsMomentumSnapshot(
-        string symbol,
-        int rsiPeriod,
-        int emaPeriod,
-        int atrPeriod,
-        int tradeCountWindow);
-
-    /// <summary>
-    /// Loop 79 — BollingerBandReversal5m snapshot. KMS ile aynı 5m rolling
-    /// buffer üzerinden hesaplanır; additive surface (KMS'i etkilemez).
-    /// Hesaplananlar:
-    ///   - RSI(<paramref name="rsiPeriod"/>) curr (<c>Count-1</c>) ve prev
-    ///     (<c>Count-2</c>) — Wilder; pencere bir bar geriye kaydırılır.
-    ///   - BB(<paramref name="bbPeriod"/>, <paramref name="bbStdDev"/>) — Lower,
-    ///     Middle, BBW = (Upper - Lower) / Middle.
-    ///   - ATR(<paramref name="atrPeriod"/>) — bilgi amaçlı (audit + future varyant).
-    ///   - Loop 80 — TradeCountAvg(<paramref name="tradeCountWindow"/>) +
-    ///     <c>CurrentTradeCount</c>: BBR volume-surge gate referansı.
+    /// Hesaplananlar: OHLCV (curr + prev), RSI14 (curr + prev), EMA9/21/50/200,
+    /// ATR14, Bollinger(20,2) bands + BBW + BBW6-min, ADX14, AvgVolume20,
+    /// AvgTradeCount20, Donchian20 high/low, VWAP, MACD line (curr + prev),
+    /// SpreadPct (canlı BookTicker üzerinden).
     ///
-    /// Warmup eşiği: <c>max(rsiPeriod + 2, bbPeriod, atrPeriod + 1, tradeCountWindow)</c>.
-    /// Returns <c>null</c> when warmup incomplete, symbol untracked, or any
-    /// parameter ≤ 0.
+    /// <para>
+    /// Warmup eşiği: 200 bar (EMA200 + Bollinger sliding history). Yetersizse
+    /// <c>null</c> döner — pattern composer "warmup not done — skip" olarak
+    /// yorumlar.
+    /// </para>
+    ///
+    /// <para>
+    /// BookTicker verisi yoksa <see cref="BarSnapshot.SpreadPct"/> 1m gibi
+    /// anormal değer döner ⇒ <c>SpreadGuardGate</c> hard-skip eder; snapshot
+    /// build'i yine de gerçekleşir (defansif — diğer detector'lar pattern
+    /// görmüş olabilir, sadece liquidity guard çalışır).
+    /// </para>
     /// </summary>
-    BbReversalSnapshot? TryGetBbReversalSnapshot(
-        string symbol,
-        int rsiPeriod,
-        int bbPeriod,
-        decimal bbStdDev,
-        int atrPeriod,
-        int tradeCountWindow);
+    BarSnapshot? TryGetBarSnapshot(string symbol);
 }

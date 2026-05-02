@@ -358,4 +358,69 @@ internal static class Indicators
         var stdDev = (decimal)Math.Sqrt((double)variance);
         return (mean, mean + stdDevMultiplier * stdDev, mean - stdDevMultiplier * stdDev);
     }
+
+    /// <summary>
+    /// Loop 81 — BBW window. Returns the minimum BBW value over the last
+    /// <paramref name="window"/> consecutive bars, where each BBW is computed
+    /// from BollingerBands(period, stdDevMultiplier) ending at that bar.
+    /// Used by <c>EmaSqueezeBreakDetector</c> to detect "squeeze release"
+    /// (current BBW expanded beyond a recent compression minimum).
+    /// Returns <c>0</c> when history insufficient (caller treats as no-signal).
+    /// </summary>
+    public static decimal BollingerBandWidthMin(
+        IReadOnlyList<Kline> bars, int period, decimal stdDevMultiplier, int window)
+    {
+        if (window <= 0 || bars.Count < period + window - 1)
+        {
+            return 0m;
+        }
+
+        decimal min = decimal.MaxValue;
+        for (var k = 0; k < window; k++)
+        {
+            // Pencerenin "k bar geride biten" snapshot'ı için bars[..bars.Count - k]
+            // alt kümesi yeterli (BollingerBands son <c>period</c> bar'ı tüketir).
+            var endExclusive = bars.Count - k;
+            if (endExclusive < period) break;
+
+            // BollingerBands son `period` bar'ı tüketir; aynı algoritmayı tekrar
+            // yazmak yerine sub-list materialise et.
+            var sub = new List<Kline>(period);
+            for (var i = endExclusive - period; i < endExclusive; i++)
+            {
+                sub.Add(bars[i]);
+            }
+            var (mean, upper, lower) = BollingerBands(sub, period, stdDevMultiplier);
+            if (mean <= 0m) continue;
+            var bbw = (upper - lower) / mean;
+            if (bbw < min) min = bbw;
+        }
+
+        return min == decimal.MaxValue ? 0m : min;
+    }
+
+    /// <summary>
+    /// Loop 81 — Simple moving average of <c>Volume</c> alias for
+    /// <see cref="VolumeSma"/> ile aynı; semantik isim (volume-surge gate kullanır).
+    /// Returns <c>0</c> when history insufficient.
+    /// </summary>
+    public static decimal AverageVolume(IReadOnlyList<Kline> bars, int period) =>
+        VolumeSma(bars, period);
+
+    /// <summary>
+    /// Loop 81 — MACD line: <c>EMA(close, fast) - EMA(close, slow)</c>. Last
+    /// closed bar dahil. Yetersiz history (&lt; <paramref name="slow"/> + 1) ⇒
+    /// <c>0</c>. Signal line + histogram dahil değil — Loop 81 sadece
+    /// zero-line cross kullanır.
+    /// </summary>
+    public static decimal Macd(IReadOnlyList<Kline> bars, int fast, int slow)
+    {
+        if (fast <= 0 || slow <= 0 || fast >= slow) return 0m;
+        if (bars.Count < slow + 1) return 0m;
+
+        var endIndex = bars.Count - 1;
+        var emaFast = Ema(bars, period: fast, endIndex: endIndex);
+        var emaSlow = Ema(bars, period: slow, endIndex: endIndex);
+        return emaFast - emaSlow;
+    }
 }
