@@ -176,4 +176,38 @@ public class IndicatorsTests
         adx.Should().BeGreaterThan(25m);
         adx.Should().BeLessThanOrEqualTo(100m);
     }
+
+    /// <summary>
+    /// Loop 81 — MACD line not enough bars returns 0 (warmup contract).
+    /// </summary>
+    [Fact]
+    public void Macd_NotEnoughBars_ReturnsZero()
+    {
+        var bars = Enumerable.Range(0, 20).Select(i => MakeBar(i, 100m + i, 100m + i, 100m + i)).ToList();
+        Indicators.Macd(bars, fast: 12, slow: 26).Should().Be(0m);
+    }
+
+    /// <summary>
+    /// Loop 81 — MACD: rising series → fast EMA &gt; slow EMA → MACD &gt; 0.
+    /// </summary>
+    [Fact]
+    public void Macd_RisingSeries_PositiveMacd()
+    {
+        var bars = Enumerable.Range(0, 60)
+            .Select(i => MakeBar(i, close: 100m + i, high: 100m + i, low: 100m + i))
+            .ToList();
+        Indicators.Macd(bars, fast: 12, slow: 26).Should().BeGreaterThan(0m);
+    }
+
+    /// <summary>
+    /// Loop 81 — MACD: falling series → fast &lt; slow → MACD &lt; 0.
+    /// </summary>
+    [Fact]
+    public void Macd_FallingSeries_NegativeMacd()
+    {
+        var bars = Enumerable.Range(0, 60)
+            .Select(i => MakeBar(i, close: 200m - i, high: 200m - i, low: 200m - i))
+            .ToList();
+        Indicators.Macd(bars, fast: 12, slow: 26).Should().BeLessThan(0m);
+    }
 }
