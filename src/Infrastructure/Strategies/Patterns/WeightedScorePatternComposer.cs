@@ -95,12 +95,28 @@ public sealed class WeightedScorePatternComposer : IPatternSignalComposer
                 Reason: ev.Reason));
         }
 
-        // 3. Loop 84 — Hard-gate fail SKIP DEVRE DIŞI. Hard-gate detektörleri
-        //    skor-toplamına 0 katkı veriyor zaten (DefaultWeight=0). Sahte
-        //    breakout riski tolere edilir; 0 emit anti-pattern (Golden #12)
-        //    pratik öncelik. hardGateFails tracking sadece ContextJson için
-        //    bırakıldı.
-        _ = hardGateFails;
+        // 3. Loop 86 — Hard-gate skip GERİ EKLENDİ. Loop 84'te kaldırılmıştı,
+        //    ama Loop 85'te yeni param ile 3 ardışık SL pattern (peak=0, BE
+        //    armed olmadan) sahte breakout sorununu doğruladı (-$1.59 toplam).
+        //    Volume_surge_gate ve spread_guard_gate kalitesiz emit'leri eler;
+        //    frekans için RequiredScore 4 (Loop 83) ve hızlı tick 5s (Loop 85)
+        //    korunuyor.
+        if (hardGateFails.Count > 0)
+        {
+            var reason = "hard_gate:" + string.Join(",", hardGateFails);
+            var ctxSkip = SerializeContext(snapshot, total, options.RequiredScore,
+                contribs, softMultiplier, emit: false, skipReason: reason);
+            return new CompositeSignalDecision(
+                Emit: false,
+                TotalScore: total,
+                RequiredScore: options.RequiredScore,
+                SkipReason: reason,
+                EntryPrice: null,
+                StopPrice: null,
+                TakeProfitPrice: null,
+                MaxHoldMinutes: null,
+                ContextJson: ctxSkip);
+        }
 
         // 4. Threshold kontrolü
         if (total < options.RequiredScore)
