@@ -204,6 +204,11 @@ public static class DependencyInjection
         services.Configure<RiskProfileDefaultsOptions>(
             configuration.GetSection(RiskProfileDefaultsOptions.SectionName));
         services.AddHostedService<RiskProfileSeeder>();
+
+        // Loop 81 — boot-time integrity probe for VirtualBalance vs Positions split.
+        // Pre-fix databases (reset path that wiped balance but left Positions) emit a
+        // single warning so operators can re-issue /papertrade/reset; never mutates state.
+        services.AddHostedService<VirtualBalanceConsistencyChecker>();
         services.AddTransient<MediatR.INotificationHandler<BinanceBot.Domain.MarketData.Events.KlineClosedEvent>,
             StrategyEvaluationHandler>();
         services.AddTransient<MediatR.INotificationHandler<BinanceBot.Domain.Strategies.Events.StrategySignalEmittedEvent>,

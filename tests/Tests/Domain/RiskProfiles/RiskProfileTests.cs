@@ -384,4 +384,51 @@ public class RiskProfileTests
         act.Should().Throw<BinanceBot.Domain.Common.DomainException>()
             .WithMessage("*Reason*");
     }
+
+    /// <summary>
+    /// Loop 81 — <see cref="RiskProfile.ResetForPaperIteration"/> mirrors
+    /// <see cref="Domain.Balances.VirtualBalance.ResetForIteration"/>: it must zero
+    /// the per-iteration accounting (PnL counters, peak, drawdown, streak) AND clear
+    /// any tripped CB so the new iteration starts on a true blank slate. Tunable limits
+    /// (RiskPerTradePct etc.) are intentionally preserved.
+    /// </summary>
+    [Fact]
+    public void ResetForPaperIteration_Paper_ZeroesPnlPeakStreakAndCb_PreservesLimits()
+    {
+        var rp = RiskProfile.CreateDefault(TradingMode.Paper, T0);
+        rp.UpdateLimits(0.02m, 0.40m, 0.10m, 0.20m, 5, 4, T0);
+        // Build state: peak $112, streak 2, CB tripped via drawdown.
+        rp.RecordTradeOutcome(12m, 112m, T0.AddMinutes(1));
+        rp.RecordTradeOutcome(-30m, 82m, T0.AddMinutes(2)); // ~26.78% dd > 10% ceiling
+        rp.CircuitBreakerStatus.Should().Be(CircuitBreakerStatus.Tripped);
+        rp.PeakEquity.Should().Be(112m);
+
+        rp.ResetForPaperIteration(T0.AddHours(1));
+
+        rp.PeakEquity.Should().Be(0m);
+        rp.CurrentDrawdownPct.Should().Be(0m);
+        rp.RealizedPnl24h.Should().Be(0m);
+        rp.RealizedPnlAllTime.Should().Be(0m);
+        rp.ConsecutiveLosses.Should().Be(0);
+        rp.CircuitBreakerStatus.Should().Be(CircuitBreakerStatus.Healthy);
+        rp.CircuitBreakerReason.Should().BeNull();
+        rp.CircuitBreakerTrippedAt.Should().BeNull();
+        // Tunable limits preserved.
+        rp.RiskPerTradePct.Should().Be(0.02m);
+        rp.MaxPositionSizePct.Should().Be(0.40m);
+        rp.MaxOpenPositions.Should().Be(4);
+    }
+
+    [Theory]
+    [InlineData(TradingMode.LiveTestnet)]
+    [InlineData(TradingMode.LiveMainnet)]
+    public void ResetForPaperIteration_NonPaper_Throws(TradingMode mode)
+    {
+        var rp = RiskProfile.CreateDefault(mode, T0);
+
+        var act = () => rp.ResetForPaperIteration(T0.AddHours(1));
+
+        act.Should().Throw<BinanceBot.Domain.Common.DomainException>()
+            .WithMessage("*only Paper*");
+    }
 }

@@ -195,6 +195,43 @@ public sealed class RiskProfile : AggregateRoot<int>
     }
 
     /// <summary>
+    /// Loop 81 — paper iteration full reset companion to <see cref="VirtualBalance.ResetForIteration"/>.
+    /// When <c>POST /api/papertrade/reset</c> wipes Positions + cash, the per-mode
+    /// risk accounting (24h/all-time realized PnL, peak equity, drawdown, streak)
+    /// must zero alongside; otherwise <see cref="EquityPeakTrackerService"/> keeps
+    /// computing drawdown against a stale peak from the prior iteration and can
+    /// trip the CB on an artificially small dip ("UI Loop 81 boot trace —
+    /// PeakEquity $171 vs new starting $100"). Also resets
+    /// <see cref="CircuitBreakerStatus"/>/<see cref="CircuitBreakerReason"/> so a
+    /// CB tripped in the prior iteration does not survive a full reset (operator
+    /// intent on <c>/papertrade/reset</c> is "fresh slate").
+    ///
+    /// Paper-only — mirrors <see cref="VirtualBalance.ResetForIteration"/>'s same
+    /// guard. Tunable limits (<see cref="RiskPerTradePct"/>,
+    /// <see cref="MaxPositionSizePct"/> etc.) are intentionally preserved — they
+    /// belong to <see cref="UpdateLimits"/> / appsettings, not to a per-iteration
+    /// reset.
+    /// </summary>
+    public void ResetForPaperIteration(DateTimeOffset now)
+    {
+        if (Id != IdFor(TradingMode.Paper))
+        {
+            throw new DomainException(
+                $"ResetForPaperIteration not allowed for profile id {Id}; only Paper (id=1) is resettable.");
+        }
+
+        ConsecutiveLosses = 0;
+        RealizedPnl24h = 0m;
+        RealizedPnlAllTime = 0m;
+        PeakEquity = 0m;
+        CurrentDrawdownPct = 0m;
+        CircuitBreakerStatus = CircuitBreakerStatus.Healthy;
+        CircuitBreakerReason = null;
+        CircuitBreakerTrippedAt = null;
+        UpdatedAt = now;
+    }
+
+    /// <summary>
     /// Loop 6 → Loop 7 bug #17 fix: PeakEquity must follow the live equity stream
     /// (cash + unrealized PnL), not just realized closes. Otherwise an intraday spike
     /// like Loop 6 t30 ($195 unrealized peak → t90 $56 close) computes drawdown
