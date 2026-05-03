@@ -284,10 +284,16 @@ public sealed class MarkToMarketWorker : BackgroundService
     }
 
     /// <summary>
-    /// Loop 76 trailing-stop evaluator. BE move applied sonra aktif olur. Long-only.
+    /// Loop 76 trailing-stop evaluator / Loop 92 Long+Short / Loop 94 always-on peak
+    /// tracking. Pozisyon açıldığı andan itibaren her tick peak/trough günceller —
+    /// önceki "BE applied yoksa skip" kuralı kaldırıldı (Loop 93 t60 regresyon: BE
+    /// eşiğine ulaşamayan pozisyonlarda ExtremeMarkPrice 0 kalıyordu, sonra BE
+    /// applied olduğunda trail yanlış noktadan başlatılıyordu).
+    ///
     /// PeakUpdated path'i sessiz log (debug). ExitTriggered candidate listesine
     /// eklenir; gerçek dispatch <see cref="DispatchTrailingExitAsync"/>'da
-    /// SaveChanges sonrası yapılır.
+    /// SaveChanges sonrası yapılır. Trailing exit *karar*ı yine BE applied
+    /// sonrası — domain method beArmed kontrolünü içerir.
     /// </summary>
     private void TryApplyTrailingStop(
         Position position,
@@ -298,8 +304,8 @@ public sealed class MarkToMarketWorker : BackgroundService
     {
         if (!opts.Enabled) return;
 
-        // Aggregate kendisi NotEligible döner ama early check log gürültüsünü azaltır.
-        if (position.BreakEvenAppliedAt is null) return;
+        // Loop 94: BE applied early-return KALDIRILDI — peak tracking artık her zaman aktif.
+        // Domain method (UpdatePeakAndCheckTrailing) beArmed bayrağını kendisi kontrol eder.
 
         // Loop 92 — Long+Short trailing aktif. Long: peak high; Short: trough low.
         if (opts.TrailPct <= 0m)

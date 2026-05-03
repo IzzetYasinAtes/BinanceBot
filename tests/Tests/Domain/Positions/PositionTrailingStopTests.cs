@@ -37,16 +37,60 @@ public class PositionTrailingStopTests
     }
 
     [Fact]
-    public void UpdatePeakAndCheckTrailing_BeNotApplied_ReturnsNotEligible()
+    public void UpdatePeakAndCheckTrailing_BeNotApplied_StillUpdatesPeakButDoesNotExit()
     {
+        // Loop 94 davranış değişikliği: BE applied yokken peak tracking ARTIK aktif
+        // — pozisyon açıldığı andan itibaren extreme refresh edilir. Trailing exit
+        // *karar*ı yine BE applied sonrası (beArmed gate). Long ilk tick mark > 0
+        // olduğunda peak yatırılır, ExitTriggered dönmez.
         var pos = OpenLong(entry: 95000m, initialStop: 94240m);
 
         var result = pos.UpdatePeakAndCheckTrailing(
             markPrice: 95400m, trailPct: 0.0015m, asOf: T0.AddMinutes(5));
 
-        result.Should().Be(TrailingResult.NotEligible);
-        pos.ExtremeMarkPrice.Should().Be(0m, "BE applied değilken peak güncellenmemeli");
+        result.Should().Be(TrailingResult.PeakUpdated);
+        pos.ExtremeMarkPrice.Should().Be(95400m, "Loop 94: peak tracking BE'den bağımsız her zaman aktif");
         pos.DomainEvents.Should().NotContain(e => e is PositionTrailingExitTriggeredEvent);
+    }
+
+    [Fact]
+    public void UpdatePeakAndCheckTrailing_BeNotApplied_LongPriceDip_DoesNotTriggerExit()
+    {
+        // Loop 94: BE armed değilken peak güncellenir AMA exit kontrolü yapılmaz.
+        // Mark peak'ten %0.5 düşse bile ExitTriggered dönmez.
+        var pos = OpenLong(entry: 95000m, initialStop: 94240m);
+        pos.UpdatePeakAndCheckTrailing(95600m, 0.0015m, T0.AddMinutes(5));  // peak=95600
+        pos.ExtremeMarkPrice.Should().Be(95600m);
+
+        // peak × (1 - 0.0015) = 95456.6 — mark altına düştü ama BE yok ⇒ exit yok.
+        var result = pos.UpdatePeakAndCheckTrailing(
+            markPrice: 95300m, trailPct: 0.0015m, asOf: T0.AddMinutes(10));
+
+        result.Should().Be(TrailingResult.PeakUpdated, "BE armed değilken exit eval yok");
+        pos.ExtremeMarkPrice.Should().Be(95600m, "in-band tick peak'i indirmez");
+        pos.DomainEvents.Should().NotContain(e => e is PositionTrailingExitTriggeredEvent);
+    }
+
+    [Fact]
+    public void UpdatePeakAndCheckTrailing_BeNotApplied_ShortFirstTick_RecordsTrough()
+    {
+        // Loop 94: Short pozisyon ilk tick — sentinel 0 ⇒ mark trough'a yatırılır,
+        // BE armed değilse exit kontrolü yapılmaz, sadece PeakUpdated döner.
+        var pos = Position.Open(
+            Symbol.From("BTCUSDT"),
+            TradeDirection.Short,
+            quantity: 0.01m,
+            entryPrice: 95000m,
+            stopPrice: 95760m,
+            strategyId: 1,
+            mode: TradingMode.Paper,
+            now: T0);
+
+        var result = pos.UpdatePeakAndCheckTrailing(
+            markPrice: 94800m, trailPct: 0.0015m, asOf: T0.AddMinutes(5));
+
+        result.Should().Be(TrailingResult.PeakUpdated);
+        pos.ExtremeMarkPrice.Should().Be(94800m, "Short ilk tick sentinel: mark trough'a yatırılır");
     }
 
     [Fact]

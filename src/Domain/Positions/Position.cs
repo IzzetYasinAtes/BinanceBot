@@ -78,21 +78,26 @@ public sealed class Position : AggregateRoot<long>
     public DateTimeOffset? BreakEvenAppliedAt { get; private set; }
 
     /// <summary>
-    /// Loop 76 trailing peak / Loop 92 Long+Short extreme. Long pozisyonda
-    /// "peak high" rolü oynar (yeni high → güncellen, mark &lt; peak × (1 −
-    /// trail) → exit). Short pozisyonda "trough low" rolü oynar (yeni low →
-    /// güncellen, mark &gt; trough × (1 + trail) → exit). Tek decimal field
-    /// iki yöne hizmet eder; rename edildi (PeakMarkPrice → ExtremeMarkPrice)
-    /// çünkü "peak" Long-bias.
+    /// Loop 76 trailing peak / Loop 92 Long+Short extreme / Loop 94 always-on tracking.
+    /// Long pozisyonda "peak high" rolü oynar (yeni high → güncellen, mark &lt; peak ×
+    /// (1 − trail) → exit). Short pozisyonda "trough low" rolü oynar (yeni low →
+    /// güncellen, mark &gt; trough × (1 + trail) → exit). Tek decimal field iki yöne
+    /// hizmet eder; rename edildi (PeakMarkPrice → ExtremeMarkPrice) çünkü "peak"
+    /// Long-bias.
     ///
-    /// Sadece BE applied sonrası (<see cref="BreakEvenAppliedAt"/> non-null)
-    /// değerlendirilir; ondan önce her tick mark'ın yeni extreme olup
-    /// olmadığını kontrol etmek anlamsız (BE move trailing'i "arm" eder).
+    /// Loop 94 fix: peak tracking BE move'dan BAĞIMSIZ olarak pozisyon açılır
+    /// açılmaz başlar — her mark-to-market tick'inde extreme refresh edilir. Önceki
+    /// davranış (sadece BreakEvenAppliedAt set olduktan sonra) regresyon yarattı:
+    /// pozisyon BE eşiğine ulaşamadığında ExtremeMarkPrice 0 kalıyor, sonra BE
+    /// applied olduğunda peak yanlış noktadan başlatılıyordu (Loop 93 t60: 3 pos
+    /// 60dk açık, ExtremeMarkPrice=0). Yeni davranış: extreme her zaman güncel.
+    /// Trailing-stop *exit kontrolü* yine BE applied sonrası değerlendirilir
+    /// (BE trailing'i "arm" eder).
     ///
-    /// Default 0 — yeni open position için yatırılır. Long path'te ilk
-    /// eligible tick mutlaka mark &gt; 0 = ExtremeMarkPrice koşulunu sağlar
-    /// ve extreme hemen güncellenir. Short path'te 0 sentinel ⇒ ilk eligible
-    /// tick'te mark direkt yatırılır.
+    /// Default 0 — yeni open position için yatırılır. Long path'te ilk tick
+    /// mutlaka mark &gt; 0 = ExtremeMarkPrice koşulunu sağlar ve extreme hemen
+    /// güncellenir. Short path'te 0 sentinel ⇒ ilk tick'te mark direkt yatırılır
+    /// (sentinel kontrolü <see cref="UpdatePeakAndCheckTrailing"/> içinde).
     /// </summary>
     public decimal ExtremeMarkPrice { get; private set; }
 
@@ -269,15 +274,26 @@ public sealed class Position : AggregateRoot<long>
     }
 
     /// <summary>
-    /// Loop 76 trailing-stop tick / Loop 92 Long+Short extension. Caller
-    /// (MarkToMarketWorker) BE move'dan SONRA çağırır; BE applied değilse
-    /// method dormant kalır (NotEligible).
+    /// Loop 76 trailing-stop tick / Loop 92 Long+Short extension / Loop 94 always-on
+    /// peak tracking. Caller (MarkToMarketWorker) her tick'te çağırır.
     ///
-    /// Long path: extreme = max(prev, mark); trailingStop = extreme × (1 −
-    /// trailPct); mark &lt; trailingStop → exit.
-    /// Short path: extreme = (prev==0 ? mark : min(prev, mark)); trailingStop
-    /// = extreme × (1 + trailPct); mark &gt; trailingStop → exit. Sentinel 0
-    /// ile ilk eligible tick'te trough yatırılır.
+    /// Loop 94 davranış değişikliği: ExtremeMarkPrice güncellemesi BE move'dan
+    /// BAĞIMSIZ olarak her tick'te yapılır (Long: yeni high, Short: yeni low
+    /// veya 0 sentinel'i mark'a yatır). Önceki "BE applied yoksa dormant" kuralı
+    /// kaldırıldı — pozisyonlar BE eşiğine ulaşamayınca ExtremeMarkPrice 0
+    /// kalıyor, sonra BE applied olduğunda peak yanlış noktadan başlıyordu
+    /// (Loop 93 t60 regresyon).
+    ///
+    /// Trailing-stop *exit kontrolü* hala BE applied sonrası değerlendirilir
+    /// (<see cref="BreakEvenAppliedAt"/> set olduktan sonra). BE trailing'i "arm"
+    /// eder; arm öncesi mark BE eşiğine ulaşmadan trail çalışırsa pozisyon her
+    /// kıpırdamada erken kapanırdı. Sıra: peak refresh → BE check → exit eval.
+    ///
+    /// Long path: extreme = max(prev, mark); BE applied ⇒ trailingStop =
+    /// extreme × (1 − trailPct); mark &lt; trailingStop → exit.
+    /// Short path: extreme = (prev==0 ? mark : min(prev, mark)); BE applied ⇒
+    /// trailingStop = extreme × (1 + trailPct); mark &gt; trailingStop → exit.
+    /// Sentinel 0 ile ilk tick'te trough yatırılır.
     /// </summary>
     /// <param name="markPrice">Mid-price tick (positive); aggregate doğrular.</param>
     /// <param name="trailPct">Trail genişliği oransal (0.0015 = %0.15).
@@ -286,9 +302,9 @@ public sealed class Position : AggregateRoot<long>
     /// <param name="asOf">Clock-driven event time. Extreme güncellenirse
     /// <see cref="UpdatedAt"/>'a yazılır.</param>
     /// <returns>
-    /// <see cref="TrailingResult.NotEligible"/> — BE not yet applied;
-    /// <see cref="TrailingResult.PeakUpdated"/> — yeni extreme (veya ilk tick) → güncellendi, exit yok;
-    /// <see cref="TrailingResult.ExitTriggered"/> — trail crossed → event raised.
+    /// <see cref="TrailingResult.NotEligible"/> — DEPRECATED, artık dönmez (Loop 94: peak her zaman aktif);
+    /// <see cref="TrailingResult.PeakUpdated"/> — extreme güncel veya in-band, exit yok;
+    /// <see cref="TrailingResult.ExitTriggered"/> — BE applied + trail crossed → event raised.
     /// </returns>
     public TrailingResult UpdatePeakAndCheckTrailing(
         decimal markPrice, decimal trailPct, DateTimeOffset asOf)
@@ -303,19 +319,21 @@ public sealed class Position : AggregateRoot<long>
             throw new DomainException("Trail percentage must be positive.");
         }
 
-        // Trailing BE move'a "armed" — BE applied değilse dormant kal.
-        if (BreakEvenAppliedAt is null)
-        {
-            return TrailingResult.NotEligible;
-        }
+        var beArmed = BreakEvenAppliedAt is not null;
 
         if (Direction == TradeDirection.Long)
         {
-            // Long: yeni high → extreme refresh. Default 0 ⇒ ilk eligible tick mutlaka bu dala düşer.
+            // Long: yeni high → extreme refresh. Default 0 ⇒ ilk tick mutlaka bu dala düşer.
             if (markPrice > ExtremeMarkPrice)
             {
                 ExtremeMarkPrice = markPrice;
                 UpdatedAt = asOf;
+                return TrailingResult.PeakUpdated;
+            }
+
+            // BE armed değilse exit kontrolü yapma — peak yatırıldı, dormant kal.
+            if (!beArmed)
+            {
                 return TrailingResult.PeakUpdated;
             }
 
@@ -330,11 +348,16 @@ public sealed class Position : AggregateRoot<long>
             return TrailingResult.PeakUpdated;
         }
 
-        // Short path. Extreme = trough low. 0 sentinel ⇒ ilk eligible tick'te mark trough'a yatırılır.
+        // Short path. Extreme = trough low. 0 sentinel ⇒ ilk tick'te mark trough'a yatırılır.
         if (ExtremeMarkPrice == 0m || markPrice < ExtremeMarkPrice)
         {
             ExtremeMarkPrice = markPrice;
             UpdatedAt = asOf;
+            return TrailingResult.PeakUpdated;
+        }
+
+        if (!beArmed)
+        {
             return TrailingResult.PeakUpdated;
         }
 
