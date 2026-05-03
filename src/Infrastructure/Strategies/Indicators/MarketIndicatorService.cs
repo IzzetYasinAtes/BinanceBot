@@ -45,6 +45,19 @@ public sealed class MarketIndicatorService : IMarketIndicatorService, IHostedSer
     // 200 bar tüm ihtiyacı karşılar; Binance REST 1 sayfa yeter.
     internal const int FiveMinuteBufferCapacity = 200;
 
+    // Loop 87 — 15m rolling buffer kapasitesi. Multi-timeframe slope gate
+    // için EMA21 + 5 bar geriye kayma gerekir; 200 bar = 50 saat tarih,
+    // EMA21 sıkıştırması rahat yetiyor. REST warmup tek sayfa, WS stream
+    // 5 coin × 1 stream = +5 abonelik (toplam <1024 limit altı).
+    internal const int FifteenMinuteBufferCapacity = 200;
+
+    // Loop 87 — 15m EMA21 slope için kaç bar geriye bakılacak.
+    internal const int Ema21Slope15mLookback = 5;
+
+    // Loop 87 — 15m snapshot field'ları için warmup eşiği. EMA21 + 5 bar slope
+    // için minimum 21+5 = 26 bar gerekir; 30 alınarak küçük emniyet payı.
+    internal const int FifteenMinuteWarmupThreshold = 30;
+
     // Loop 81 — Bollinger sabit (20, 2.0) — pattern detector'lar paylaşır.
     internal const int BollingerPeriod = 20;
     internal const decimal BollingerStdDev = 2.0m;
@@ -151,9 +164,11 @@ public sealed class MarketIndicatorService : IMarketIndicatorService, IHostedSer
         if (!_state.TryGetValue(symbol, out var state)) return null;
 
         IReadOnlyList<WsKlinePayload> bars;
+        IReadOnlyList<WsKlinePayload> bars15m;
         lock (state.SyncRoot)
         {
             bars = state.FiveMinute.Snapshot();
+            bars15m = state.FifteenMinute.Snapshot();
         }
 
         if (bars.Count < WarmupCompletedBarThreshold)
@@ -228,6 +243,21 @@ public sealed class MarketIndicatorService : IMarketIndicatorService, IHostedSer
         var recentStart = Math.Max(0, klines.Count - RecentBarsCount);
         var recentBars = klines.GetRange(recentStart, klines.Count - recentStart);
 
+        // Loop 87 — 15m EMA21 (current + 5 bar back) for MTF slope gate.
+        // Yetersiz warmup'ta 0 döner; PatternCompositeEvaluator slope ≤ 0 ⇒ skip.
+        decimal ema21_15m = 0m;
+        decimal ema21Prev5_15m = 0m;
+        if (bars15m.Count >= FifteenMinuteWarmupThreshold)
+        {
+            var klines15m = ToKlineList(bars15m);
+            ema21_15m = Evaluators.Indicators.Ema(
+                klines15m, period: Ema21Period, endIndex: klines15m.Count - 1);
+            var prevIdx15m = klines15m.Count - 1 - Ema21Slope15mLookback;
+            ema21Prev5_15m = prevIdx15m >= Ema21Period - 1
+                ? Evaluators.Indicators.Ema(klines15m, period: Ema21Period, endIndex: prevIdx15m)
+                : ema21_15m;
+        }
+
         return new BarSnapshot(
             Symbol: symbol.ToUpperInvariant(),
             BarOpenTime: current.OpenTime,
@@ -266,6 +296,8 @@ public sealed class MarketIndicatorService : IMarketIndicatorService, IHostedSer
             MacdLine: macdLine,
             MacdLinePrev: macdLinePrev,
             SpreadPct: spreadPct,
+            Ema21_15m: ema21_15m,
+            Ema21Prev5_15m: ema21Prev5_15m,
             RecentBars: recentBars);
     }
 
@@ -297,6 +329,7 @@ public sealed class MarketIndicatorService : IMarketIndicatorService, IHostedSer
         interval switch
         {
             KlineInterval.FiveMinutes => state.FiveMinute,
+            KlineInterval.FifteenMinutes => state.FifteenMinute,
             _ => null,
         };
 
@@ -318,13 +351,16 @@ public sealed class MarketIndicatorService : IMarketIndicatorService, IHostedSer
             await foreach (var payload in reader.ReadAllAsync(ct).WithCancellation(ct))
             {
                 if (!payload.IsClosed) continue;
-                if (payload.Interval != KlineInterval.FiveMinutes) continue;
 
                 if (!_state.TryGetValue(payload.Symbol, out var state)) continue;
 
+                // Loop 87 — multi-interval ingest: 5m + 15m. Diğer interval'lar
+                // (1m/30m vb.) bu servisin scope'u değil ⇒ sessiz drop.
                 lock (state.SyncRoot)
                 {
-                    state.FiveMinute.Upsert(payload);
+                    var buf = SelectBuffer(state, payload.Interval);
+                    if (buf is null) continue;
+                    buf.Upsert(payload);
                 }
             }
         }
@@ -348,6 +384,8 @@ public sealed class MarketIndicatorService : IMarketIndicatorService, IHostedSer
             if (ct.IsCancellationRequested) return;
 
             await WarmupOneAsync(marketData, symbol, KlineInterval.FiveMinutes, FiveMinuteBufferCapacity, ct);
+            // Loop 87 — paralel 15m warmup (MTF slope gate için).
+            await WarmupOneAsync(marketData, symbol, KlineInterval.FifteenMinutes, FifteenMinuteBufferCapacity, ct);
             await MaybePublishWarmupAsync(symbol, ct);
         }
 
@@ -508,6 +546,8 @@ public sealed class MarketIndicatorService : IMarketIndicatorService, IHostedSer
     {
         public object SyncRoot { get; } = new();
         public IndicatorRollingBuffer FiveMinute { get; } = new(FiveMinuteBufferCapacity);
+        // Loop 87 — 15m buffer paralel; MTF slope gate için EMA21 hesabı.
+        public IndicatorRollingBuffer FifteenMinute { get; } = new(FifteenMinuteBufferCapacity);
         public bool WarmupEventPublished { get; set; }
     }
 }

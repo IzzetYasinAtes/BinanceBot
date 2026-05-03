@@ -59,6 +59,10 @@ namespace BinanceBot.Application.Strategies.Patterns;
 /// <param name="MacdLinePrev">MACD line bir önceki bar — zero-cross sıçrama tespit.</param>
 /// <param name="SpreadPct">(Ask-Bid)/Ask — canlı BookTicker'dan snapshot build sırasında okunur.
 /// BookTicker yoksa 1m gibi anormal yüksek değer döner ⇒ <c>SpreadGuardGate</c> hard-skip eder.</param>
+/// <param name="Ema21_15m">Loop 87 — 15m TF EMA(21) son kapalı bar. Multi-timeframe slope gate
+/// için kullanılır; 15m buffer warmup yetersizse 0 döner ve gate slope ≤ 0 ⇒ skip yapar.</param>
+/// <param name="Ema21Prev5_15m">Loop 87 — 15m TF EMA(21) 5 bar önce. <c>Ema21_15m - Ema21Prev5_15m</c>
+/// slope referansı; pozitif ⇒ büyük TF yukarı, negatif/nötr ⇒ skip ("mtf_15m_slope_down").</param>
 /// <param name="RecentBars">Son 30 bar (oldest-first) — Donchian/Higher-low/RSI sequence için.
 /// Memory hafif (30 × ~80 byte = 2.4KB).</param>
 public sealed record BarSnapshot(
@@ -99,4 +103,6 @@ public sealed record BarSnapshot(
     decimal MacdLine,
     decimal MacdLinePrev,
     decimal SpreadPct,
+    decimal Ema21_15m,
+    decimal Ema21Prev5_15m,
     IReadOnlyList<Kline> RecentBars);

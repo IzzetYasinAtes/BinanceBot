@@ -36,6 +36,8 @@ public class WeightedScorePatternComposerTests
             Vwap: close - 0.2m,
             MacdLine: 0.05m, MacdLinePrev: 0.04m,
             SpreadPct: 0.0005m,
+            Ema21_15m: close - 0.05m,
+            Ema21Prev5_15m: close - 0.4m,
             RecentBars: bars ?? Array.Empty<Kline>());
     }
 

@@ -67,6 +67,9 @@ public class PatternCompositeEvaluatorTests
             Vwap: 99.8m,
             MacdLine: 0.05m, MacdLinePrev: 0.04m,
             SpreadPct: 0.0005m,
+            // Loop 87 — MTF gate slope > 0 (büyük TF yukarı): 100.4 - 99.9 = +0.5 ⇒ pass.
+            Ema21_15m: 100.4m,
+            Ema21Prev5_15m: 99.9m,
             RecentBars: bars);
     }
 
@@ -146,5 +149,82 @@ public class PatternCompositeEvaluatorTests
 
         var second = await sut.EvaluateAsync(StrategyId, DefaultParams, SymbolStr, Array.Empty<Kline>(), default);
         second.Should().BeNull();
+    }
+
+    // ────────── Loop 87 — MTF + RSI cap gate testleri ──────────
+
+    [Fact]
+    public async Task EvaluateAsync_Mtf15mSlopeDown_ReturnsNullSkip()
+    {
+        // Slope 15m negatif (büyük TF aşağı): emit_score yeterli olsa bile skip.
+        var snap = MakeFullEmitSnapshot() with
+        {
+            Ema21_15m = 100m,
+            Ema21Prev5_15m = 100.5m, // slope = -0.5 ⇒ skip
+        };
+        var sut = Build(snap);
+        var r = await sut.EvaluateAsync(StrategyId, DefaultParams, SymbolStr, Array.Empty<Kline>(), default);
+        r.Should().BeNull("15m EMA21 slope ≤ 0 ⇒ MTF gate skip");
+    }
+
+    [Fact]
+    public async Task EvaluateAsync_Mtf15mWarmupNotReady_ReturnsNullSkip()
+    {
+        // 15m warmup tamamlanmamış (Ema21_15m = 0): güvenli tarafa skip.
+        var snap = MakeFullEmitSnapshot() with
+        {
+            Ema21_15m = 0m,
+            Ema21Prev5_15m = 0m,
+        };
+        var sut = Build(snap);
+        var r = await sut.EvaluateAsync(StrategyId, DefaultParams, SymbolStr, Array.Empty<Kline>(), default);
+        r.Should().BeNull("15m EMA21 == 0 ⇒ warmup yetersiz, MTF gate skip");
+    }
+
+    [Fact]
+    public async Task EvaluateAsync_Mtf15mSlopePositive_StillEmits()
+    {
+        // Slope pozitif (büyük TF yukarı) + score yeterli ⇒ emit.
+        var snap = MakeFullEmitSnapshot() with
+        {
+            Ema21_15m = 101m,
+            Ema21Prev5_15m = 100m, // slope +1 ⇒ pass
+        };
+        var sut = Build(snap);
+        var r = await sut.EvaluateAsync(StrategyId, DefaultParams, SymbolStr, Array.Empty<Kline>(), default);
+        r.Should().NotBeNull("15m slope > 0 ⇒ MTF gate pass + score yeterli ⇒ emit");
+    }
+
+    [Fact]
+    public async Task EvaluateAsync_Rsi14AboveCap_ReturnsNullSkip()
+    {
+        // RSI 80 > cap 75 ⇒ aşırı alım skip.
+        var snap = MakeFullEmitSnapshot() with { Rsi14 = 80m };
+        var sut = Build(snap);
+        var r = await sut.EvaluateAsync(StrategyId, DefaultParams, SymbolStr, Array.Empty<Kline>(), default);
+        r.Should().BeNull("RSI > RsiMaxEmit ⇒ rsi_overbought skip");
+    }
+
+    [Fact]
+    public async Task EvaluateAsync_Rsi14AtCap_StillEmits()
+    {
+        // RSI cap (75) sınırda — strict üstünde değil ⇒ pass.
+        var snap = MakeFullEmitSnapshot() with { Rsi14 = 75m };
+        var sut = Build(snap);
+        var r = await sut.EvaluateAsync(StrategyId, DefaultParams, SymbolStr, Array.Empty<Kline>(), default);
+        r.Should().NotBeNull("RSI == cap (strict-greater-than gate) ⇒ pass");
+    }
+
+    [Fact]
+    public async Task EvaluateAsync_RsiCapOverridenLow_SkipsEvenWithinDefault()
+    {
+        // ParametersJson içinde RsiMaxEmit=50, snapshot RSI=55 ⇒ skip.
+        const string lowCap =
+            "{\"RequiredScore\":5,\"SlAtrMultiplier\":1.2,\"MinSlPct\":0.006,\"MaxSlPct\":0.012," +
+            "\"TpRiskRewardRatio\":2.0,\"MaxHoldMinutes\":60,\"CooldownBarsAfterSignal\":2," +
+            "\"RsiMaxEmit\":50}";
+        var sut = Build(MakeFullEmitSnapshot()); // RSI default 55
+        var r = await sut.EvaluateAsync(StrategyId, lowCap, SymbolStr, Array.Empty<Kline>(), default);
+        r.Should().BeNull("RsiMaxEmit override ile RSI 55 > 50 ⇒ skip");
     }
 }

@@ -67,6 +67,28 @@ public sealed class PatternCompositeEvaluator : IStrategyEvaluator
             return Task.FromResult<StrategyEvaluation?>(null);
         }
 
+        // Loop 87 — MTF gate: 15m EMA21 slope ≤ 0 ⇒ büyük TF aleyhine, skip.
+        // Ema21_15m=0 ⇒ 15m warmup tamamlanmamış; bu durumda da skip (güvenli).
+        var slope15m = snapshot.Ema21_15m - snapshot.Ema21Prev5_15m;
+        if (snapshot.Ema21_15m <= 0m || slope15m <= 0m)
+        {
+            _logger.LogDebug(
+                "PatternComposite skip symbol={Symbol} strategyId={StrategyId} " +
+                "ema21_15m={Ema} slope15m={Slope} reason=mtf_15m_slope_down",
+                symbol, strategyId, snapshot.Ema21_15m, slope15m);
+            return Task.FromResult<StrategyEvaluation?>(null);
+        }
+
+        // Loop 87 — RSI cap gate: aşırı alım breakout'u ele.
+        if (snapshot.Rsi14 > options.RsiMaxEmit)
+        {
+            _logger.LogDebug(
+                "PatternComposite skip symbol={Symbol} strategyId={StrategyId} " +
+                "rsi14={Rsi} cap={Cap} reason=rsi_overbought",
+                symbol, strategyId, snapshot.Rsi14, options.RsiMaxEmit);
+            return Task.FromResult<StrategyEvaluation?>(null);
+        }
+
         // Detector'ları sırayla değerlendir
         var detectors = _registry.Detectors;
         var evaluations = new List<PatternEvaluation>(detectors.Count);

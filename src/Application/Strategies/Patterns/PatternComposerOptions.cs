@@ -64,4 +64,14 @@ public sealed class PatternComposerOptions
 
     /// <summary>BE move offset. Default 0.0002.</summary>
     public decimal BeMoveOffsetPct { get; set; } = 0.0002m;
+
+    // ── Loop 87: Multi-timeframe + RSI cap gate'leri ──────────────────────
+
+    /// <summary>
+    /// Loop 87 — RSI14 üst sınırı (dahil). Snapshot.Rsi14 bu değerin üstündeyse
+    /// emit edilmez (skip="rsi_overbought"). Aşırı alım breakout'u eler.
+    /// Default 75. RSI 75+ breakout'lar L85/L86 post-mortem'inde yüksek
+    /// revert oranı gösterdi.
+    /// </summary>
+    public decimal RsiMaxEmit { get; set; } = 75m;
 }

@@ -53,6 +53,7 @@ public class PatternDetectorsTests
         decimal vwap = 99.8m,
         decimal macdLine = 0.05m, decimal macdLinePrev = 0.04m,
         decimal spreadPct = 0.0005m,
+        decimal ema21_15m = 100m, decimal ema21Prev5_15m = 99.5m,
         IReadOnlyList<Kline>? recentBars = null)
     {
         return new BarSnapshot(
@@ -76,6 +77,8 @@ public class PatternDetectorsTests
             Vwap: vwap,
             MacdLine: macdLine, MacdLinePrev: macdLinePrev,
             SpreadPct: spreadPct,
+            Ema21_15m: ema21_15m,
+            Ema21Prev5_15m: ema21Prev5_15m,
             RecentBars: recentBars ?? MakeBarsRising(30));
     }
 
