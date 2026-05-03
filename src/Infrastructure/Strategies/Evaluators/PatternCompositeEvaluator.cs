@@ -67,12 +67,13 @@ public sealed class PatternCompositeEvaluator : IStrategyEvaluator
             return Task.FromResult<StrategyEvaluation?>(null);
         }
 
-        // Loop 88 — MTF gate yumuşatıldı: warmup şart ama slope sadece KESİN
-        //   aleyhte ise skip (slope < -%0.1 of EMA21). Flat veya hafif negatif
-        //   slope emit izin verir (Loop 87 1.5h 0 emit pivot — dilemma çözümü).
+        // Loop 90 — MTF gate KAPATILDI. L89 1h 0 emit (pazar downtrend, 5/5
+        //   coin negatif slope). Memory #12: 0 emit > 1h pivot zorunlu.
+        //   Sahte breakout filtresi artık sadece RSI cap (Loop 87) + BE-stop
+        //   (Loop 83) + Trail (Loop 83) ile yapılır. Composer hard-gate de
+        //   kapalı (Loop 89). Frekans önceliği.
         var slope15m = snapshot.Ema21_15m - snapshot.Ema21Prev5_15m;
-        var mtfStrongDownThreshold = -snapshot.Ema21_15m * 0.001m;
-        if (snapshot.Ema21_15m <= 0m || slope15m < mtfStrongDownThreshold)
+        if (false) // MTF gate disabled
         {
             _logger.LogDebug(
                 "PatternComposite skip symbol={Symbol} strategyId={StrategyId} " +
