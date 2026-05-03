@@ -1,0 +1,1 @@
+UPDATE Strategies SET Status = 1, ParametersJson = REPLACE(ParametersJson, ',"WeightOverrides":{"bearish_engulfing":0.0,"shooting_star":0.0,"bollinger_upper_reversal":0.0,"bollinger_squeeze_break_down":0.0,"rsi_overbought_pullback":0.0,"ema9_slope_down":0.0,"donchian_breakdown":0.0}', '') WHERE Type = 3;
