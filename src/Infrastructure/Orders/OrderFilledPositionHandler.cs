@@ -1,9 +1,11 @@
 using System.Text.Json;
 using BinanceBot.Application.Abstractions;
+using BinanceBot.Domain.Balances;
 using BinanceBot.Domain.Common;
 using BinanceBot.Domain.Orders;
 using BinanceBot.Domain.Orders.Events;
 using BinanceBot.Domain.Positions;
+using BinanceBot.Domain.ValueObjects;
 using MediatR;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -139,6 +141,23 @@ public sealed class OrderFilledPositionHandler : INotificationHandler<OrderFille
             }
         }
 
+        // Loop 94 (Fix #3) — Paper-only Futures margin akışı. AllocateMarginForPosition
+        // (open) ve ReturnMarginAndApplyPnl (close) sadece Paper modu için çağrılır;
+        // LiveTestnet/LiveMainnet gerçek Binance balance API'den çekilir, lokal
+        // VirtualBalance sadece Paper iteration ledger'ı. 1x leverage MVP varsayımı:
+        // margin = entry × qty (full notional). Loop 14'te leverage RiskProfile'dan
+        // okunacak, formül margin = notional / leverage'a evrilecek.
+        VirtualBalance? paperBalance = null;
+        if (order.Mode == TradingMode.Paper)
+        {
+            paperBalance = await db.VirtualBalances
+                .FirstOrDefaultAsync(b => b.Id == (int)TradingMode.Paper, cancellationToken);
+            if (paperBalance is null)
+            {
+                _logger.LogWarning("Paper VirtualBalance seed missing in OrderFilledPositionHandler; margin flow skipped");
+            }
+        }
+
         try
         {
             if (openPosition is null)
@@ -155,6 +174,16 @@ public sealed class OrderFilledPositionHandler : INotificationHandler<OrderFille
                     takeProfit: order.TakeProfit,
                     maxHoldDuration: maxHoldDuration);
                 db.Positions.Add(pos);
+
+                // Loop 94 Fix #3: Paper Futures margin allocate (1x leverage MVP).
+                // Wallet'a fee zaten PlaceOrderCommandHandler.ApplyFill ile yansıdı;
+                // burada notional locked margin'e taşınır.
+                if (paperBalance is not null)
+                {
+                    var margin = fillPrice * fillQty;
+                    paperBalance.AllocateMarginForPosition(margin, now);
+                }
+
                 _logger.LogInformation(
                     "Position opened from fill {Cid} direction={Direction} qty={Qty} price={Price}",
                     notification.ClientOrderId, newDirection, fillQty, fillPrice);
@@ -169,7 +198,22 @@ public sealed class OrderFilledPositionHandler : INotificationHandler<OrderFille
                 {
                     // ADR-0020 §20.6 — partial fill commission accumulates on the
                     // aggregate via AddFill's addCommission parameter.
+                    var prevMargin = openPosition.AverageEntryPrice * openPosition.Quantity;
                     openPosition.AddFill(fillQty, fillPrice, now, addCommission: orderQuoteFee);
+
+                    // Loop 94 Fix #3: same-side add ⇒ margin'e ek notional locked.
+                    // Position.AddFill içinde AverageEntryPrice + Quantity güncellendi;
+                    // delta = newMargin − prevMargin (AddFill'ten önce hesapladık).
+                    if (paperBalance is not null)
+                    {
+                        var newMargin = openPosition.AverageEntryPrice * openPosition.Quantity;
+                        var marginDelta = newMargin - prevMargin;
+                        if (marginDelta > 0m)
+                        {
+                            paperBalance.AllocateMarginForPosition(marginDelta, now);
+                        }
+                    }
+
                     _logger.LogInformation(
                         "Position {Pos} added fill {Cid} qty={Qty} fee={Fee}",
                         openPosition.Id, notification.ClientOrderId, fillQty, orderQuoteFee);
@@ -194,6 +238,12 @@ public sealed class OrderFilledPositionHandler : INotificationHandler<OrderFille
                         flipEntryFee = 0m;
                     }
 
+                    // Loop 94 Fix #3: close branch'te orijinal margin = entry × qty.
+                    // Position.Close() içinde Quantity korunur, AverageEntryPrice de
+                    // korunur (ExitPrice ayrı field). Yani Close ÖNCESİNDE veya SONRASINDA
+                    // hesaplanabilir; defansif olarak Close'dan önce snapshot al.
+                    var originalMargin = openPosition.AverageEntryPrice * openPosition.Quantity;
+
                     openPosition.Close(fillPrice, $"order_{notification.ClientOrderId}", now,
                         exitCommission: exitFee);
 
@@ -210,6 +260,20 @@ public sealed class OrderFilledPositionHandler : INotificationHandler<OrderFille
                         _logger.LogError(
                             "ZOMBI-GUARD Position.Close() left aggregate inconsistent: pos={Pos} status={Status} closedAt={ClosedAt} exitPrice={ExitPrice}",
                             openPosition.Id, openPosition.Status, openPosition.ClosedAt, openPosition.ExitPrice);
+                    }
+
+                    // Loop 94 Fix #3: margin geri + GROSS PnL wallet'a yansıt.
+                    // ReturnMarginAndApplyPnl(margin, gross) → wallet += gross,
+                    // allocatedMargin -= margin. Entry/exit fee'leri PlaceOrderCommandHandler
+                    // ApplyFill (open ve close legler için ayrı) ile zaten wallet'tan düşüldü
+                    // — burada gross eklersek toplam wallet etkisi: -entryFee - exitFee + gross
+                    // = startBalance + (gross - fees) = startBalance + Position.RealizedPnl ✓
+                    if (paperBalance is not null)
+                    {
+                        var gross = openPosition.Direction == TradeDirection.Long
+                            ? (fillPrice - openPosition.AverageEntryPrice) * openPosition.Quantity
+                            : (openPosition.AverageEntryPrice - fillPrice) * openPosition.Quantity;
+                        paperBalance.ReturnMarginAndApplyPnl(originalMargin, gross, now);
                     }
 
                     _logger.LogInformation(
@@ -229,6 +293,14 @@ public sealed class OrderFilledPositionHandler : INotificationHandler<OrderFille
                             takeProfit: order.TakeProfit,
                             maxHoldDuration: maxHoldDuration);
                         db.Positions.Add(flip);
+
+                        // Loop 94 Fix #3: flip leg de yeni pozisyon margin'i locked eder.
+                        if (paperBalance is not null)
+                        {
+                            var flipMargin = fillPrice * leftover;
+                            paperBalance.AllocateMarginForPosition(flipMargin, now);
+                        }
+
                         _logger.LogInformation(
                             "Position {Pos} flipped from leftover qty={Qty}",
                             flip.Id, leftover);

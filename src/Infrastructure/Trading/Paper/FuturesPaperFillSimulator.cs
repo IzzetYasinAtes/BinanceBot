@@ -152,6 +152,16 @@ public sealed class FuturesPaperFillSimulator : IPaperFillSimulator
 
         // Loop 92 — Futures fee schedule: taker %0.05 (0.0005) USDT-quote her iki leg için.
         // Spot ile farkı: BUY commission da quote (USDT), base asset değil.
+        //
+        // Loop 94 (Fix #2) — Futures cash semantics refactor.
+        // Eskiden RealizedCashDelta = signedNotional - fee (Spot semantik):
+        //   open BUY → wallet -= notional + fee (notional cash'ten düşüyordu, BUG)
+        //   close SELL → wallet += notional - fee (PnL implicit kapanışta)
+        // Yeni Futures semantik: notional MARGIN'a alınır (AllocatedMargin), wallet
+        // sadece commission ile değişir. Margin allocate / return + realized PnL
+        // wallet'a yansıtma <see cref="OrderFilledPositionHandler"/> tarafından
+        // open/close branch'inde yapılır (simulator order context'sini bilmediği
+        // için bu sorumluluğu üstlenmez).
         decimal realizedCash = 0m;
         decimal quoteCommissionTotal = 0m;
         foreach (var f in fills)
@@ -163,14 +173,9 @@ public sealed class FuturesPaperFillSimulator : IPaperFillSimulator
             var tradeId = Interlocked.Increment(ref _virtualTradeCounter);
             order.RegisterFill(tradeId, f.Price, f.Quantity, quoteFee, commissionAsset, now);
 
-            // Margin/Cash akışı: VirtualBalance Loop 92 commit 7'de WalletBalance/AllocatedMargin/UnrealizedPnl
-            // ayrılacak. Şimdilik mevcut ApplyFill (CurrentBalance) realizedCash delta semantiği
-            // korunuyor — open MARKET emir negatif notional, close MARKET emir pozitif notional.
-            // OrderFilledPositionHandler bu delta'yı apply edecek.
-            var signedNotional = order.Side == OrderSide.Buy
-                ? -f.Price * f.Quantity
-                : +f.Price * f.Quantity;
-            realizedCash += signedNotional - quoteFee;
+            // Loop 94: sadece commission düşülür. Margin akışı (AllocateMarginForPosition /
+            // ReturnMarginAndApplyPnl) + realized PnL wallet'a OrderFilledPositionHandler'da.
+            realizedCash -= quoteFee;
             quoteCommissionTotal += quoteFee;
         }
 

@@ -183,10 +183,12 @@ public class MarkToMarketWorkerTrailingStopTests
     }
 
     [Fact]
-    public async Task BeNotApplied_DoesNotInvokeTrailing()
+    public async Task BeNotApplied_TracksPeakButDoesNotDispatchExit()
     {
-        // BE never applied → UpdatePeakAndCheckTrailing dormant. Mediator strict
-        // mock; trailing dalı dispatch ederse test fail.
+        // Loop 94 davranış değişikliği: BE applied null iken peak tracking
+        // ARTIK aktif (Loop 93 t60 regresyonu fix). Mark refresh edilir AMA
+        // exit dispatch yok. Mediator strict mock; trailing dalı dispatch
+        // ederse test fail.
         using var db = NewDb();
         var pos = Position.Open(
             Symbol.From(Sym),
@@ -206,15 +208,17 @@ public class MarkToMarketWorkerTrailingStopTests
         var sut = new MarkToMarketWorker(
             BuildScope(db, new FixedClock(T0.AddMinutes(5)), mediator.Object),
             NullLogger<MarkToMarketWorker>.Instance,
-            // BE'yi de false bırak → bu test sadece "BE applied null → trailing dormant" yolunu doğrular.
+            // BE'yi de false bırak → bu test artık "BE null → peak tracking yapar
+            // ama exit yok" yolunu doğrular (Loop 94).
             BeOpts(new BreakEvenOptions { Enabled = false }),
             TrailOpts(new TrailingStopOptions { Enabled = true, TrailPct = 0.0015m }));
 
         await InvokeTickAsync(sut, CancellationToken.None);
 
         var saved = db.Positions.Single(p => p.Id == pos.Id);
-        saved.ExtremeMarkPrice.Should().Be(0m, "BE applied null iken trailing dormant");
+        saved.ExtremeMarkPrice.Should().Be(95400m, "Loop 94: BE null'da peak tracking aktif");
         saved.BreakEvenAppliedAt.Should().BeNull();
+        // Mediator strict mock → trailing exit dispatch ederse VerifyNoOtherCalls fail.
         mediator.VerifyNoOtherCalls();
     }
 

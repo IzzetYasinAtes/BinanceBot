@@ -43,10 +43,13 @@ public class FuturesPaperFillSimulatorTests
             updateId: 1L, updatedAt: DateTimeOffset.UtcNow);
 
     [Fact]
-    public async Task LongOpen_MarketBuy_DeductsFiftyBpsFromCash()
+    public async Task LongOpen_MarketBuy_DeductsOnlyCommissionFromCash()
     {
+        // Loop 94 Fix #2 (Futures cash semantic refactor):
         // Long open: BUY @ ask=$30000 × 0.01 = $300 notional. Fee 0.05% = $0.15.
-        // Cash delta: -300 - 0.15 = -300.15.
+        // Eski (Spot) semantic: cash -= notional + fee → -300.15 (BUG: notional cash'ten düşüyor)
+        // Yeni (Futures) semantic: cash -= fee only → -0.15 (notional MARGIN'a alınır,
+        // OrderFilledPositionHandler.AllocateMarginForPosition ile).
         var sim = NewSim();
         var inst = NewInstrument();
         var bt = NewBookTicker(bid: 29990m, ask: 30000m);
@@ -61,14 +64,17 @@ public class FuturesPaperFillSimulatorTests
 
         outcome.Filled.Should().BeTrue();
         outcome.QuoteCommissionTotal.Should().BeApproximately(0.15m, 0.0001m);
-        outcome.RealizedCashDelta.Should().BeApproximately(-300.15m, 0.0001m);
+        outcome.RealizedCashDelta.Should().BeApproximately(-0.15m, 0.0001m,
+            "Loop 94: Futures cash flow yalnızca commission düşer; notional margin'e alınır");
     }
 
     [Fact]
-    public async Task ShortOpen_MarketSell_DeductsFiftyBpsFromCash()
+    public async Task ShortOpen_MarketSell_DeductsOnlyCommissionFromCash()
     {
-        // Short open: SELL @ bid=$30000 × 0.01 = $300 notional. Fee 0.05% = $0.15.
-        // Cash delta: +300 - 0.15 = +299.85 (notional gelir, fee gider).
+        // Loop 94 Fix #2: Short open. SELL @ bid=$30000 × 0.01 = $300 notional. Fee=$0.15.
+        // Eski (Spot) semantic: cash += notional - fee → +299.85 (BUG)
+        // Yeni (Futures) semantic: cash -= fee only → -0.15 (Short opening de margin
+        // allocate eder, notional cash'e gelmez).
         var sim = NewSim();
         var inst = NewInstrument();
         var bt = NewBookTicker(bid: 30000m, ask: 30010m);
@@ -83,7 +89,8 @@ public class FuturesPaperFillSimulatorTests
 
         outcome.Filled.Should().BeTrue();
         outcome.QuoteCommissionTotal.Should().BeApproximately(0.15m, 0.0001m);
-        outcome.RealizedCashDelta.Should().BeApproximately(+299.85m, 0.0001m);
+        outcome.RealizedCashDelta.Should().BeApproximately(-0.15m, 0.0001m,
+            "Loop 94: Futures cash flow yalnızca commission düşer; Short notional da margin'e alınır");
     }
 
     [Fact]

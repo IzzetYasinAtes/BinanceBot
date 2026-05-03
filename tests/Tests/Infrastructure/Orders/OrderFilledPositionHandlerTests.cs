@@ -101,6 +101,18 @@ public class OrderFilledPositionHandlerTests
                 b.HasKey(x => x.Id);
             });
 
+            // Loop 94 Fix #3: VirtualBalance handler içinde Paper margin akışı için
+            // sorgulanır (AllocateMarginForPosition / ReturnMarginAndApplyPnl). Test
+            // harness InMemory'de map edilir; null seed'lenmediğinde handler defansif
+            // log + skip yapar — testler margin assertion içermediği için davranış
+            // saklı kalır.
+            modelBuilder.Entity<VirtualBalance>(b =>
+            {
+                b.HasKey(x => x.Id);
+                b.Property(x => x.Mode).HasConversion<int>();
+                b.Ignore(x => x.DomainEvents);
+            });
+
             modelBuilder.Ignore<Instrument>();
             modelBuilder.Ignore<Kline>();
             modelBuilder.Ignore<BookTicker>();
@@ -110,7 +122,6 @@ public class OrderFilledPositionHandlerTests
             modelBuilder.Ignore<BacktestRun>();
             modelBuilder.Ignore<BacktestTrade>();
             modelBuilder.Ignore<SystemEvent>();
-            modelBuilder.Ignore<VirtualBalance>();
 
             base.OnModelCreating(modelBuilder);
         }
@@ -394,5 +405,166 @@ public class OrderFilledPositionHandlerTests
         pos.Direction.Should().Be(side == OrderSide.Buy
             ? TradeDirection.Long
             : TradeDirection.Short);
+    }
+
+    /// <summary>
+    /// Loop 94 Fix #3 — open Long pozisyonda VirtualBalance.AllocateMarginForPosition
+    /// çağrılmalı. notional = fillPrice × qty, AllocatedMargin += notional. Wallet
+    /// dokunulmaz (PlaceOrderCommandHandler ApplyFill ile fee zaten düşmüş kabul).
+    /// </summary>
+    [Fact]
+    public async Task PaperLongOpen_AllocatesMargin_OnVirtualBalance()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var (scopeFactory, db) = BuildHarness(now);
+
+        // Paper VirtualBalance seed: $500 wallet, 0 margin.
+        var vb = VirtualBalance.CreateDefault(TradingMode.Paper, 500m, now);
+        db.VirtualBalances.Add(vb);
+        db.SaveChanges();
+
+        SeedFilledOrder(db, cid: "open-long-margin", strategyId: 7,
+            qty: 0.01m, fillPrice: 30000m, now: now, side: OrderSide.Buy);
+
+        var sut = new OrderFilledPositionHandler(
+            scopeFactory, new FixedClock(now),
+            NullLogger<OrderFilledPositionHandler>.Instance);
+
+        await sut.Handle(new OrderFilledEvent(
+            "open-long-margin", "BTCUSDT", 0.01m, 300m, TradingMode.Paper),
+            CancellationToken.None);
+
+        var paper = db.VirtualBalances.AsNoTracking().Single();
+        paper.AllocatedMargin.Should().Be(300m, "fillPrice × qty = 30000 × 0.01");
+        // Wallet test bağlamında ApplyFill çağrılmadı — sadece margin akışı doğrulanır.
+        paper.WalletBalance.Should().Be(500m);
+
+        var pos = db.Positions.Single();
+        pos.Direction.Should().Be(TradeDirection.Long);
+    }
+
+    /// <summary>
+    /// Loop 94 Fix #3 — open Short pozisyonda da margin allocate edilir (Futures
+    /// SELL leg de margin posts; Spot semantik "satıştan cash kazandın" YANLIŞ).
+    /// </summary>
+    [Fact]
+    public async Task PaperShortOpen_AllocatesMargin_OnVirtualBalance()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var (scopeFactory, db) = BuildHarness(now);
+
+        var vb = VirtualBalance.CreateDefault(TradingMode.Paper, 500m, now);
+        db.VirtualBalances.Add(vb);
+        db.SaveChanges();
+
+        SeedFilledOrder(db, cid: "open-short-margin", strategyId: 8,
+            qty: 0.01m, fillPrice: 30000m, now: now, side: OrderSide.Sell);
+
+        var sut = new OrderFilledPositionHandler(
+            scopeFactory, new FixedClock(now),
+            NullLogger<OrderFilledPositionHandler>.Instance);
+
+        await sut.Handle(new OrderFilledEvent(
+            "open-short-margin", "BTCUSDT", 0.01m, 300m, TradingMode.Paper),
+            CancellationToken.None);
+
+        var paper = db.VirtualBalances.AsNoTracking().Single();
+        paper.AllocatedMargin.Should().Be(300m, "Short open de notional margin'e gider");
+        paper.WalletBalance.Should().Be(500m);
+
+        var pos = db.Positions.Single();
+        pos.Direction.Should().Be(TradeDirection.Short);
+    }
+
+    /// <summary>
+    /// Loop 94 Fix #3 — close path. Long pozisyon profitle kapandığında
+    /// ReturnMarginAndApplyPnl(originalMargin, gross) → wallet += gross,
+    /// AllocatedMargin -= originalMargin. Profit/loss net hesabı: entry/exit fee
+    /// PlaceOrderCommandHandler.ApplyFill ile düşülür (bu testte simüle edilmiyor),
+    /// gross PnL wallet'a doğrudan yansır.
+    /// </summary>
+    [Fact]
+    public async Task PaperLongClose_ReturnsMarginAndAppliesGrossPnl()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var (scopeFactory, db) = BuildHarness(now);
+
+        // VB: 500 wallet, 300 margin (önceki long open simülasyonu).
+        var vb = VirtualBalance.CreateDefault(TradingMode.Paper, 500m, now);
+        vb.AllocateMarginForPosition(300m, now);
+        db.VirtualBalances.Add(vb);
+
+        // Açık Long pozisyon seed: entry $30000, qty 0.01 → margin $300.
+        var openPos = Position.Open(
+            Symbol.From("BTCUSDT"), TradeDirection.Long, 0.01m, 30000m,
+            stopPrice: null, strategyId: 9, mode: TradingMode.Paper, now: now,
+            entryCommission: 0m);
+        // Reflection ile Id ata (InMemory provider auto generate ediyor ama eski entry zaten persist edilmiş kabul).
+        db.Positions.Add(openPos);
+        db.SaveChanges();
+
+        // Reverse SELL fill @ $30500 → gross = (30500 - 30000) × 0.01 = +$5.
+        SeedFilledOrder(db, cid: "close-long-pnl", strategyId: 9,
+            qty: 0.01m, fillPrice: 30500m, now: now.AddMinutes(5), side: OrderSide.Sell);
+
+        var sut = new OrderFilledPositionHandler(
+            scopeFactory, new FixedClock(now.AddMinutes(5)),
+            NullLogger<OrderFilledPositionHandler>.Instance);
+
+        await sut.Handle(new OrderFilledEvent(
+            "close-long-pnl", "BTCUSDT", 0.01m, 305m, TradingMode.Paper),
+            CancellationToken.None);
+
+        var paper = db.VirtualBalances.AsNoTracking().Single();
+        paper.AllocatedMargin.Should().Be(0m, "close ile original margin geri döndü");
+        paper.WalletBalance.Should().Be(505m, "wallet += gross PnL (500 + 5)");
+
+        var closed = db.Positions.AsNoTracking().Single();
+        closed.Status.Should().Be(PositionStatus.Closed);
+        // Position.RealizedPnl = gross - fees. Fee 0 → RealizedPnl = 5.
+        closed.RealizedPnl.Should().Be(5m);
+    }
+
+    /// <summary>
+    /// Loop 94 Fix #3 — Short close negatif PnL ile. Short entry $30000, exit
+    /// $30200 ⇒ gross = (30000 - 30200) × 0.01 = -$2 (zarar). Wallet -= 2,
+    /// margin geri döner.
+    /// </summary>
+    [Fact]
+    public async Task PaperShortClose_LossPnl_ReturnsMarginAndDeductsFromWallet()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var (scopeFactory, db) = BuildHarness(now);
+
+        var vb = VirtualBalance.CreateDefault(TradingMode.Paper, 500m, now);
+        vb.AllocateMarginForPosition(300m, now);
+        db.VirtualBalances.Add(vb);
+
+        var openPos = Position.Open(
+            Symbol.From("BTCUSDT"), TradeDirection.Short, 0.01m, 30000m,
+            stopPrice: null, strategyId: 10, mode: TradingMode.Paper, now: now,
+            entryCommission: 0m);
+        db.Positions.Add(openPos);
+        db.SaveChanges();
+
+        // Reverse BUY fill @ $30200 → gross = (30000 - 30200) × 0.01 = -$2.
+        SeedFilledOrder(db, cid: "close-short-loss", strategyId: 10,
+            qty: 0.01m, fillPrice: 30200m, now: now.AddMinutes(5), side: OrderSide.Buy);
+
+        var sut = new OrderFilledPositionHandler(
+            scopeFactory, new FixedClock(now.AddMinutes(5)),
+            NullLogger<OrderFilledPositionHandler>.Instance);
+
+        await sut.Handle(new OrderFilledEvent(
+            "close-short-loss", "BTCUSDT", 0.01m, 302m, TradingMode.Paper),
+            CancellationToken.None);
+
+        var paper = db.VirtualBalances.AsNoTracking().Single();
+        paper.AllocatedMargin.Should().Be(0m);
+        paper.WalletBalance.Should().Be(498m, "wallet += -2 (gross loss)");
+
+        var closed = db.Positions.AsNoTracking().Single();
+        closed.Status.Should().Be(PositionStatus.Closed);
+        closed.RealizedPnl.Should().Be(-2m);
     }
 }
