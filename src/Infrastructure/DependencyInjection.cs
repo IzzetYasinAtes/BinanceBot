@@ -142,7 +142,7 @@ public static class DependencyInjection
         });
 
         services.AddSingleton<IBinanceCredentialsProvider, BinanceCredentialsProvider>();
-        services.AddSingleton<IPaperFillSimulator, PaperFillSimulator>();
+        services.AddSingleton<IPaperFillSimulator, FuturesPaperFillSimulator>();
 
         // ADR-0011 §11.3 — equity snapshot is per-request (DbContext is scoped).
         services.AddScoped<IEquitySnapshotProvider, EquitySnapshotProvider>();

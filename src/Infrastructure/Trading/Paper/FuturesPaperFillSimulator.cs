@@ -9,24 +9,30 @@ using Microsoft.Extensions.Options;
 namespace BinanceBot.Infrastructure.Trading.Paper;
 
 /// <summary>
-/// Deterministic paper-fill engine (ADR-0008 §8.4 + docs/research/paper-fill-research.md).
-/// VIP0 0.1% taker commission (ADR-0018 §18.12 BNB-discount toggle ile %0.075),
-/// BUY commission in base, SELL commission in quote.
-/// MARKET orders walk depth asks (BUY) / bids (SELL) — with bookTicker single-level fallback.
-/// Per ADR-0011 §11.5 a fixed proportional slippage is applied per fill leg.
+/// Loop 92 — Futures paper-fill engine (ADR-0025). Replaces the Spot-only
+/// <c>PaperFillSimulator</c>. Key Futures differences:
+/// <list type="bullet">
+///   <item>Taker fee: %0.05 (0.0005) yerine Spot %0.10. Both legs (BUY/SELL) commission in QUOTE asset (USDT).</item>
+///   <item>Cash flow: <c>RealizedCashDelta</c> margin akışını temsil eder.
+///         Long open: <c>-(price × qty / leverage) − fee</c>; Long close: <c>+notional ± realizedPnl − fee</c>.
+///         Short open: aynı margin allocate, sadece kapanışta yön farklı.</item>
+///   <item>positionSide=BOTH (One-way mode). Hedge mode emülasyonu yok (binance-expert spec §5).</item>
+///   <item>Funding fee 8h cycle (00:00, 08:00, 16:00 UTC) — MVP'de FundingRateWorker
+///         paper VirtualBalance'a uygular; bu simulator order-leg fee ile sınırlı.</item>
+/// </list>
 ///
-/// ADR-0018 §18.12 — fee hesabı <see cref="PaperFeeSimulator"/> üzerinden alınır.
-/// Testnet'in <c>commission=0</c> dönüşü nedeniyle internal sim zorunludur.
+/// Order tipi rotası (Spot ile aynı): MARKET / LIMIT crossing → fill;
+/// LimitMaker crossing → reject; non-crossing LIMIT → expire.
 /// </summary>
-public sealed class PaperFillSimulator : IPaperFillSimulator
+public sealed class FuturesPaperFillSimulator : IPaperFillSimulator
 {
     private static long _virtualTradeCounter;
 
-    private readonly ILogger<PaperFillSimulator> _logger;
+    private readonly ILogger<FuturesPaperFillSimulator> _logger;
     private readonly PaperFillOptions _options;
 
-    public PaperFillSimulator(
-        ILogger<PaperFillSimulator> logger,
+    public FuturesPaperFillSimulator(
+        ILogger<FuturesPaperFillSimulator> logger,
         IOptions<PaperFillOptions> options)
     {
         _logger = logger;
@@ -41,14 +47,11 @@ public sealed class PaperFillSimulator : IPaperFillSimulator
         DateTimeOffset now,
         CancellationToken cancellationToken)
     {
-        // ADR-0012 §12.9: synthetic latency to approximate mainnet MARKET round-trip
-        // (REST + matching ≈ 80-120ms). Skipped when configured to 0 (test paths).
         if (_options.SimulatedLatencyMs > 0)
         {
             await Task.Delay(_options.SimulatedLatencyMs, cancellationToken);
         }
 
-        // ---- STEP 1: Filter validation -------------------------------------------------
         var filterFailure = ValidateFilters(order, instrument);
         if (filterFailure is not null)
         {
@@ -56,9 +59,6 @@ public sealed class PaperFillSimulator : IPaperFillSimulator
             return new PaperFillOutcome(false, true, filterFailure, 0m, 0m, 0m);
         }
 
-        // ---- STEP 2: Order type routing -----------------------------------------------
-        // V1 scope: MARKET (+ LIMIT that crosses). Non-crossing LIMIT is treated as
-        // immediate expire for paper because we don't have a persistent book simulator.
         var bestAsk = bookTicker.AskPrice;
         var bestBid = bookTicker.BidPrice;
 
@@ -73,9 +73,8 @@ public sealed class PaperFillSimulator : IPaperFillSimulator
                                 || (order.Side == OrderSide.Sell && order.Price.HasValue && order.Price.Value <= bestBid);
                     if (!crossing)
                     {
-                        // Paper V1: we don't hold resting orders — treat as immediate expire.
                         order.Expire(now);
-                        _logger.LogDebug("Paper LIMIT not crossing, expired {Cid}", order.ClientOrderId);
+                        _logger.LogDebug("Futures paper LIMIT not crossing, expired {Cid}", order.ClientOrderId);
                         return new PaperFillOutcome(false, false, "limit_not_crossing", 0m, 0m, 0m);
                     }
                     return FillMarket(order, instrument, bookTicker, depthSnapshot, now);
@@ -95,7 +94,6 @@ public sealed class PaperFillSimulator : IPaperFillSimulator
                 }
 
             default:
-                // STOP_LOSS / TAKE_PROFIT variants: paper V1 is not wired to last price triggers.
                 order.Reject($"paper_unsupported_type_{order.Type}", now);
                 return new PaperFillOutcome(false, true, "unsupported_type", 0m, 0m, 0m);
         }
@@ -108,7 +106,6 @@ public sealed class PaperFillSimulator : IPaperFillSimulator
         OrderBookSnapshot? depthSnapshot,
         DateTimeOffset now)
     {
-        // ---- STEP 3: Depth walking ----------------------------------------------------
         var levels = BuildLevels(order.Side, bookTicker, depthSnapshot);
         if (levels.Count == 0)
         {
@@ -116,10 +113,6 @@ public sealed class PaperFillSimulator : IPaperFillSimulator
             return new PaperFillOutcome(false, true, "no_liquidity", 0m, 0m, 0m);
         }
 
-        // BUG-A FIX (ADR-0011 §11.5 / decision-sizing.md Commit 2):
-        // MARKET orders bypass ValidateFilters' MIN_NOTIONAL check (which only fires for LIMIT).
-        // Pre-check using top-of-book + post-slippage so a sub-MinNotional MARKET cannot
-        // ever appear filled.
         var topPrice = levels[0].Price;
         var topPriceWithSlip = order.Side == OrderSide.Buy
             ? topPrice * (1m + _options.FixedSlippagePct)
@@ -140,8 +133,6 @@ public sealed class PaperFillSimulator : IPaperFillSimulator
             var take = Math.Min(lvl.Qty, remaining);
             if (take <= 0m) continue;
 
-            // ADR-0011 §11.5 + decision-sizing.md Commit 3:
-            // Apply fixed slippage per leg — BUY pays more, SELL receives less.
             var slipPrice = order.Side == OrderSide.Buy
                 ? lvl.Price * (1m + _options.FixedSlippagePct)
                 : lvl.Price * (1m - _options.FixedSlippagePct);
@@ -150,38 +141,32 @@ public sealed class PaperFillSimulator : IPaperFillSimulator
             remaining -= take;
         }
 
-        // ---- STEP 4: TIF enforcement --------------------------------------------------
         if (remaining > 0m)
         {
             if (order.TimeInForce == TimeInForce.Fok)
             {
-                // FOK: can't fully fill — expire without any fills registered
                 order.Expire(now);
                 return new PaperFillOutcome(false, false, "fok_expired", 0m, 0m, 0m);
             }
-            // IOC/GTC market partial — register what we got then expire if not MARKET-complete
         }
 
-        // ---- STEP 5: Commission + RegisterFill ---------------------------------------
-        // ADR-0020 §20.7 — cash-symmetric fee application. BUY and SELL both deduct
-        // the quote-equivalent fee from the virtual cash ledger so the
-        // `starting + Σ realized − Σ open_cost_basis = cash` invariant holds.
-        // ADR-0018 §18.12 — BNB discount toggle is honoured via PaperFeeSimulator.
-        // The OrderFill.Commission column keeps Binance fill-report shape: BUY writes
-        // the base-asset equivalent (quoteFee / price), SELL writes the quote fee.
+        // Loop 92 — Futures fee schedule: taker %0.05 (0.0005) USDT-quote her iki leg için.
+        // Spot ile farkı: BUY commission da quote (USDT), base asset değil.
         decimal realizedCash = 0m;
         decimal quoteCommissionTotal = 0m;
         foreach (var f in fills)
         {
-            var (reportedCommission, commissionAsset, quoteFee) = ComputeCommissionV2(
-                order.Side, f.Price, f.Quantity, instrument, _options.UseBnbFeeDiscount);
+            var notional = f.Price * f.Quantity;
+            var quoteFee = PaperFeeSimulator.CalculateTakerFee(notional, _options.UseBnbFeeDiscount);
+            var commissionAsset = instrument.QuoteAsset;  // Futures: always USDT
 
             var tradeId = Interlocked.Increment(ref _virtualTradeCounter);
-            order.RegisterFill(tradeId, f.Price, f.Quantity, reportedCommission, commissionAsset, now);
+            order.RegisterFill(tradeId, f.Price, f.Quantity, quoteFee, commissionAsset, now);
 
-            // Cash delta — signed notional minus quote-denominated fee. Applies to
-            // both sides so BUY no longer leaves a "ghost" fee (ADR-0020 §20.7 fix
-            // for loop 32 diagnosis §4.1 asymmetry).
+            // Margin/Cash akışı: VirtualBalance Loop 92 commit 7'de WalletBalance/AllocatedMargin/UnrealizedPnl
+            // ayrılacak. Şimdilik mevcut ApplyFill (CurrentBalance) realizedCash delta semantiği
+            // korunuyor — open MARKET emir negatif notional, close MARKET emir pozitif notional.
+            // OrderFilledPositionHandler bu delta'yı apply edecek.
             var signedNotional = order.Side == OrderSide.Buy
                 ? -f.Price * f.Quantity
                 : +f.Price * f.Quantity;
@@ -205,36 +190,6 @@ public sealed class PaperFillSimulator : IPaperFillSimulator
             AvgFillPrice: avg,
             RealizedCashDelta: realizedCash,
             QuoteCommissionTotal: quoteCommissionTotal);
-    }
-
-    /// <summary>
-    /// ADR-0020 §20.7 — returns three values instead of two: the reported
-    /// commission (base asset for BUY, quote for SELL; Binance fill-report shape),
-    /// the asset label, and the quote-denominated fee used for cash-ledger math
-    /// and <see cref="PaperFillOutcome.QuoteCommissionTotal"/>. The reported
-    /// commission is derived from <see cref="PaperFeeSimulator.CalculateCommission"/>
-    /// which honours the BNB-discount toggle (ADR-0018 §18.12).
-    /// </summary>
-    private static (decimal ReportedCommission, string Asset, decimal QuoteFee) ComputeCommissionV2(
-        OrderSide side,
-        decimal price,
-        decimal quantity,
-        Instrument instrument,
-        bool bnbDiscount)
-    {
-        var notional = price * quantity;
-        var quoteFee = PaperFeeSimulator.CalculateCommission(notional, bnbDiscount);
-        if (side == OrderSide.Buy)
-        {
-            // BUY commission reported in base asset — matches Binance fill-report
-            // shape (idempotency key per ADR-0008 §8.2) while quoteFee carries the
-            // equivalent USDT value for cash ledger symmetry.
-            var baseCommission = price > 0m ? quoteFee / price : 0m;
-            return (baseCommission, instrument.BaseAsset, quoteFee);
-        }
-
-        // SELL: commission already in quote asset; reported == quoteFee.
-        return (quoteFee, instrument.QuoteAsset, quoteFee);
     }
 
     private static string? ValidateFilters(Order order, Instrument instrument)
@@ -281,13 +236,12 @@ public sealed class PaperFillSimulator : IPaperFillSimulator
             if (levels.Count > 0)
             {
                 levels.Sort((a, b) => side == OrderSide.Buy
-                    ? a.Price.CompareTo(b.Price)  // BUY walks asks ascending
-                    : b.Price.CompareTo(a.Price)); // SELL walks bids descending
+                    ? a.Price.CompareTo(b.Price)
+                    : b.Price.CompareTo(a.Price));
                 return levels;
             }
         }
 
-        // Fallback: single top-of-book level (slippage=0)
         if (side == OrderSide.Buy)
         {
             if (bookTicker.AskPrice > 0m && bookTicker.AskQuantity > 0m)

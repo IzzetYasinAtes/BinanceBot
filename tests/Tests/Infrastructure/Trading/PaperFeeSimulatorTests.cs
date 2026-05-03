@@ -4,50 +4,50 @@ using FluentAssertions;
 namespace BinanceBot.Tests.Infrastructure.Trading;
 
 /// <summary>
-/// ADR-0018 §18.12 — paper-mode commission simulation. Verifies the two spot VIP 0
-/// rate branches (normal taker 0.10% and BNB-discount taker 0.075%) plus the guard
-/// rail for non-positive notional inputs.
+/// Loop 92 — Futures taker fee simulator (ADR-0025). Verifies VIP0 taker
+/// %0.05 (0.0005) ve BNB-discount %0.045 (0.00045) hesaplamaları + non-positive
+/// notional guard rail.
 /// </summary>
 public class PaperFeeSimulatorTests
 {
     [Fact]
-    public void NormalTaker_OnePercent_OfOneThousandDollar()
+    public void FuturesTaker_FiftyBps_OfThousandDollar()
     {
-        // 0.10% of $1000 = $1.00. Round-trip (open + close) = $2.00.
-        PaperFeeSimulator.CalculateCommission(1000m, bnbDiscount: false)
-            .Should().Be(1.00m);
+        // Futures VIP0 taker %0.05 of $1000 = $0.50. Round-trip (open + close) = $1.00.
+        PaperFeeSimulator.CalculateTakerFee(1000m, bnbDiscount: false)
+            .Should().Be(0.50m);
     }
 
     [Fact]
-    public void NormalTaker_OnHundredDollarNotional_IsTenCents()
+    public void FuturesTaker_OnHundredDollarNotional_IsFiveCents()
     {
-        PaperFeeSimulator.CalculateCommission(100m, bnbDiscount: false)
-            .Should().Be(0.10m);
+        PaperFeeSimulator.CalculateTakerFee(100m, bnbDiscount: false)
+            .Should().Be(0.05m);
     }
 
     [Fact]
-    public void BnbDiscountTaker_SeventyFiveBps_OfHundredDollar()
+    public void BnbDiscountTaker_FortyFiveBps_OfHundredDollar()
     {
-        // 0.075% of $100 = $0.075.
-        PaperFeeSimulator.CalculateCommission(100m, bnbDiscount: true)
-            .Should().Be(0.075m);
+        // BNB indirim %0.045 of $100 = $0.045.
+        PaperFeeSimulator.CalculateTakerFee(100m, bnbDiscount: true)
+            .Should().Be(0.045m);
     }
 
     [Fact]
-    public void NormalTaker_OnFiveDollarMinNotional_IsHalfCent()
+    public void FuturesTaker_OnFiveDollarMinNotional_IsQuarterCent()
     {
-        // ADR-0018 §18.10 — $5 minNotional trade: 0.10% = $0.005.
-        PaperFeeSimulator.CalculateCommission(5m, bnbDiscount: false)
-            .Should().Be(0.005m);
+        // Futures min notional $5: 0.05% = $0.0025.
+        PaperFeeSimulator.CalculateTakerFee(5m, bnbDiscount: false)
+            .Should().Be(0.0025m);
     }
 
     [Fact]
-    public void BnbDiscount_SaveTwoPointFiveBps_EveryTrade()
+    public void BnbDiscount_SavesHalfBps_EveryTrade()
     {
-        // Delta = (0.001 - 0.00075) * notional = 0.00025 * notional.
-        var normal = PaperFeeSimulator.CalculateCommission(1000m, bnbDiscount: false);
-        var discount = PaperFeeSimulator.CalculateCommission(1000m, bnbDiscount: true);
-        (normal - discount).Should().Be(0.25m);
+        // Delta = (0.0005 - 0.00045) * notional = 0.00005 * notional.
+        var normal = PaperFeeSimulator.CalculateTakerFee(1000m, bnbDiscount: false);
+        var discount = PaperFeeSimulator.CalculateTakerFee(1000m, bnbDiscount: true);
+        (normal - discount).Should().Be(0.05m);
     }
 
     [Theory]
@@ -56,16 +56,27 @@ public class PaperFeeSimulatorTests
     [InlineData(-0.01)]
     public void NonPositiveNotional_ReturnsZero_SilentGuard(double notional)
     {
-        PaperFeeSimulator.CalculateCommission((decimal)notional, bnbDiscount: true)
+        PaperFeeSimulator.CalculateTakerFee((decimal)notional, bnbDiscount: true)
             .Should().Be(0m);
-        PaperFeeSimulator.CalculateCommission((decimal)notional, bnbDiscount: false)
+        PaperFeeSimulator.CalculateTakerFee((decimal)notional, bnbDiscount: false)
             .Should().Be(0m);
     }
 
     [Fact]
-    public void Constants_MatchAdr0018Literals()
+    public void Constants_MatchBinanceExpertSpec_Loop92()
     {
-        PaperFeeSimulator.NormalFeeRate.Should().Be(0.001m);
-        PaperFeeSimulator.BnbDiscountFeeRate.Should().Be(0.00075m);
+        // binance-expert spec §13: Futures VIP0 taker %0.05, BNB-discount %0.045.
+        PaperFeeSimulator.FuturesTakerFeeRate.Should().Be(0.0005m);
+        PaperFeeSimulator.FuturesTakerFeeRateBnb.Should().Be(0.00045m);
+        PaperFeeSimulator.FuturesMakerFeeRate.Should().Be(0.0002m);
+    }
+
+    [Fact]
+    public void CalculateCommission_BackwardCompat_DelegatesToTakerFee()
+    {
+        // Eski Spot adı "CalculateCommission" şimdi taker fee'ye delegate ediyor.
+        var taker = PaperFeeSimulator.CalculateTakerFee(500m, bnbDiscount: false);
+        var legacy = PaperFeeSimulator.CalculateCommission(500m, bnbDiscount: false);
+        legacy.Should().Be(taker);
     }
 }
