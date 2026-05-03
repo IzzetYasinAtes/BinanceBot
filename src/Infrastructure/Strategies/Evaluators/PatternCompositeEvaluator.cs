@@ -67,10 +67,20 @@ public sealed class PatternCompositeEvaluator : IStrategyEvaluator
             return Task.FromResult<StrategyEvaluation?>(null);
         }
 
-        // Loop 90 — MTF gate TAMAMEN KAPATILDI (kod kaldırıldı). L89 1h 0 emit
-        //   (pazar downtrend, 5/5 coin negatif slope). Memory #12 pivot.
-        //   Sahte breakout filtresi: RSI cap (Loop 87) + BE-stop (Loop 83) +
-        //   Trail (Loop 83). Composer hard-gate de kapalı (Loop 89).
+        // Loop 91 — MTF gate GERİ EKLENDİ (yumuşak: slope < -%0.1 strict).
+        //   L90'da MTF kapatıldı, 3/3 yeni emit kötü başlangıç (sahte breakout).
+        //   Pazar downtrend olduğunda emit yapma daha doğru — Memory #12 ile
+        //   çelişse bile. Pivot yerine pazar dönmesini bekle.
+        var slope15m = snapshot.Ema21_15m - snapshot.Ema21Prev5_15m;
+        var mtfStrongDownThreshold = -snapshot.Ema21_15m * 0.001m;
+        if (snapshot.Ema21_15m <= 0m || slope15m < mtfStrongDownThreshold)
+        {
+            _logger.LogDebug(
+                "PatternComposite skip symbol={Symbol} strategyId={StrategyId} " +
+                "ema21_15m={Ema} slope15m={Slope} reason=mtf_15m_slope_down",
+                symbol, strategyId, snapshot.Ema21_15m, slope15m);
+            return Task.FromResult<StrategyEvaluation?>(null);
+        }
 
         // Loop 87 — RSI cap gate: aşırı alım breakout'u ele.
         if (snapshot.Rsi14 > options.RsiMaxEmit)
