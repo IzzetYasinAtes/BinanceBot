@@ -20,8 +20,17 @@ public sealed class VirtualBalanceConfiguration : IEntityTypeConfiguration<Virtu
         builder.Property(b => b.Mode).HasConversion<int>().IsRequired();
 
         builder.Property(b => b.StartingBalance).HasPrecision(28, 10);
-        builder.Property(b => b.CurrentBalance).HasPrecision(28, 10);
+        // Loop 92 — WalletBalance domain field; DB kolonu commit 8 migration'ında
+        // CurrentBalance -> WalletBalance rename edilecek. Şimdilik kolon adı
+        // CurrentBalance kalır (geriye uyumlu mevcut migration).
+        builder.Property(b => b.WalletBalance).HasPrecision(28, 10).HasColumnName("CurrentBalance");
         builder.Property(b => b.Equity).HasPrecision(28, 10);
+        // Loop 92 — Futures genişlemesi: AllocatedMargin + UnrealizedPnl (commit 8 migration).
+        builder.Property(b => b.AllocatedMargin).HasPrecision(28, 10).HasDefaultValue(0m);
+        builder.Property(b => b.UnrealizedPnl).HasPrecision(28, 10).HasDefaultValue(0m);
+        // CurrentBalance computed property — DB'de saklanmaz, sadece domain alias.
+        builder.Ignore(b => b.CurrentBalance);
+        builder.Ignore(b => b.AvailableBalance);
 
         builder.Property(b => b.IterationId).IsRequired();
         builder.Property(b => b.StartedAt).IsRequired();
@@ -43,8 +52,11 @@ public sealed class VirtualBalanceConfiguration : IEntityTypeConfiguration<Virtu
         Id = (int)mode,
         Mode = mode,
         StartingBalance = startingBalance,
-        CurrentBalance = startingBalance,
+        // Loop 92 — WalletBalance maps to existing CurrentBalance column.
+        WalletBalance = startingBalance,
         Equity = startingBalance,
+        AllocatedMargin = 0m,
+        UnrealizedPnl = 0m,
         IterationId = DeterministicIterationId(mode),
         StartedAt = now,
         LastResetAt = (DateTimeOffset?)null,

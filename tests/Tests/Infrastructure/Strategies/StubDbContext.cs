@@ -88,6 +88,9 @@ internal sealed class StubDbContext : DbContext, IApplicationDbContext
             b.HasKey(x => x.Id);
             b.Property(x => x.Id).ValueGeneratedNever();
             b.Property(x => x.Mode).HasConversion<int>();
+            // Loop 92 — CurrentBalance computed alias (no setter), AvailableBalance computed.
+            b.Ignore(x => x.CurrentBalance);
+            b.Ignore(x => x.AvailableBalance);
             b.Ignore(x => x.DomainEvents);
         });
 
