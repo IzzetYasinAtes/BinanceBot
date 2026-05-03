@@ -115,7 +115,7 @@ public sealed class PatternCompositeEvaluator : IStrategyEvaluator
         }
 
         var slope15m = snapshot.Ema21_15m - snapshot.Ema21Prev5_15m;
-        var mtfThreshold = snapshot.Ema21_15m * 0.0005m;  // %0.05 kademe (Loop 95: frekans gevşetme)
+        var mtfThreshold = snapshot.Ema21_15m * 0.002m;  // %0.2 kademe (Loop 96: gerçek gevşetme — Loop 95 yanlış yön 0.0005 sıkmıştı)
 
         if (direction == TradeDirection.Long && slope15m < -mtfThreshold)
         {
