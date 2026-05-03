@@ -100,6 +100,8 @@ public sealed class MarkToMarketWorker : BackgroundService
         // mark/peak güncellemeleri çakışmasın).
         var trailingExits = new List<(Position pos, decimal markPrice, decimal peakPrice, decimal trailPct)>();
 
+        var liquidationExits = new List<(Position pos, decimal markPrice, decimal marginRatio)>();
+
         foreach (var position in openPositions)
         {
             var ticker = tickers.FirstOrDefault(t => t.Symbol == position.Symbol);
@@ -111,10 +113,20 @@ public sealed class MarkToMarketWorker : BackgroundService
             position.MarkToMarket(mid, clock.UtcNow);
             dirty++;
 
+            // Loop 92 — Futures liquidation guard (binance-expert spec §10).
+            // marginRatio = |UnrealizedPnl| / margin (entry notional / leverage).
+            // %80 üstünde olursa force close (CloseSignalPositionCommand) — Binance
+            // gerçek likidasyondan önce devreye girer, ADL riskini azaltır.
+            // MVP: leverage 1x varsayımı → margin = entry × qty (full notional).
+            // Loop 14'te leverage RiskProfile'dan okunacak.
+            if (TryDetectLiquidationRisk(position, mid, out var marginRatio))
+            {
+                liquidationExits.Add((position, mid, marginRatio));
+            }
+
             // Loop 75 — break-even SL move. MarkToMarket'ten hemen sonra,
             // aynı tracked aggregate üzerinde tetikleniyor → tek SaveChanges.
-            // Long-only kontrat (KMS Long-only spot); Short eklenirse simetri
-            // burada genişler (mark <= entry × (1 - TriggerPct)).
+            // Loop 92 Long+Short symmetry: BE move worker'ında zaten Direction-aware.
             TryApplyBreakEvenMove(position, mid, beOpts, clock.UtcNow);
 
             // Loop 76 — trailing-stop. BE move'dan SONRA çağrılır (sıra kritik):
@@ -135,6 +147,73 @@ public sealed class MarkToMarketWorker : BackgroundService
         foreach (var (pos, mark, peak, trailPct) in trailingExits)
         {
             await DispatchTrailingExitAsync(mediator, pos, mark, peak, trailPct, clock, ct);
+        }
+
+        // Loop 92 — Futures liquidation guard exit dispatch (yüksek öncelikli kapanış).
+        foreach (var (pos, mark, ratio) in liquidationExits)
+        {
+            await DispatchLiquidationExitAsync(mediator, pos, mark, ratio, clock, ct);
+        }
+    }
+
+    /// <summary>
+    /// Loop 92 — Futures liquidation risk detector. marginRatio = |UnrealizedPnl| /
+    /// margin. Margin (1x leverage MVP) = AverageEntryPrice × Quantity. Loss eşiği
+    /// %80 (binance-expert spec §10) — Binance gerçek likidasyondan önce force close.
+    /// Long: UnrealizedPnl &lt; 0; Short: UnrealizedPnl &lt; 0 (markup pozisyonu için).
+    /// </summary>
+    private bool TryDetectLiquidationRisk(Position position, decimal mid, out decimal marginRatio)
+    {
+        marginRatio = 0m;
+
+        // Sadece zarar pozisyonları kontrol edilir.
+        if (position.UnrealizedPnl >= 0m) return false;
+
+        var margin = position.AverageEntryPrice * position.Quantity;
+        if (margin <= 0m) return false;
+
+        marginRatio = Math.Abs(position.UnrealizedPnl) / margin;
+        const decimal LiquidationThreshold = 0.80m;
+        return marginRatio >= LiquidationThreshold;
+    }
+
+    private async Task DispatchLiquidationExitAsync(
+        IMediator mediator,
+        Position pos,
+        decimal markPrice,
+        decimal marginRatio,
+        IClock clock,
+        CancellationToken ct)
+    {
+        if (pos.Mode == TradingMode.LiveMainnet)
+        {
+            _logger.LogDebug(
+                "LIQUIDATION-GUARD skipped (mainnet blocked) pos={PosId} mark={Mark} ratio={Ratio}",
+                pos.Id, markPrice, marginRatio);
+            return;
+        }
+
+        var cidPrefix = $"liq-{pos.Id}-{clock.UtcNow.ToUnixTimeSeconds()}";
+        var reason = $"liquidation_guard@{markPrice:F4}_marginRatio={marginRatio:P2}";
+
+        _logger.LogCritical(
+            "LIQUIDATION-GUARD triggered pos={PosId} symbol={Symbol} direction={Direction} mark={Mark} ratio={Ratio:P2}",
+            pos.Id, pos.Symbol.Value, pos.Direction, markPrice, marginRatio);
+
+        var result = await mediator.Send(
+            new CloseSignalPositionCommand(
+                pos.Symbol.Value,
+                pos.StrategyId,
+                pos.Mode,
+                reason,
+                cidPrefix),
+            ct);
+
+        if (!result.IsSuccess && result.Status != ResultStatus.NotFound)
+        {
+            _logger.LogError(
+                "LIQUIDATION-GUARD close failed pos={PosId} mode={Mode}: {Errors}",
+                pos.Id, pos.Mode, string.Join(";", result.Errors));
         }
     }
 
