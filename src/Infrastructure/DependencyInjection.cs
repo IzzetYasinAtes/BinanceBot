@@ -150,9 +150,13 @@ public static class DependencyInjection
         services.AddSingleton<BinanceStreamBus>();
         services.AddSingleton<IBinanceMarketStream>(sp => sp.GetRequiredService<BinanceStreamBus>());
 
-        services.AddSingleton<BinanceWsSupervisor>();
-        services.AddHostedService(sp => sp.GetRequiredService<BinanceWsSupervisor>());
-        services.AddSingleton<IWsReadinessProbe>(sp => sp.GetRequiredService<BinanceWsSupervisor>());
+        services.AddSingleton<FuturesWsSupervisor>();
+        services.AddHostedService(sp => sp.GetRequiredService<FuturesWsSupervisor>());
+        services.AddSingleton<IWsReadinessProbe>(sp => sp.GetRequiredService<FuturesWsSupervisor>());
+
+        // Loop 92 — Futures user data stream (private). listenKey lifecycle yönetir
+        // (POST/PUT/DELETE 30dk yenileme), ORDER_TRADE_UPDATE + ACCOUNT_UPDATE log'lar.
+        services.AddHostedService<FuturesUserDataStreamWorker>();
         services.AddScoped<ISystemStatusProvider, SystemStatusProvider>();
         services.AddHostedService<ClockSyncWorker>();
         services.AddHostedService<SymbolFiltersRefresher>();

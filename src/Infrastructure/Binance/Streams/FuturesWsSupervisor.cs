@@ -11,11 +11,11 @@ using Microsoft.Extensions.Options;
 
 namespace BinanceBot.Infrastructure.Binance.Streams;
 
-public sealed class BinanceWsSupervisor : BackgroundService, IWsReadinessProbe
+public sealed class FuturesWsSupervisor : BackgroundService, IWsReadinessProbe
 {
     private readonly IOptionsMonitor<BinanceOptions> _options;
     private readonly BinanceStreamBus _bus;
-    private readonly ILogger<BinanceWsSupervisor> _logger;
+    private readonly ILogger<FuturesWsSupervisor> _logger;
     private readonly IServiceScopeFactory _scopeFactory;
 
     private volatile WsSupervisorState _state = WsSupervisorState.Disconnected;
@@ -30,10 +30,10 @@ public sealed class BinanceWsSupervisor : BackgroundService, IWsReadinessProbe
     /// </remarks>
     public bool IsReady => _everConnected;
 
-    public BinanceWsSupervisor(
+    public FuturesWsSupervisor(
         IOptionsMonitor<BinanceOptions> options,
         BinanceStreamBus bus,
-        ILogger<BinanceWsSupervisor> logger,
+        ILogger<FuturesWsSupervisor> logger,
         IServiceScopeFactory scopeFactory)
     {
         _options = options;
@@ -230,7 +230,7 @@ public sealed class BinanceWsSupervisor : BackgroundService, IWsReadinessProbe
             string streamName = string.Empty;
             try
             {
-                if (!BinanceStreamParser.TryParseCombinedEnvelope(raw, out streamName, out var data))
+                if (!FuturesStreamParser.TryParseCombinedEnvelope(raw, out streamName, out var data))
                 {
                     // Loop 24 diagnostic — non-envelope frames (subscription acks, error
                     // payloads) were silently dropped. Log the first 200 bytes so we can
@@ -243,7 +243,7 @@ public sealed class BinanceWsSupervisor : BackgroundService, IWsReadinessProbe
 
                 if (streamName.Contains("@kline_", StringComparison.OrdinalIgnoreCase))
                 {
-                    if (BinanceStreamParser.TryParseKline(data, receivedAt, out var kline))
+                    if (FuturesStreamParser.TryParseKline(data, receivedAt, out var kline))
                     {
                         // Loop 24 diagnostic — explicit per-frame kline log so we can
                         // verify 30s bars actually arrive from the WS. MicroScalper ingestion
@@ -260,14 +260,14 @@ public sealed class BinanceWsSupervisor : BackgroundService, IWsReadinessProbe
                 }
                 else if (streamName.Contains("@bookTicker", StringComparison.OrdinalIgnoreCase))
                 {
-                    if (BinanceStreamParser.TryParseBookTicker(data, receivedAt, out var bt))
+                    if (FuturesStreamParser.TryParseBookTicker(data, receivedAt, out var bt))
                     {
                         _bus.PublishBookTicker(bt);
                     }
                 }
                 else if (streamName.Contains("@depth", StringComparison.OrdinalIgnoreCase))
                 {
-                    if (BinanceStreamParser.TryParseDepthDiff(data, receivedAt, out var depth))
+                    if (FuturesStreamParser.TryParseDepthDiff(data, receivedAt, out var depth))
                     {
                         _bus.PublishDepth(depth);
                     }

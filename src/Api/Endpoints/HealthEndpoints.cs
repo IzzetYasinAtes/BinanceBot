@@ -16,7 +16,7 @@ public static class HealthEndpoints
         app.MapGet("/health/ready", async (
                 ApplicationDbContext db,
                 IClock clock,
-                BinanceWsSupervisor ws,
+                FuturesWsSupervisor ws,
                 CancellationToken ct) =>
             {
                 var canConnect = await db.Database.CanConnectAsync(ct);

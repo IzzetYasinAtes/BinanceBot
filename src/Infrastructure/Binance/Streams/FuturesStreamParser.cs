@@ -5,7 +5,7 @@ using BinanceBot.Domain.MarketData;
 
 namespace BinanceBot.Infrastructure.Binance.Streams;
 
-public static class BinanceStreamParser
+public static class FuturesStreamParser
 {
     public static bool TryParseCombinedEnvelope(
         ReadOnlySpan<byte> rawJson,

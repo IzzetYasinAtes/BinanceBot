@@ -111,11 +111,11 @@ public sealed class BinanceStreamBusTests
             "\"Q\":\"500.0\",\"B\":\"0\"}}}";
         var rawBytes = Encoding.UTF8.GetBytes(rawJson);
 
-        BinanceStreamParser.TryParseCombinedEnvelope(rawBytes, out var streamName, out var data)
+        FuturesStreamParser.TryParseCombinedEnvelope(rawBytes, out var streamName, out var data)
             .Should().BeTrue();
         streamName.Should().Be("btcusdt@kline_30s");
 
-        BinanceStreamParser.TryParseKline(data, DateTimeOffset.UtcNow, out var kline)
+        FuturesStreamParser.TryParseKline(data, DateTimeOffset.UtcNow, out var kline)
             .Should().BeTrue();
         kline.Interval.Should().Be(KlineInterval.ThirtySeconds);
         kline.IsClosed.Should().BeTrue();
@@ -147,9 +147,9 @@ public sealed class BinanceStreamBusTests
             "\"V\":\"1\",\"Q\":\"1\",\"B\":\"0\"}}}";
         var raw = Encoding.UTF8.GetBytes(rawJson);
 
-        BinanceStreamParser.TryParseCombinedEnvelope(raw, out _, out var data).Should().BeTrue();
+        FuturesStreamParser.TryParseCombinedEnvelope(raw, out _, out var data).Should().BeTrue();
 
-        var parsed = BinanceStreamParser.TryParseKline(data, DateTimeOffset.UtcNow, out var kline);
+        var parsed = FuturesStreamParser.TryParseKline(data, DateTimeOffset.UtcNow, out var kline);
         parsed.Should().BeFalse();
         kline.Should().BeNull();
     }

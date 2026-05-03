@@ -9,7 +9,7 @@ namespace BinanceBot.Infrastructure.Binance.Streams;
 /// design (SingleReader=false) race'di — iki consumer'dan yalnızca biri
 /// her kline/book-ticker/depth'i okuyordu ve diğerine ulaşmıyordu.
 ///
-/// Yazım tarafı (<see cref="BinanceWsSupervisor"/>) <c>Publish*</c> çağırır;
+/// Yazım tarafı (<see cref="FuturesWsSupervisor"/>) <c>Publish*</c> çağırır;
 /// her publish, aktif subscriber listesinin snapshot'ı alınarak her bir
 /// <see cref="Channel{T}"/>'e <c>TryWrite</c> ile yazılır (DropOldest policy,
 /// bounded 1024/2048/4096). Okuyucular <c>Subscribe*</c> ile kendi
@@ -25,7 +25,7 @@ public sealed class BinanceStreamBus : IBinanceMarketStream
     private readonly Broadcaster<WsBookTickerPayload> _bookTickers = new(capacity: 2048);
     private readonly Broadcaster<WsDepthDiffPayload> _depth = new(capacity: 4096);
 
-    // -- Publish side (used by BinanceWsSupervisor) ---------------------------
+    // -- Publish side (used by FuturesWsSupervisor) ---------------------------
 
     /// <summary>
     /// Supervisor publishes a kline envelope to every subscriber.

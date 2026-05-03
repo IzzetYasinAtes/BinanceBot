@@ -42,7 +42,7 @@ public sealed record StrategySignalSkippedEvent(
     DateTimeOffset BarOpenTime) : DomainEventBase;
 
 /// <summary>
-/// ADR-0016 §16.9.6 — emitted by <c>BinanceWsSupervisor</c> whenever the WS
+/// ADR-0016 §16.9.6 — emitted by <c>FuturesWsSupervisor</c> whenever the WS
 /// supervisor state machine transitions. Drives the <c>WsStateChanged</c> row.
 /// </summary>
 public sealed record WsConnectionStateChangedEvent(

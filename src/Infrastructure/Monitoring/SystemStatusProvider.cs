@@ -9,12 +9,12 @@ namespace BinanceBot.Infrastructure.Monitoring;
 
 public sealed class SystemStatusProvider : ISystemStatusProvider
 {
-    private readonly BinanceWsSupervisor _supervisor;
+    private readonly FuturesWsSupervisor _supervisor;
     private readonly IOptionsMonitor<BinanceOptions> _options;
     private readonly ApplicationDbContext _db;
 
     public SystemStatusProvider(
-        BinanceWsSupervisor supervisor,
+        FuturesWsSupervisor supervisor,
         IOptionsMonitor<BinanceOptions> options,
         ApplicationDbContext db)
     {
