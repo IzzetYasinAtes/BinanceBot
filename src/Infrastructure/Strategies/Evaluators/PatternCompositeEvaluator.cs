@@ -67,10 +67,12 @@ public sealed class PatternCompositeEvaluator : IStrategyEvaluator
             return Task.FromResult<StrategyEvaluation?>(null);
         }
 
-        // Loop 87 — MTF gate: 15m EMA21 slope ≤ 0 ⇒ büyük TF aleyhine, skip.
-        // Ema21_15m=0 ⇒ 15m warmup tamamlanmamış; bu durumda da skip (güvenli).
+        // Loop 88 — MTF gate yumuşatıldı: warmup şart ama slope sadece KESİN
+        //   aleyhte ise skip (slope < -%0.1 of EMA21). Flat veya hafif negatif
+        //   slope emit izin verir (Loop 87 1.5h 0 emit pivot — dilemma çözümü).
         var slope15m = snapshot.Ema21_15m - snapshot.Ema21Prev5_15m;
-        if (snapshot.Ema21_15m <= 0m || slope15m <= 0m)
+        var mtfStrongDownThreshold = -snapshot.Ema21_15m * 0.001m;
+        if (snapshot.Ema21_15m <= 0m || slope15m < mtfStrongDownThreshold)
         {
             _logger.LogDebug(
                 "PatternComposite skip symbol={Symbol} strategyId={StrategyId} " +
