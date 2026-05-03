@@ -42,7 +42,56 @@ public class WeightedScorePatternComposerTests
     }
 
     private static WeightedScorePatternComposer Sut() =>
-        new(NullLogger<WeightedScorePatternComposer>.Instance);
+        new(NullLogger<WeightedScorePatternComposer>.Instance, new StubRegistry());
+
+    /// <summary>
+    /// Loop 92 — Direction routing için minimal registry. Test'in içinde isimle
+    /// kullanılan detector'ların yön bias'ı production ile aynı olmalı.
+    /// </summary>
+    private sealed class StubRegistry : IPatternRegistry
+    {
+        public IReadOnlyList<IPatternDetector> Detectors { get; } = new IPatternDetector[]
+        {
+            // Long-bias
+            new StubDetector("ema_squeeze_break", BinanceBot.Domain.Common.TradeDirection.Long),
+            new StubDetector("vwap_bounce", BinanceBot.Domain.Common.TradeDirection.Long),
+            new StubDetector("inside_bar_breakout", BinanceBot.Domain.Common.TradeDirection.Long),
+            new StubDetector("rsi_oversold_recovery", BinanceBot.Domain.Common.TradeDirection.Long),
+            new StubDetector("volume_spike_donchian", BinanceBot.Domain.Common.TradeDirection.Long),
+            new StubDetector("higher_low_ema_touch", BinanceBot.Domain.Common.TradeDirection.Long),
+            new StubDetector("macd_zero_cross", BinanceBot.Domain.Common.TradeDirection.Long),
+            new StubDetector("bullish_engulfing", BinanceBot.Domain.Common.TradeDirection.Long),
+            new StubDetector("hammer_reversal", BinanceBot.Domain.Common.TradeDirection.Long),
+            new StubDetector("bollinger_lower_reversal", BinanceBot.Domain.Common.TradeDirection.Long),
+            // Short-bias
+            new StubDetector("bearish_engulfing", BinanceBot.Domain.Common.TradeDirection.Short),
+            new StubDetector("shooting_star", BinanceBot.Domain.Common.TradeDirection.Short),
+            new StubDetector("bollinger_upper_reversal", BinanceBot.Domain.Common.TradeDirection.Short),
+            new StubDetector("bollinger_squeeze_break_down", BinanceBot.Domain.Common.TradeDirection.Short),
+            new StubDetector("rsi_overbought_pullback", BinanceBot.Domain.Common.TradeDirection.Short),
+            new StubDetector("ema9_slope_down", BinanceBot.Domain.Common.TradeDirection.Short),
+            new StubDetector("donchian_breakdown", BinanceBot.Domain.Common.TradeDirection.Short),
+            // Neutral
+            new StubDetector("volume_surge_gate", null),
+            new StubDetector("spread_guard_gate", null),
+            new StubDetector("adx_regime_filter", null),
+        };
+
+        private sealed class StubDetector : IPatternDetector
+        {
+            public StubDetector(string name, BinanceBot.Domain.Common.TradeDirection? dir)
+            {
+                Name = name;
+                Direction = dir;
+            }
+            public string Name { get; }
+            public decimal DefaultWeight => 1m;
+            public bool IsHardGate => false;
+            public BinanceBot.Domain.Common.TradeDirection? Direction { get; }
+            public PatternEvaluation Evaluate(BarSnapshot snapshot) =>
+                new(Name, 0m);
+        }
+    }
 
 
 

@@ -1,34 +1,39 @@
 using System.Text.Json;
 using BinanceBot.Application.Strategies.Patterns;
+using BinanceBot.Domain.Common;
 using Microsoft.Extensions.Logging;
 
 namespace BinanceBot.Infrastructure.Strategies.Patterns;
 
 /// <summary>
-/// Loop 81 — Ağırlıklı skor toplama composer (ADR-0024 §24.9).
+/// Loop 81 + Loop 92 — Direction-aware ağırlıklı skor composer (ADR-0024 §24.9 + ADR-0025).
 ///
-/// Algoritma:
+/// Algoritma (Loop 92 iki-kova):
 /// <list type="number">
-///   <item>Hard-gate disiplini: <c>IsHardGate=true &amp;&amp; Score==0</c> ⇒ <c>SkipReason=hard_gate:&lt;name&gt;</c>.</item>
+///   <item>Hard-gate disiplini: VolumeSurgeGate / SpreadGuardGate score=0 ⇒ skip (hard_gate:&lt;name&gt;).
+///         Loop 89 hard-gate skip TEKRAR DEVRE DIŞI; ama hard-gate kayıtları ContextJson'da kalır.</item>
 ///   <item>Soft filter: <c>adx_regime_filter</c> evaluation 0 puan ise tüm
-///         pattern skorları <c>options.AdxOutsideRegimeMultiplier</c> × ile çarpılır.</item>
-///   <item>Ağırlıklı toplam: <c>Σ Clamp(Score, 0, 1) × Weight × softMul</c>.</item>
-///   <item>Toplam &gt;= <c>RequiredScore</c> ⇒ Emit (geometri ATR-bazlı).</item>
+///         pattern skorları <c>options.AdxOutsideRegimeMultiplier</c> ile çarpılır.</item>
+///   <item>İki-kova: Long-bias detector'lar Long bucket'a, Short-bias detector'lar Short bucket'a.
+///         Neutral detector'lar (Direction=null) iki bucket'a da katkı verir.</item>
+///   <item>longTotal &gt;= RequiredScore AND shortTotal &gt;= RequiredScore ⇒ skip
+///         (both_directions_qualified). Yön belirsizliği — bar değişene kadar kararsızlık.</item>
+///   <item>Sadece bir bucket geçerse o yönde emit. Geometri Direction'a göre asimetrik.</item>
 /// </list>
-///
-/// Detector skor &lt; 0 veya &gt; 1 ise warning logla + clamp et (defansif).
-/// ContextJson her zaman dolu — emit + skip durumlarında tüm detector
-/// skorlarını taşır.
 /// </summary>
 public sealed class WeightedScorePatternComposer : IPatternSignalComposer
 {
     private const string AdxFilterName = "adx_regime_filter";
 
     private readonly ILogger<WeightedScorePatternComposer> _logger;
+    private readonly IPatternRegistry _registry;
 
-    public WeightedScorePatternComposer(ILogger<WeightedScorePatternComposer> logger)
+    public WeightedScorePatternComposer(
+        ILogger<WeightedScorePatternComposer> logger,
+        IPatternRegistry registry)
     {
         _logger = logger;
+        _registry = registry;
     }
 
     public CompositeSignalDecision Compose(
@@ -36,27 +41,22 @@ public sealed class WeightedScorePatternComposer : IPatternSignalComposer
         IReadOnlyList<PatternEvaluation> evaluations,
         PatternComposerOptions options)
     {
-        // 1. Hard-gate kontrolü ve soft filter tespiti
+        // 1. Soft filter ADX
         decimal softMultiplier = 1m;
-        var hardGateFails = new List<string>();
-        PatternEvaluation? adxFilter = null;
-
-        foreach (var ev in evaluations)
-        {
-            if (string.Equals(ev.Name, AdxFilterName, StringComparison.OrdinalIgnoreCase))
-            {
-                adxFilter = ev;
-                continue;
-            }
-        }
-
+        var adxFilter = evaluations.FirstOrDefault(
+            e => string.Equals(e.Name, AdxFilterName, StringComparison.OrdinalIgnoreCase));
         if (adxFilter is not null && adxFilter.Score <= 0m)
         {
             softMultiplier = options.AdxOutsideRegimeMultiplier;
         }
 
-        // 2. Skor toplam (clamp + weight + softMul)
-        decimal total = 0m;
+        // 2. Direction lookup (registry üzerinden) — composer evaluations'da Direction taşımıyor.
+        var directionByName = _registry.Detectors.ToDictionary(
+            d => d.Name, d => d.Direction, StringComparer.OrdinalIgnoreCase);
+
+        // 3. İki-kova skor toplama
+        decimal longTotal = 0m;
+        decimal shortTotal = 0m;
         var contribs = new List<DetectorContrib>(evaluations.Count);
 
         foreach (var ev in evaluations)
@@ -69,22 +69,24 @@ public sealed class WeightedScorePatternComposer : IPatternSignalComposer
             }
             var clamped = Math.Clamp(ev.Score, 0m, 1m);
 
-            // Soft filter veya hard-gate pattern'ı skor toplamına ağırlıkla katkı vermez
-            // (DefaultWeight=0). Ama hard-gate fail kontrolü yapılır.
             decimal weight = ResolveWeight(ev.Name, options);
-            decimal effectiveWeight = weight;
+            decimal contribution = clamped * weight * softMultiplier;
 
-            // Hard-gate detection: ağırlığı 0 ama IsHardGate=true → skor 0 ⇒ skip
-            // Hard-gate flag'i runtime PatternEvaluation'da olmadığı için Name → registry
-            // ihtiyacı olur, ama composer registry tüketmez. Çözüm: hard-gate detector'ları
-            // VolumeSurgeGate + SpreadGuardGate isimleri ile tanı.
-            if (IsHardGateName(ev.Name) && clamped <= 0m)
+            // Direction routing
+            directionByName.TryGetValue(ev.Name, out var dir);
+            switch (dir)
             {
-                hardGateFails.Add(ev.Name);
+                case TradeDirection.Long:
+                    longTotal += contribution;
+                    break;
+                case TradeDirection.Short:
+                    shortTotal += contribution;
+                    break;
+                default:  // null = Neutral, both buckets
+                    longTotal += contribution;
+                    shortTotal += contribution;
+                    break;
             }
-
-            decimal contribution = clamped * effectiveWeight * softMultiplier;
-            total += contribution;
 
             contribs.Add(new DetectorContrib(
                 Name: ev.Name,
@@ -92,48 +94,57 @@ public sealed class WeightedScorePatternComposer : IPatternSignalComposer
                 Weight: weight,
                 SoftMultiplier: softMultiplier,
                 Contribution: contribution,
+                Direction: dir?.ToString(),
                 Reason: ev.Reason));
         }
 
-        // 4. Loop 89 — Hard-gate skip TEKRAR DEVRE DIŞI. Loop 88'de 1h+ 0 emit
-        //    pivot kararı: hard-gate (gece düşük volume + alt-coin spread)
-        //    + MTF + RSI üçlüsü kombinasyon olarak çok katı. Hard-gate
-        //    tracking ContextJson'da bırakıldı; sahte breakout filtresi
-        //    artık MTF gate (PatternCompositeEvaluator Loop 87/88) + RSI cap
-        //    (Loop 87) ile yapılır. Loop 84'ün hard-gate-off davranışına
-        //    geri dönüldü AMA bu sefer ek kalite filtreleri var.
-        _ = hardGateFails;
+        // 4. Both-directions-qualified guard (Loop 92 spec §3 #2)
+        var longQualified = longTotal >= options.RequiredScore;
+        var shortQualified = shortTotal >= options.RequiredScore;
 
-        // 4. Threshold kontrolü
-        if (total < options.RequiredScore)
+        if (longQualified && shortQualified)
         {
-            const string skipReason = "score_below_threshold";
-            var ctxSkip = SerializeContext(snapshot, total, options.RequiredScore,
-                contribs, softMultiplier, emit: false, skipReason: skipReason);
+            const string skipReason = "both_directions_qualified";
+            var ctxSkip = SerializeContext(snapshot, longTotal, shortTotal, options.RequiredScore,
+                contribs, softMultiplier, emit: false, direction: null, skipReason: skipReason);
             return new CompositeSignalDecision(
-                Emit: false,
-                TotalScore: total,
+                Emit: false, Direction: null,
+                TotalScore: Math.Max(longTotal, shortTotal),
                 RequiredScore: options.RequiredScore,
                 SkipReason: skipReason,
-                EntryPrice: null,
-                StopPrice: null,
-                TakeProfitPrice: null,
-                MaxHoldMinutes: null,
-                ContextJson: ctxSkip);
+                EntryPrice: null, StopPrice: null, TakeProfitPrice: null,
+                MaxHoldMinutes: null, ContextJson: ctxSkip);
         }
 
-        // 5. Geometri (R:R 1:2, ATR clip)
+        if (!longQualified && !shortQualified)
+        {
+            const string skipReason = "score_below_threshold";
+            var ctxSkip = SerializeContext(snapshot, longTotal, shortTotal, options.RequiredScore,
+                contribs, softMultiplier, emit: false, direction: null, skipReason: skipReason);
+            return new CompositeSignalDecision(
+                Emit: false, Direction: null,
+                TotalScore: Math.Max(longTotal, shortTotal),
+                RequiredScore: options.RequiredScore,
+                SkipReason: skipReason,
+                EntryPrice: null, StopPrice: null, TakeProfitPrice: null,
+                MaxHoldMinutes: null, ContextJson: ctxSkip);
+        }
+
+        // 5. Tek bucket emit: yön belirle ve geometri hesapla
+        var direction = longQualified ? TradeDirection.Long : TradeDirection.Short;
+        var totalForDir = longQualified ? longTotal : shortTotal;
+
         var entry = snapshot.Close;
         if (entry <= 0m)
         {
             const string skipReason = "geometry_invalid:entry_zero";
-            var ctxSkip = SerializeContext(snapshot, total, options.RequiredScore,
-                contribs, softMultiplier, emit: false, skipReason: skipReason);
-            return new CompositeSignalDecision(false, total, options.RequiredScore, skipReason,
-                null, null, null, null, ctxSkip);
+            var ctxSkip = SerializeContext(snapshot, longTotal, shortTotal, options.RequiredScore,
+                contribs, softMultiplier, emit: false, direction: null, skipReason: skipReason);
+            return new CompositeSignalDecision(false, null, totalForDir, options.RequiredScore,
+                skipReason, null, null, null, null, ctxSkip);
         }
 
-        // SL = max(ATR × SlAtrMultiplier, MinSlPct × entry)  (yüzde olarak)
+        // SL hesabı (Long: entry altı; Short: entry üstü). slPct yüzde formundadır.
         decimal atrSlPct = entry > 0m ? snapshot.Atr14 * options.SlAtrMultiplier / entry : 0m;
         decimal slPct = Math.Max(atrSlPct, options.MinSlPct);
         if (options.MaxSlPct > 0m && slPct > options.MaxSlPct)
@@ -141,28 +152,47 @@ public sealed class WeightedScorePatternComposer : IPatternSignalComposer
             slPct = options.MaxSlPct;
         }
 
-        decimal stop = entry * (1m - slPct);
+        decimal stop;
+        decimal tp;
         decimal tpPct = slPct * options.TpRiskRewardRatio;
-        decimal tp = entry * (1m + tpPct);
 
-        if (stop >= entry || tp <= entry)
+        if (direction == TradeDirection.Long)
         {
-            const string skipReason = "geometry_invalid:tp_or_sl";
-            var ctxSkip = SerializeContext(snapshot, total, options.RequiredScore,
-                contribs, softMultiplier, emit: false, skipReason: skipReason);
-            return new CompositeSignalDecision(false, total, options.RequiredScore, skipReason,
-                null, null, null, null, ctxSkip);
+            stop = entry * (1m - slPct);
+            tp = entry * (1m + tpPct);
+            if (stop >= entry || tp <= entry)
+            {
+                const string skipReason = "geometry_invalid:tp_or_sl";
+                var ctxSkip = SerializeContext(snapshot, longTotal, shortTotal, options.RequiredScore,
+                    contribs, softMultiplier, emit: false, direction: null, skipReason: skipReason);
+                return new CompositeSignalDecision(false, null, totalForDir, options.RequiredScore,
+                    skipReason, null, null, null, null, ctxSkip);
+            }
+        }
+        else  // Short
+        {
+            stop = entry * (1m + slPct);
+            tp = entry * (1m - tpPct);
+            if (stop <= entry || tp >= entry)
+            {
+                const string skipReason = "geometry_invalid:tp_or_sl";
+                var ctxSkip = SerializeContext(snapshot, longTotal, shortTotal, options.RequiredScore,
+                    contribs, softMultiplier, emit: false, direction: null, skipReason: skipReason);
+                return new CompositeSignalDecision(false, null, totalForDir, options.RequiredScore,
+                    skipReason, null, null, null, null, ctxSkip);
+            }
         }
 
-        var ctxEmit = SerializeContext(snapshot, total, options.RequiredScore,
-            contribs, softMultiplier, emit: true, skipReason: null,
+        var ctxEmit = SerializeContext(snapshot, longTotal, shortTotal, options.RequiredScore,
+            contribs, softMultiplier, emit: true, direction: direction, skipReason: null,
             entry: entry, stop: stop, tp: tp,
             slPct: slPct, tpPct: tpPct,
             maxHold: options.MaxHoldMinutes);
 
         return new CompositeSignalDecision(
             Emit: true,
-            TotalScore: total,
+            Direction: direction,
+            TotalScore: totalForDir,
             RequiredScore: options.RequiredScore,
             SkipReason: null,
             EntryPrice: entry,
@@ -182,14 +212,13 @@ public sealed class WeightedScorePatternComposer : IPatternSignalComposer
         {
             return w;
         }
-        // Hard-gate ve soft filter detector'ları skor toplamına katkı vermez
         if (IsHardGateName(name) || string.Equals(name, AdxFilterName, StringComparison.OrdinalIgnoreCase))
         {
             return 0m;
         }
-        // Default ağırlıklar — spec §2 sabitleri
         return name switch
         {
+            // Long-bias defaults (spec §2 sabitleri)
             "ema_squeeze_break" => 3m,
             "vwap_bounce" => 2m,
             "inside_bar_breakout" => 3m,
@@ -200,17 +229,27 @@ public sealed class WeightedScorePatternComposer : IPatternSignalComposer
             "bullish_engulfing" => 2m,
             "hammer_reversal" => 2m,
             "bollinger_lower_reversal" => 2m,
-            _ => 1m, // bilinmeyen detector → 1
+            // Loop 92 — Short-bias defaults
+            "bearish_engulfing" => 2m,
+            "shooting_star" => 2m,
+            "bollinger_upper_reversal" => 1.5m,
+            "bollinger_squeeze_break_down" => 1.5m,
+            "rsi_overbought_pullback" => 1.5m,
+            "ema9_slope_down" => 1m,
+            "donchian_breakdown" => 1.5m,
+            _ => 1m,
         };
     }
 
     private static string SerializeContext(
         BarSnapshot snapshot,
-        decimal totalScore,
+        decimal longTotal,
+        decimal shortTotal,
         decimal requiredScore,
         IReadOnlyList<DetectorContrib> contribs,
         decimal softMultiplier,
         bool emit,
+        TradeDirection? direction,
         string? skipReason,
         decimal? entry = null,
         decimal? stop = null,
@@ -223,8 +262,10 @@ public sealed class WeightedScorePatternComposer : IPatternSignalComposer
         {
             type = "pattern-composite",
             emit,
+            direction = direction?.ToString(),
             skipReason,
-            totalScore,
+            longTotal,
+            shortTotal,
             requiredScore,
             softMultiplier,
             patterns = contribs,
@@ -253,5 +294,6 @@ public sealed class WeightedScorePatternComposer : IPatternSignalComposer
         decimal Weight,
         decimal SoftMultiplier,
         decimal Contribution,
+        string? Direction,
         string? Reason);
 }

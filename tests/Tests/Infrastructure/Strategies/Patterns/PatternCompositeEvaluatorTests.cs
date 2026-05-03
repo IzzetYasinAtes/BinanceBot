@@ -95,7 +95,7 @@ public class PatternCompositeEvaluatorTests
             new AdxRegimeFilter(),
         };
         var registry = new PatternRegistry(detectors);
-        var composer = new WeightedScorePatternComposer(NullLogger<WeightedScorePatternComposer>.Instance);
+        var composer = new WeightedScorePatternComposer(NullLogger<WeightedScorePatternComposer>.Instance, registry);
         var cd = cooldown ?? new CooldownService(NullLogger<CooldownService>.Instance);
         var clock = new FixedClock(DateTimeOffset.UtcNow);
 
