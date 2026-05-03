@@ -52,7 +52,7 @@ public class StopLossMonitorServiceTests
 
     private static Position SeedOpenPosition(
         StubDbContext db,
-        PositionSide side,
+        TradeDirection side,
         decimal stop,
         TradingMode mode = TradingMode.Paper)
     {
@@ -95,7 +95,7 @@ public class StopLossMonitorServiceTests
     public async Task LongPosition_BidBelowStop_TriggersClose()
     {
         using var db = NewDb();
-        var pos = SeedOpenPosition(db, PositionSide.Long, stop: 29500m);
+        var pos = SeedOpenPosition(db, TradeDirection.Long, stop: 29500m);
         SeedTicker(db, bid: 29400m, ask: 29410m);
 
         var mediator = new Mock<IMediator>(MockBehavior.Strict);
@@ -124,7 +124,7 @@ public class StopLossMonitorServiceTests
     public async Task LongPosition_BidAboveStop_DoesNotTrigger()
     {
         using var db = NewDb();
-        SeedOpenPosition(db, PositionSide.Long, stop: 29500m);
+        SeedOpenPosition(db, TradeDirection.Long, stop: 29500m);
         SeedTicker(db, bid: 29800m, ask: 29810m);
 
         var mediator = new Mock<IMediator>(MockBehavior.Strict);
@@ -143,7 +143,7 @@ public class StopLossMonitorServiceTests
     public async Task ShortPosition_AskAboveStop_TriggersClose()
     {
         using var db = NewDb();
-        var pos = SeedOpenPosition(db, PositionSide.Short, stop: 30500m);
+        var pos = SeedOpenPosition(db, TradeDirection.Short, stop: 30500m);
         SeedTicker(db, bid: 30590m, ask: 30600m);
 
         var mediator = new Mock<IMediator>(MockBehavior.Strict);
@@ -169,7 +169,7 @@ public class StopLossMonitorServiceTests
         using var db = NewDb();
         var pos = Position.Open(
             Symbol.From("BTCUSDT"),
-            PositionSide.Long,
+            TradeDirection.Long,
             quantity: 0.01m,
             entryPrice: 30000m,
             stopPrice: null,
@@ -203,7 +203,7 @@ public class StopLossMonitorServiceTests
         using var db = NewDb();
         // Note: StubDbContext ignores Strategy entity; the monitor query never joins it.
         // The contract under test is "tick scans positions independent of strategy state".
-        var pos = SeedOpenPosition(db, PositionSide.Long, stop: 76200m);
+        var pos = SeedOpenPosition(db, TradeDirection.Long, stop: 76200m);
         // BTC scenario from Loop 6: entry 76618, stop 76200 (~-0.55%), mark fell to 75876.
         SeedTicker(db, bid: 75876m, ask: 75880m);
 
@@ -228,7 +228,7 @@ public class StopLossMonitorServiceTests
     public async Task LiveMainnetPosition_IsSkippedDefensively()
     {
         using var db = NewDb();
-        SeedOpenPosition(db, PositionSide.Long, stop: 29500m, mode: TradingMode.LiveMainnet);
+        SeedOpenPosition(db, TradeDirection.Long, stop: 29500m, mode: TradingMode.LiveMainnet);
         SeedTicker(db, bid: 29400m, ask: 29410m);
 
         var mediator = new Mock<IMediator>(MockBehavior.Strict);

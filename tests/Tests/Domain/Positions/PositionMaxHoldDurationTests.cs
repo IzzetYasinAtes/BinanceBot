@@ -16,7 +16,7 @@ public class PositionMaxHoldDurationTests
     {
         return Position.Open(
             Symbol.From("BTCUSDT"),
-            PositionSide.Long,
+            TradeDirection.Long,
             quantity: 0.01m,
             entryPrice: 30000m,
             stopPrice: null,

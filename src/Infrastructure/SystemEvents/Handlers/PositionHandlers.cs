@@ -18,14 +18,14 @@ public sealed class PositionOpenedSystemEventHandler : INotificationHandler<Posi
         {
             positionId = notification.PositionId,
             symbol = notification.Symbol,
-            side = notification.Side.ToString(),
+            direction = notification.Direction.ToString(),
             entryPrice = notification.EntryPrice,
             quantity = notification.Quantity,
             mode = notification.Mode.ToString(),
         });
         return _publisher.PublishAsync(
             SystemEventType.PositionOpened,
-            $"Pozisyon açıldı: {notification.Symbol} {notification.Side} {notification.Quantity}",
+            $"Pozisyon açıldı: {notification.Symbol} {notification.Direction} {notification.Quantity}",
             details,
             cancellationToken);
     }

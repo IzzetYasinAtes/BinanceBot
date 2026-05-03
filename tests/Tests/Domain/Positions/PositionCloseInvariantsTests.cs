@@ -26,7 +26,7 @@ public class PositionCloseInvariantsTests
     {
         return Position.Open(
             Symbol.From("BTCUSDT"),
-            PositionSide.Long,
+            TradeDirection.Long,
             quantity: qty,
             entryPrice: entry,
             stopPrice: null,

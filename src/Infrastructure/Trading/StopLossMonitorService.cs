@@ -166,13 +166,13 @@ public sealed class StopLossMonitorService : BackgroundService
             }
 
             // Long positions exit on a falling bid; short positions exit on a rising ask.
-            var markPrice = pos.Side == PositionSide.Long ? bt.BidPrice : bt.AskPrice;
+            var markPrice = pos.Direction == TradeDirection.Long ? bt.BidPrice : bt.AskPrice;
             if (markPrice <= 0m)
             {
                 continue;
             }
 
-            var triggered = pos.Side == PositionSide.Long
+            var triggered = pos.Direction == TradeDirection.Long
                 ? markPrice <= stop
                 : markPrice >= stop;
             if (!triggered)

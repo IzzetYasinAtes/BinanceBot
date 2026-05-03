@@ -47,7 +47,7 @@ public class StrategySignalToOrderHandlerTests
             bool seedTicker = true,
             bool seedRiskProfile = true,
             bool seedOpenPosition = false,
-            PositionSide openPositionSide = PositionSide.Long,
+            TradeDirection openTradeDirection = TradeDirection.Long,
             int? maxOpenPositionsOverride = null,
             int seededOpenPositionsPerMode = 0)
     {
@@ -120,7 +120,7 @@ public class StrategySignalToOrderHandlerTests
         {
             var pos = Position.Open(
                 Symbol.From("BTCUSDT"),
-                openPositionSide,
+                openTradeDirection,
                 quantity: 0.01m,
                 entryPrice: 29500m,
                 stopPrice: null,
@@ -137,7 +137,7 @@ public class StrategySignalToOrderHandlerTests
                 {
                     db.Positions.Add(Position.Open(
                         Symbol.From("BTCUSDT"),
-                        PositionSide.Long,
+                        TradeDirection.Long,
                         quantity: 0.01m,
                         entryPrice: 29500m,
                         stopPrice: null,
@@ -384,7 +384,7 @@ public class StrategySignalToOrderHandlerTests
 
         // Seed: mode=Paper already has an open BTCUSDT position for strategyId=1.
         db.Positions.Add(Position.Open(
-            Symbol.From("BTCUSDT"), PositionSide.Long,
+            Symbol.From("BTCUSDT"), TradeDirection.Long,
             quantity: 0.01m, entryPrice: 29500m, stopPrice: null,
             strategyId: 1, mode: TradingMode.Paper, now: DateTimeOffset.UtcNow));
         db.SaveChanges();
@@ -431,7 +431,7 @@ public class StrategySignalToOrderHandlerTests
 
         // Open on LiveTestnet only; Paper + LiveMainnet stay eligible.
         db.Positions.Add(Position.Open(
-            Symbol.From("BTCUSDT"), PositionSide.Long,
+            Symbol.From("BTCUSDT"), TradeDirection.Long,
             0.01m, 29500m, null, strategyId: 1,
             mode: TradingMode.LiveTestnet, now: DateTimeOffset.UtcNow));
         db.SaveChanges();
@@ -473,7 +473,7 @@ public class StrategySignalToOrderHandlerTests
             minNotional: 5m, minQty: 0.001m, maxQty: 9000m,
             syncedAt: DateTimeOffset.UtcNow));
         db.Positions.Add(Position.Open(
-            Symbol.From("BNBUSDT"), PositionSide.Long,
+            Symbol.From("BNBUSDT"), TradeDirection.Long,
             0.01m, 600m, null, strategyId: 1,
             mode: TradingMode.Paper, now: DateTimeOffset.UtcNow));
         db.SaveChanges();

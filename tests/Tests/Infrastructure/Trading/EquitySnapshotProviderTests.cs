@@ -50,7 +50,7 @@ public class EquitySnapshotProviderTests
     private static Position OpenPosition(
         StubDbContext db,
         string symbol,
-        PositionSide side,
+        TradeDirection side,
         decimal qty,
         decimal entryPrice)
     {
@@ -91,7 +91,7 @@ public class EquitySnapshotProviderTests
     {
         var db = NewDb();
         SeedPaperBalance(db, startingBalance: 100m);
-        OpenPosition(db, "XRPUSDT", PositionSide.Long, qty: 0.5m, entryPrice: 79.94m);
+        OpenPosition(db, "XRPUSDT", TradeDirection.Long, qty: 0.5m, entryPrice: 79.94m);
         var sut = new EquitySnapshotProvider(db);
 
         var realized = await sut.GetRealizedEquityAsync(TradingMode.Paper, CancellationToken.None);
@@ -109,7 +109,7 @@ public class EquitySnapshotProviderTests
     {
         var db = NewDb();
         SeedPaperBalance(db, startingBalance: 100m);
-        var pos = OpenPosition(db, "XRPUSDT", PositionSide.Long, qty: 0.5m, entryPrice: 80m);
+        var pos = OpenPosition(db, "XRPUSDT", TradeDirection.Long, qty: 0.5m, entryPrice: 80m);
         // Mark price 10x — UnrealizedPnl explodes, realized must stay at 100.
         pos.MarkToMarket(markPrice: 800m, now: T0.AddMinutes(1));
         db.SaveChanges();
@@ -131,10 +131,10 @@ public class EquitySnapshotProviderTests
         var db = NewDb();
         SeedPaperBalance(db, startingBalance: 100m);
 
-        var winner = OpenPosition(db, "BTCUSDT", PositionSide.Long, qty: 0.001m, entryPrice: 30_000m);
+        var winner = OpenPosition(db, "BTCUSDT", TradeDirection.Long, qty: 0.001m, entryPrice: 30_000m);
         winner.Close(exitPrice: 35_000m, reason: "tp", now: T0.AddMinutes(5)); // +$5
 
-        var loser = OpenPosition(db, "ETHUSDT", PositionSide.Short, qty: 0.02m, entryPrice: 2_500m);
+        var loser = OpenPosition(db, "ETHUSDT", TradeDirection.Short, qty: 0.02m, entryPrice: 2_500m);
         loser.Close(exitPrice: 2_600m, reason: "sl", now: T0.AddMinutes(10)); // -$2
 
         db.SaveChanges();
@@ -158,13 +158,13 @@ public class EquitySnapshotProviderTests
         SeedPaperBalance(db, startingBalance: 100m);
 
         // Two open positions (mark pumped) — must contribute zero.
-        var open1 = OpenPosition(db, "BTCUSDT", PositionSide.Long, qty: 0.001m, entryPrice: 30_000m);
+        var open1 = OpenPosition(db, "BTCUSDT", TradeDirection.Long, qty: 0.001m, entryPrice: 30_000m);
         open1.MarkToMarket(markPrice: 60_000m, now: T0.AddMinutes(1));
-        var open2 = OpenPosition(db, "ETHUSDT", PositionSide.Long, qty: 0.02m, entryPrice: 2_500m);
+        var open2 = OpenPosition(db, "ETHUSDT", TradeDirection.Long, qty: 0.02m, entryPrice: 2_500m);
         open2.MarkToMarket(markPrice: 3_000m, now: T0.AddMinutes(1));
 
         // One closed loss -$1.50.
-        var closedLoss = OpenPosition(db, "BNBUSDT", PositionSide.Long, qty: 0.1m, entryPrice: 500m);
+        var closedLoss = OpenPosition(db, "BNBUSDT", TradeDirection.Long, qty: 0.1m, entryPrice: 500m);
         closedLoss.Close(exitPrice: 485m, reason: "sl", now: T0.AddMinutes(5)); // -$1.50
 
         db.SaveChanges();
@@ -210,7 +210,7 @@ public class EquitySnapshotProviderTests
     {
         var db = NewDb();
         SeedPaperBalance(db, startingBalance: 100m);
-        var pos = OpenPosition(db, "XRPUSDT", PositionSide.Long, qty: 0.5m, entryPrice: 80m);
+        var pos = OpenPosition(db, "XRPUSDT", TradeDirection.Long, qty: 0.5m, entryPrice: 80m);
         pos.MarkToMarket(markPrice: 800m, now: T0.AddMinutes(1));
         db.SaveChanges();
 

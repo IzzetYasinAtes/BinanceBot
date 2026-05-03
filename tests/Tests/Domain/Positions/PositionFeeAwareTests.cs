@@ -23,7 +23,7 @@ public class PositionFeeAwareTests
         // qty=1, long, entry 10, exit 11 -> gross = (11-10)*1 = 1.0.
         var position = Position.Open(
             Symbol.From("BTCUSDT"),
-            PositionSide.Long,
+            TradeDirection.Long,
             quantity: 1m,
             entryPrice: 10m,
             stopPrice: null,
@@ -53,7 +53,7 @@ public class PositionFeeAwareTests
         // baseline). Prevents silent semantic drift in admin/test code paths.
         var position = Position.Open(
             Symbol.From("ETHUSDT"),
-            PositionSide.Long,
+            TradeDirection.Long,
             quantity: 0.02m,
             entryPrice: 2500m,
             stopPrice: null,
@@ -75,7 +75,7 @@ public class PositionFeeAwareTests
         // so a close after multiple fills nets the full entry-side fee ledger.
         var position = Position.Open(
             Symbol.From("BTCUSDT"),
-            PositionSide.Long,
+            TradeDirection.Long,
             quantity: 0.001m,
             entryPrice: 30000m,
             stopPrice: null,
@@ -96,7 +96,7 @@ public class PositionFeeAwareTests
     {
         Action act = () => Position.Open(
             Symbol.From("BTCUSDT"),
-            PositionSide.Long,
+            TradeDirection.Long,
             quantity: 0.001m,
             entryPrice: 30000m,
             stopPrice: null,
@@ -114,7 +114,7 @@ public class PositionFeeAwareTests
     {
         var position = Position.Open(
             Symbol.From("BTCUSDT"),
-            PositionSide.Long,
+            TradeDirection.Long,
             quantity: 0.001m,
             entryPrice: 30000m,
             stopPrice: null,

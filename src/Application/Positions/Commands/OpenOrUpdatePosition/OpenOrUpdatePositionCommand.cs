@@ -38,7 +38,7 @@ public sealed class OpenOrUpdatePositionCommandHandler
                 nameof(request.OrderSide), "Invalid side", null, ValidationSeverity.Error));
         }
 
-        var positionSide = side == OrderSide.Buy ? PositionSide.Long : PositionSide.Short;
+        var direction = side == OrderSide.Buy ? TradeDirection.Long : TradeDirection.Short;
 
         var open = await _db.Positions
             .Where(p => p.Symbol == symbolVo
@@ -52,17 +52,17 @@ public sealed class OpenOrUpdatePositionCommandHandler
             {
                 // Admin-driven open path has no risk-stop hint (ADR-0012 §12.4 — stops travel
                 // through the signal/order pipeline; manual opens stay un-stopped on purpose).
-                var created = Position.Open(symbolVo, positionSide, request.Quantity, request.Price,
+                var created = Position.Open(symbolVo, direction, request.Quantity, request.Price,
                     stopPrice: null, request.StrategyId, request.Mode, _clock.UtcNow);
                 _db.Positions.Add(created);
                 await _db.SaveChangesAsync(ct);
                 return Result.Success(created.Id);
             }
 
-            if (open.Side != positionSide)
+            if (open.Direction != direction)
             {
                 return Result<long>.Conflict(
-                    $"Open position {open.Id} has side {open.Side}, incoming fill side {positionSide}");
+                    $"Open position {open.Id} has direction {open.Direction}, incoming fill direction {direction}");
             }
 
             open.AddFill(request.Quantity, request.Price, _clock.UtcNow);

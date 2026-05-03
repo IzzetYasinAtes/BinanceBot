@@ -16,7 +16,7 @@ public class PositionModeTests
     {
         var position = Position.Open(
             Symbol.From("BTCUSDT"),
-            PositionSide.Long,
+            TradeDirection.Long,
             quantity: 0.01m,
             entryPrice: 30000m,
             stopPrice: null,
@@ -33,7 +33,7 @@ public class PositionModeTests
     [Fact]
     public void Close_EmitsClosedEventWithMode()
     {
-        var p = Position.Open(Symbol.From("BTCUSDT"), PositionSide.Long,
+        var p = Position.Open(Symbol.From("BTCUSDT"), TradeDirection.Long,
             0.01m, 30000m, null, 1, TradingMode.LiveTestnet, DateTimeOffset.UtcNow);
         p.ClearDomainEvents();
 

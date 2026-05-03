@@ -43,7 +43,7 @@ public class TakeProfitMonitorServiceTests
 
     private static Position SeedOpenPosition(
         StubDbContext db,
-        PositionSide side,
+        TradeDirection side,
         decimal? takeProfit,
         TradingMode mode = TradingMode.Paper)
     {
@@ -83,7 +83,7 @@ public class TakeProfitMonitorServiceTests
     public async Task LongPosition_BidAtOrAboveTakeProfit_TriggersClose()
     {
         using var db = NewDb();
-        var pos = SeedOpenPosition(db, PositionSide.Long, takeProfit: 30500m);
+        var pos = SeedOpenPosition(db, TradeDirection.Long, takeProfit: 30500m);
         SeedTicker(db, bid: 30600m, ask: 30610m);
 
         var mediator = new Mock<IMediator>(MockBehavior.Strict);
@@ -112,7 +112,7 @@ public class TakeProfitMonitorServiceTests
     public async Task ShortPosition_AskAtOrBelowTakeProfit_TriggersClose()
     {
         using var db = NewDb();
-        var pos = SeedOpenPosition(db, PositionSide.Short, takeProfit: 29500m);
+        var pos = SeedOpenPosition(db, TradeDirection.Short, takeProfit: 29500m);
         SeedTicker(db, bid: 29390m, ask: 29400m);
 
         var mediator = new Mock<IMediator>(MockBehavior.Strict);
@@ -136,7 +136,7 @@ public class TakeProfitMonitorServiceTests
     public async Task PositionWithNullTakeProfit_IsSkipped()
     {
         using var db = NewDb();
-        SeedOpenPosition(db, PositionSide.Long, takeProfit: null);
+        SeedOpenPosition(db, TradeDirection.Long, takeProfit: null);
         SeedTicker(db, bid: 99999m, ask: 100000m);
 
         var mediator = new Mock<IMediator>(MockBehavior.Strict);

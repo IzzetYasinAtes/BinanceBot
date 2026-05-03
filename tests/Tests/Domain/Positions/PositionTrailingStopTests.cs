@@ -19,7 +19,7 @@ public class PositionTrailingStopTests
     {
         return Position.Open(
             Symbol.From("BTCUSDT"),
-            PositionSide.Long,
+            TradeDirection.Long,
             quantity: 0.01m,
             entryPrice: entry,
             stopPrice: initialStop,
@@ -45,7 +45,7 @@ public class PositionTrailingStopTests
             markPrice: 95400m, trailPct: 0.0015m, asOf: T0.AddMinutes(5));
 
         result.Should().Be(TrailingResult.NotEligible);
-        pos.PeakMarkPrice.Should().Be(0m, "BE applied değilken peak güncellenmemeli");
+        pos.ExtremeMarkPrice.Should().Be(0m, "BE applied değilken peak güncellenmemeli");
         pos.DomainEvents.Should().NotContain(e => e is PositionTrailingExitTriggeredEvent);
     }
 
@@ -54,12 +54,12 @@ public class PositionTrailingStopTests
     {
         var pos = OpenLongWithBeApplied(entry: 95000m, beStop: 95019m);
 
-        // İlk eligible tick — PeakMarkPrice default 0, mark > 0 → peak refresh.
+        // İlk eligible tick — ExtremeMarkPrice default 0, mark > 0 → peak refresh.
         var result = pos.UpdatePeakAndCheckTrailing(
             markPrice: 95400m, trailPct: 0.0015m, asOf: T0.AddMinutes(15));
 
         result.Should().Be(TrailingResult.PeakUpdated);
-        pos.PeakMarkPrice.Should().Be(95400m);
+        pos.ExtremeMarkPrice.Should().Be(95400m);
         pos.UpdatedAt.Should().Be(T0.AddMinutes(15));
         pos.DomainEvents.Should().NotContain(e => e is PositionTrailingExitTriggeredEvent);
     }
@@ -74,7 +74,7 @@ public class PositionTrailingStopTests
             markPrice: 95600m, trailPct: 0.0015m, asOf: T0.AddMinutes(20));
 
         result.Should().Be(TrailingResult.PeakUpdated);
-        pos.PeakMarkPrice.Should().Be(95600m, "yeni high peak'i ileri taşır");
+        pos.ExtremeMarkPrice.Should().Be(95600m, "yeni high peak'i ileri taşır");
     }
 
     [Fact]
@@ -89,7 +89,7 @@ public class PositionTrailingStopTests
             markPrice: 95500m, trailPct: 0.0015m, asOf: T0.AddMinutes(22));
 
         result.Should().Be(TrailingResult.PeakUpdated);
-        pos.PeakMarkPrice.Should().Be(95600m, "in-band tick peak'i indirmez");
+        pos.ExtremeMarkPrice.Should().Be(95600m, "in-band tick peak'i indirmez");
         pos.DomainEvents.Should().NotContain(e => e is PositionTrailingExitTriggeredEvent);
     }
 
@@ -105,7 +105,7 @@ public class PositionTrailingStopTests
             markPrice: 95300m, trailPct: 0.0015m, asOf: T0.AddMinutes(25));
 
         result.Should().Be(TrailingResult.ExitTriggered);
-        pos.PeakMarkPrice.Should().Be(95600m, "exit'te peak değişmez (audit için yatık kalır)");
+        pos.ExtremeMarkPrice.Should().Be(95600m, "exit'te peak değişmez (audit için yatık kalır)");
 
         var evt = pos.DomainEvents.OfType<PositionTrailingExitTriggeredEvent>().Should().ContainSingle().Subject;
         evt.PositionId.Should().Be(pos.Id);

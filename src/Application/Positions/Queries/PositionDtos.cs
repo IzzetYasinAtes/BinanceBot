@@ -3,7 +3,7 @@ namespace BinanceBot.Application.Positions.Queries;
 public sealed record PositionDto(
     long Id,
     string Symbol,
-    string Side,
+    string Direction,
     string Status,
     decimal Quantity,
     decimal AverageEntryPrice,

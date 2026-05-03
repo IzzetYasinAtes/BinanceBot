@@ -156,17 +156,8 @@ public sealed class MarkToMarketWorker : BackgroundService
         // erken return kurşun-yele.
         if (position.BreakEvenAppliedAt is not null) return;
 
-        // MVP: Long-only path. KMS Long-only kontratıyla hizalı; Short eklenirse
-        // burada simetrik else dalı eklenir. Short geldiğinde "early skip" sessiz
-        // değil, explicit log.
-        if (position.Side != PositionSide.Long)
-        {
-            _logger.LogDebug(
-                "BE move skip non-Long pos={PosId} side={Side} (Loop 75 MVP Long-only)",
-                position.Id, position.Side);
-            return;
-        }
-
+        // Loop 92 — Long+Short symmetry. Long: mark >= entry × (1+trigger), newStop = entry × (1+offset).
+        // Short: mark <= entry × (1-trigger), newStop = entry × (1-offset).
         if (opts.TriggerPct <= 0m || opts.OffsetPct <= 0m)
         {
             _logger.LogWarning(
@@ -178,10 +169,19 @@ public sealed class MarkToMarketWorker : BackgroundService
         var entry = position.AverageEntryPrice;
         if (entry <= 0m) return;
 
-        var triggerPrice = entry * (1m + opts.TriggerPct);
-        if (markPrice < triggerPrice) return;  // henüz UPnl eşiğin altında
-
-        var newStop = entry * (1m + opts.OffsetPct);
+        decimal newStop;
+        if (position.Direction == TradeDirection.Long)
+        {
+            var triggerPrice = entry * (1m + opts.TriggerPct);
+            if (markPrice < triggerPrice) return;  // henüz UPnl eşiğin altında
+            newStop = entry * (1m + opts.OffsetPct);
+        }
+        else
+        {
+            var triggerPrice = entry * (1m - opts.TriggerPct);
+            if (markPrice > triggerPrice) return;  // Short için mark düşmedi henüz
+            newStop = entry * (1m - opts.OffsetPct);
+        }
 
         var result = position.MoveStopToBreakEven(newStop, asOf);
         switch (result)
@@ -222,15 +222,7 @@ public sealed class MarkToMarketWorker : BackgroundService
         // Aggregate kendisi NotEligible döner ama early check log gürültüsünü azaltır.
         if (position.BreakEvenAppliedAt is null) return;
 
-        // Long-only kontrat (BE move ile hizalı). Short eklenirse simetri burada.
-        if (position.Side != PositionSide.Long)
-        {
-            _logger.LogDebug(
-                "TRAILING skip non-Long pos={PosId} side={Side} (Loop 76 MVP Long-only)",
-                position.Id, position.Side);
-            return;
-        }
-
+        // Loop 92 — Long+Short trailing aktif. Long: peak high; Short: trough low.
         if (opts.TrailPct <= 0m)
         {
             _logger.LogWarning(
@@ -239,8 +231,8 @@ public sealed class MarkToMarketWorker : BackgroundService
             return;
         }
 
-        // Capture peak BEFORE call so logging shows the source value of the decision.
-        var prevPeak = position.PeakMarkPrice;
+        // Capture extreme BEFORE call so logging shows the source value of the decision.
+        var prevExtreme = position.ExtremeMarkPrice;
 
         TrailingResult result;
         try
@@ -261,18 +253,18 @@ public sealed class MarkToMarketWorker : BackgroundService
                 // BE applied null — defensive (early return zaten yakalamıştı).
                 break;
             case TrailingResult.PeakUpdated:
-                if (position.PeakMarkPrice > prevPeak)
+                if (position.ExtremeMarkPrice != prevExtreme)
                 {
                     _logger.LogInformation(
-                        "TRAILING peak-up pos={PosId} symbol={Symbol} prevPeak={Prev} newPeak={New} trailPct={TrailPct}",
-                        position.Id, position.Symbol.Value, prevPeak, position.PeakMarkPrice, opts.TrailPct);
+                        "TRAILING extreme-update pos={PosId} symbol={Symbol} direction={Direction} prev={Prev} new={New} trailPct={TrailPct}",
+                        position.Id, position.Symbol.Value, position.Direction, prevExtreme, position.ExtremeMarkPrice, opts.TrailPct);
                 }
                 break;
             case TrailingResult.ExitTriggered:
                 _logger.LogWarning(
-                    "TRAILING-EXIT trigger pos={PosId} symbol={Symbol} peak={Peak} mark={Mark} trailPct={TrailPct}",
-                    position.Id, position.Symbol.Value, position.PeakMarkPrice, markPrice, opts.TrailPct);
-                exits.Add((position, markPrice, position.PeakMarkPrice, opts.TrailPct));
+                    "TRAILING-EXIT trigger pos={PosId} symbol={Symbol} direction={Direction} extreme={Extreme} mark={Mark} trailPct={TrailPct}",
+                    position.Id, position.Symbol.Value, position.Direction, position.ExtremeMarkPrice, markPrice, opts.TrailPct);
+                exits.Add((position, markPrice, position.ExtremeMarkPrice, opts.TrailPct));
                 break;
         }
     }

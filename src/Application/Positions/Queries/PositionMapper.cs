@@ -7,7 +7,7 @@ internal static class PositionMapper
     public static PositionDto ToDto(Position p) => new(
         p.Id,
         p.Symbol.Value,
-        p.Side.ToString(),
+        p.Direction.ToString(),
         p.Status.ToString(),
         p.Quantity,
         p.AverageEntryPrice,

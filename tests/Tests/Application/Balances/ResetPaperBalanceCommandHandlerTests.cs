@@ -99,7 +99,7 @@ public sealed class ResetPaperBalanceCommandHandlerTests
         TradingMode mode, DateTimeOffset openedAt)
     {
         var pos = Position.Open(
-            Symbol.From(symbol), PositionSide.Long, quantity: 0.01m,
+            Symbol.From(symbol), TradeDirection.Long, quantity: 0.01m,
             entryPrice: entry, stopPrice: null, strategyId: null,
             mode: mode, now: openedAt);
         pos.Close(exit, "tp", openedAt.AddMinutes(5));
@@ -113,7 +113,7 @@ public sealed class ResetPaperBalanceCommandHandlerTests
         TradingMode mode, DateTimeOffset openedAt, decimal markPrice)
     {
         var pos = Position.Open(
-            Symbol.From(symbol), PositionSide.Long, quantity: 0.01m,
+            Symbol.From(symbol), TradeDirection.Long, quantity: 0.01m,
             entryPrice: entry, stopPrice: null, strategyId: null,
             mode: mode, now: openedAt);
         pos.MarkToMarket(markPrice, openedAt.AddSeconds(30));

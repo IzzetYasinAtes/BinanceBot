@@ -6,12 +6,6 @@ public enum PositionStatus
     Closed = 2,
 }
 
-public enum PositionSide
-{
-    Long = 1,
-    Short = 2,
-}
-
 /// <summary>
 /// Loop 75 — break-even SL move outcome. Result-pattern enum so the caller
 /// stays exception-free for expected idempotency / no-improve paths
@@ -31,18 +25,22 @@ public enum MoveStopResult
 /// Loop 76 — trailing-stop tick outcome. Returned by
 /// <see cref="Position.UpdatePeakAndCheckTrailing"/> so the caller
 /// (MarkToMarketWorker) stays exception-free for the expected three branches
-/// of trailing flow (BE not yet applied → not eligible, mark made a new high
-/// → peak refreshed, mark dropped past trail → exit dispatch). Combo with
-/// <see cref="MoveStopResult"/>: BE move runs first and "arms" trailing;
-/// once <see cref="Position.BreakEvenAppliedAt"/> is non-null this method
-/// can transition out of <see cref="NotEligible"/>.
+/// of trailing flow (BE not yet applied → not eligible, mark made a new
+/// extreme → extreme refreshed, mark crossed back through trail → exit
+/// dispatch). Combo with <see cref="MoveStopResult"/>: BE move runs first
+/// and "arms" trailing; once <see cref="Position.BreakEvenAppliedAt"/> is
+/// non-null this method can transition out of <see cref="NotEligible"/>.
+///
+/// Loop 92 (Futures pivot): Long ⇒ <c>peak high</c> tracking (yeni high → refresh,
+/// mark &lt; peak × (1-trail) → exit); Short ⇒ <c>trough low</c> tracking
+/// (yeni low → refresh, mark &gt; trough × (1+trail) → exit). Aynı enum.
 /// </summary>
 public enum TrailingResult
 {
-    /// <summary>BE move not yet applied — trailing dormant, no peak update either.</summary>
+    /// <summary>BE move not yet applied — trailing dormant, no extreme update either.</summary>
     NotEligible = 1,
-    /// <summary>Mark made a new high — <see cref="Position.PeakMarkPrice"/> updated, no exit.</summary>
+    /// <summary>Mark made a new extreme (Long: high; Short: low) — <c>ExtremeMarkPrice</c> updated, no exit.</summary>
     PeakUpdated = 2,
-    /// <summary>Mark fell below <c>peak × (1 - trailPct)</c> — caller dispatches close.</summary>
+    /// <summary>Mark crossed back through trail (Long: below; Short: above) — caller dispatches close.</summary>
     ExitTriggered = 3,
 }

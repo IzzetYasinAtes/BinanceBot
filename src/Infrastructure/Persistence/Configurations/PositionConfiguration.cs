@@ -18,7 +18,8 @@ public sealed class PositionConfiguration : IEntityTypeConfiguration<Position>
             .HasMaxLength(20)
             .IsRequired();
 
-        builder.Property(p => p.Side).HasConversion<int>();
+        // Loop 92 — Side → Direction rename (kolon adı "Direction") + value backing aynı (1=Long, 2=Short).
+        builder.Property(p => p.Direction).HasColumnName("Direction").HasConversion<int>();
         builder.Property(p => p.Status).HasConversion<int>();
         builder.Property(p => p.Mode).HasConversion<int>().IsRequired();
 
@@ -41,10 +42,10 @@ public sealed class PositionConfiguration : IEntityTypeConfiguration<Position>
         // Loop 75 — break-even SL move audit timestamp. Nullable datetimeoffset,
         // null = BE never applied. EF default precision yeterli (datetimeoffset(7)).
         builder.Property(p => p.BreakEvenAppliedAt);
-        // Loop 76 — trailing-stop running peak. NOT NULL DEFAULT 0; BE
-        // applied'tan önce dormant (UpdatePeakAndCheckTrailing erkenden
-        // NotEligible döner). decimal(18,8) Symbol fiyat hassasiyeti ile uyumlu.
-        builder.Property(p => p.PeakMarkPrice)
+        // Loop 76 + Loop 92 — trailing extreme. NOT NULL DEFAULT 0. PeakMarkPrice
+        // → ExtremeMarkPrice rename (Long bias terim → Long+Short symmetry).
+        // Long: peak high; Short: trough low.
+        builder.Property(p => p.ExtremeMarkPrice)
             .HasColumnType("decimal(18,8)")
             .IsRequired()
             .HasDefaultValue(0m);

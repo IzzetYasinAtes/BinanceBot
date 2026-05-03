@@ -80,7 +80,7 @@ public class OrderFilledPositionHandlerTests
             {
                 b.HasKey(x => x.Id);
                 b.Property(x => x.Symbol).HasConversion(s => s.Value, v => Symbol.From(v));
-                b.Property(x => x.Side).HasConversion<int>();
+                b.Property(x => x.Direction).HasConversion<int>();
                 b.Property(x => x.Status).HasConversion<int>();
                 b.Property(x => x.Mode).HasConversion<int>();
                 b.Ignore(x => x.DomainEvents);

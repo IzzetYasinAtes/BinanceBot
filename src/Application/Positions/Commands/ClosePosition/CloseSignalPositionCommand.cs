@@ -77,7 +77,7 @@ public sealed class CloseSignalPositionCommandHandler
                 $"No open position for {req.Symbol} mode={req.Mode}");
         }
 
-        var reverseSide = position.Side == PositionSide.Long ? OrderSide.Sell : OrderSide.Buy;
+        var reverseSide = position.Direction == TradeDirection.Long ? OrderSide.Sell : OrderSide.Buy;
         // Suffix "x" disambiguates exit cid from entry cid for the same bar (ADR-0008 §8.2).
         var cid = $"{req.CorrelationCidPrefix}-x-{req.Mode.ToCidSuffix()}";
 

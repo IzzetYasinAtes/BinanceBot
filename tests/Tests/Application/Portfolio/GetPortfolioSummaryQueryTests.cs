@@ -45,7 +45,7 @@ public class GetPortfolioSummaryQueryTests
     }
 
     private static Position OpenPos(
-        StubDbContext db, string sym, PositionSide side, decimal qty, decimal entry)
+        StubDbContext db, string sym, TradeDirection side, decimal qty, decimal entry)
     {
         var p = Position.Open(
             Symbol.From(sym), side, qty, entry,
@@ -107,7 +107,7 @@ public class GetPortfolioSummaryQueryTests
     {
         var db = NewDb();
         SeedPaper(db, 100m);
-        var pos = OpenPos(db, "XRPUSDT", PositionSide.Long, qty: 10m, entry: 2m); // cost 20
+        var pos = OpenPos(db, "XRPUSDT", TradeDirection.Long, qty: 10m, entry: 2m); // cost 20
         pos.MarkToMarket(markPrice: 2.5m, now: T0.AddMinutes(1));                  // unrealized +5
         db.SaveChanges();
 
@@ -139,11 +139,11 @@ public class GetPortfolioSummaryQueryTests
         var db = NewDb();
         SeedPaper(db, 100m);
 
-        var winner = OpenPos(db, "BTCUSDT", PositionSide.Long, qty: 0.001m, entry: 30000m);
+        var winner = OpenPos(db, "BTCUSDT", TradeDirection.Long, qty: 0.001m, entry: 30000m);
         winner.Close(exitPrice: 35000m, reason: "tp", now: T0.AddMinutes(5));   // +5
-        var loser = OpenPos(db, "ETHUSDT", PositionSide.Short, qty: 0.02m, entry: 2500m);
+        var loser = OpenPos(db, "ETHUSDT", TradeDirection.Short, qty: 0.02m, entry: 2500m);
         loser.Close(exitPrice: 2600m, reason: "sl", now: T0.AddMinutes(10));    // -2
-        var second = OpenPos(db, "BNBUSDT", PositionSide.Long, qty: 0.1m, entry: 500m);
+        var second = OpenPos(db, "BNBUSDT", TradeDirection.Long, qty: 0.1m, entry: 500m);
         second.Close(exitPrice: 505m, reason: "tp", now: T0.AddMinutes(15));    // +0.5
         db.SaveChanges();
 
@@ -197,7 +197,7 @@ public class GetPortfolioSummaryQueryTests
     {
         var db = NewDb();
         SeedPaper(db, 100m);
-        var pos = OpenPos(db, "XRPUSDT", PositionSide.Long, qty: 10m, entry: 2m);
+        var pos = OpenPos(db, "XRPUSDT", TradeDirection.Long, qty: 10m, entry: 2m);
         pos.MarkToMarket(markPrice: 2.5m, now: T0.AddMinutes(1));
         db.SaveChanges();
 
@@ -216,10 +216,10 @@ public class GetPortfolioSummaryQueryTests
         var db = NewDb();
         SeedPaper(db, 500m);
 
-        var closed = OpenPos(db, "BTCUSDT", PositionSide.Long, qty: 0.001m, entry: 30000m);
+        var closed = OpenPos(db, "BTCUSDT", TradeDirection.Long, qty: 0.001m, entry: 30000m);
         closed.Close(exitPrice: 31000m, reason: "tp", now: T0.AddMinutes(5));
 
-        var openPos = OpenPos(db, "ETHUSDT", PositionSide.Long, qty: 0.05m, entry: 2500m);
+        var openPos = OpenPos(db, "ETHUSDT", TradeDirection.Long, qty: 0.05m, entry: 2500m);
         openPos.MarkToMarket(markPrice: 2600m, now: T0.AddMinutes(6));
         db.SaveChanges();
 
@@ -269,7 +269,7 @@ public class GetPortfolioSummaryQueryTests
         // ADR-0020 §20.6). Aggregated as 1 representative closed position.
         var closed = Position.Open(
             Symbol.From("BTCUSDT"),
-            PositionSide.Long,
+            TradeDirection.Long,
             quantity: 0.01m,
             entryPrice: 100m,            // notional 1.00
             stopPrice: null,
@@ -286,7 +286,7 @@ public class GetPortfolioSummaryQueryTests
         // by adding a small winning trade (gross +0.59).
         var winner = Position.Open(
             Symbol.From("ETHUSDT"),
-            PositionSide.Long,
+            TradeDirection.Long,
             quantity: 1m,
             entryPrice: 1m,
             stopPrice: null,
@@ -305,7 +305,7 @@ public class GetPortfolioSummaryQueryTests
         // 3 open positions: total notional $300.53, total entry commission $0.23.
         var open1 = Position.Open(
             Symbol.From("XRPUSDT"),
-            PositionSide.Long,
+            TradeDirection.Long,
             quantity: 100m,
             entryPrice: 1m,              // notional 100.00
             stopPrice: null,
@@ -315,7 +315,7 @@ public class GetPortfolioSummaryQueryTests
             entryCommission: 0.10m);
         var open2 = Position.Open(
             Symbol.From("BNBUSDT"),
-            PositionSide.Long,
+            TradeDirection.Long,
             quantity: 1m,
             entryPrice: 100.53m,         // notional 100.53
             stopPrice: null,
@@ -325,7 +325,7 @@ public class GetPortfolioSummaryQueryTests
             entryCommission: 0.10m);
         var open3 = Position.Open(
             Symbol.From("SOLUSDT"),
-            PositionSide.Long,
+            TradeDirection.Long,
             quantity: 2m,
             entryPrice: 50m,             // notional 100.00
             stopPrice: null,
@@ -389,7 +389,7 @@ public class GetPortfolioSummaryQueryTests
         {
             var pos = Position.Open(
                 Symbol.From("BTCUSDT"),
-                PositionSide.Long,
+                TradeDirection.Long,
                 quantity: 0.001m,
                 entryPrice: 5100m,
                 stopPrice: null,

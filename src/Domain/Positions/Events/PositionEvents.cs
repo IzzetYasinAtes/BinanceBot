@@ -5,7 +5,7 @@ namespace BinanceBot.Domain.Positions.Events;
 public sealed record PositionOpenedEvent(
     long PositionId,
     string Symbol,
-    PositionSide Side,
+    TradeDirection Direction,
     decimal EntryPrice,
     decimal Quantity,
     TradingMode Mode) : DomainEventBase;
@@ -44,11 +44,12 @@ public sealed record PositionStopMovedEvent(
 
 /// <summary>
 /// Loop 76 — trailing-stop exit trigger audit. Domain method
-/// <c>Position.UpdatePeakAndCheckTrailing</c>, BE applied + mark &lt; peak × (1 − trailPct)
+/// <c>Position.UpdatePeakAndCheckTrailing</c>, BE applied + trail crossed
 /// koşulunu gördüğünde raise eder. Aggregate aslında close edilmez; bu sadece
 /// "closer'a haber" event'idir — gerçek close, MarkToMarketWorker'ın
 /// <c>CloseSignalPositionCommand</c> dispatch'iyle StopLoss/TakeProfit pattern'i
-/// üzerinden gerçekleşir. UI ve audit log consumer'ları için aksiyon kayıtlı kalır.
+/// üzerinden gerçekleşir. Long: peak high üzerinden, Short: trough low
+/// üzerinden hesaplanır (Loop 92 Futures pivot, ADR-0025).
 /// </summary>
 public sealed record PositionTrailingExitTriggeredEvent(
     long PositionId,

@@ -141,27 +141,27 @@ public sealed class OrderFilledPositionHandler : INotificationHandler<OrderFille
         {
             if (openPosition is null)
             {
-                var newSide = order.Side == OrderSide.Buy ? PositionSide.Long : PositionSide.Short;
+                var newDirection = order.Side == OrderSide.Buy ? TradeDirection.Long : TradeDirection.Short;
                 // ADR-0012 §12.4: forward Order.StopPrice into Position so StopLossMonitorService
                 // can soft-trigger an exit when mark price crosses the level.
                 // Loop 10 take-profit fix: same forwarding pattern for Order.TakeProfit so
                 // TakeProfitMonitorService can realize gains on the resulting Position.
                 // ADR-0014 §14.5: maxHoldDuration sourced above from StrategySignal.ContextJson.
-                var pos = Position.Open(order.Symbol, newSide, fillQty, fillPrice,
+                var pos = Position.Open(order.Symbol, newDirection, fillQty, fillPrice,
                     order.StopPrice, order.StrategyId, order.Mode, now,
                     entryCommission: orderQuoteFee,
                     takeProfit: order.TakeProfit,
                     maxHoldDuration: maxHoldDuration);
                 db.Positions.Add(pos);
                 _logger.LogInformation(
-                    "Position opened from fill {Cid} side={Side} qty={Qty} price={Price}",
-                    notification.ClientOrderId, newSide, fillQty, fillPrice);
+                    "Position opened from fill {Cid} direction={Direction} qty={Qty} price={Price}",
+                    notification.ClientOrderId, newDirection, fillQty, fillPrice);
             }
             else
             {
                 var sameSide =
-                    (openPosition.Side == PositionSide.Long && order.Side == OrderSide.Buy) ||
-                    (openPosition.Side == PositionSide.Short && order.Side == OrderSide.Sell);
+                    (openPosition.Direction == TradeDirection.Long && order.Side == OrderSide.Buy) ||
+                    (openPosition.Direction == TradeDirection.Short && order.Side == OrderSide.Sell);
 
                 if (sameSide)
                 {
@@ -217,11 +217,11 @@ public sealed class OrderFilledPositionHandler : INotificationHandler<OrderFille
                     var leftover = fillQty - openPosition.Quantity;
                     if (leftover > 0m)
                     {
-                        var flipSide = order.Side == OrderSide.Buy
-                            ? PositionSide.Long
-                            : PositionSide.Short;
+                        var flipDirection = order.Side == OrderSide.Buy
+                            ? TradeDirection.Long
+                            : TradeDirection.Short;
                         // The flip uses the same incoming stop / take-profit hints as the closing entry order.
-                        var flip = Position.Open(order.Symbol, flipSide, leftover, fillPrice,
+                        var flip = Position.Open(order.Symbol, flipDirection, leftover, fillPrice,
                             order.StopPrice, order.StrategyId, order.Mode, now,
                             entryCommission: flipEntryFee,
                             takeProfit: order.TakeProfit,

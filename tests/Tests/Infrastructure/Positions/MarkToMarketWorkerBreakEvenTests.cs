@@ -67,7 +67,7 @@ public class MarkToMarketWorkerBreakEvenTests
     {
         var pos = Position.Open(
             Symbol.From(Sym),
-            PositionSide.Long,
+            TradeDirection.Long,
             quantity: 0.01m,
             entryPrice: Entry,
             stopPrice: stop,

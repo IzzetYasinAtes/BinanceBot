@@ -113,13 +113,13 @@ public sealed class TakeProfitMonitorService : BackgroundService
 
             // Long realises into the bid (the price someone will pay us); short realises
             // into the ask (the price we must pay to cover). Same convention as StopLossMonitor.
-            var markPrice = pos.Side == PositionSide.Long ? bt.BidPrice : bt.AskPrice;
+            var markPrice = pos.Direction == TradeDirection.Long ? bt.BidPrice : bt.AskPrice;
             if (markPrice <= 0m)
             {
                 continue;
             }
 
-            var triggered = pos.Side == PositionSide.Long
+            var triggered = pos.Direction == TradeDirection.Long
                 ? markPrice >= tp
                 : markPrice <= tp;
             if (!triggered)

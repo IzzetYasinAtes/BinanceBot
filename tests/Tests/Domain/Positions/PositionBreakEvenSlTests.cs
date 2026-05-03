@@ -19,7 +19,7 @@ public class PositionBreakEvenSlTests
     {
         return Position.Open(
             Symbol.From("BTCUSDT"),
-            PositionSide.Long,
+            TradeDirection.Long,
             quantity: 0.01m,
             entryPrice: entry,
             stopPrice: initialStop,

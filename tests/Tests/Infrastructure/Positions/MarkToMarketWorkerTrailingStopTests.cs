@@ -70,7 +70,7 @@ public class MarkToMarketWorkerTrailingStopTests
     {
         var pos = Position.Open(
             Symbol.From(Sym),
-            PositionSide.Long,
+            TradeDirection.Long,
             quantity: 0.01m,
             entryPrice: Entry,
             stopPrice: stop,
@@ -128,7 +128,7 @@ public class MarkToMarketWorkerTrailingStopTests
         await InvokeTickAsync(sut, CancellationToken.None);
 
         var saved = db.Positions.Single(p => p.Id == pos.Id);
-        saved.PeakMarkPrice.Should().Be(95400m, "ilk eligible tick peak'i yatırır");
+        saved.ExtremeMarkPrice.Should().Be(95400m, "ilk eligible tick peak'i yatırır");
         mediator.VerifyNoOtherCalls();
     }
 
@@ -159,7 +159,7 @@ public class MarkToMarketWorkerTrailingStopTests
         await InvokeTickAsync(sut, CancellationToken.None);
 
         var afterFirst = db.Positions.Single(p => p.Id == pos.Id);
-        afterFirst.PeakMarkPrice.Should().Be(95600m);
+        afterFirst.ExtremeMarkPrice.Should().Be(95600m);
 
         // Tick 2: mark drop.
         ReplaceTicker(db, bid: 95300m, ask: 95300m, asOf: T0.AddMinutes(25));
@@ -179,7 +179,7 @@ public class MarkToMarketWorkerTrailingStopTests
 
         // Peak değişmedi (exit'te aggregate peak'i sabit tutar — audit için).
         var afterSecond = db.Positions.Single(p => p.Id == pos.Id);
-        afterSecond.PeakMarkPrice.Should().Be(95600m);
+        afterSecond.ExtremeMarkPrice.Should().Be(95600m);
     }
 
     [Fact]
@@ -190,7 +190,7 @@ public class MarkToMarketWorkerTrailingStopTests
         using var db = NewDb();
         var pos = Position.Open(
             Symbol.From(Sym),
-            PositionSide.Long,
+            TradeDirection.Long,
             quantity: 0.01m,
             entryPrice: Entry,
             stopPrice: 94240m,
@@ -213,7 +213,7 @@ public class MarkToMarketWorkerTrailingStopTests
         await InvokeTickAsync(sut, CancellationToken.None);
 
         var saved = db.Positions.Single(p => p.Id == pos.Id);
-        saved.PeakMarkPrice.Should().Be(0m, "BE applied null iken trailing dormant");
+        saved.ExtremeMarkPrice.Should().Be(0m, "BE applied null iken trailing dormant");
         saved.BreakEvenAppliedAt.Should().BeNull();
         mediator.VerifyNoOtherCalls();
     }
@@ -237,7 +237,7 @@ public class MarkToMarketWorkerTrailingStopTests
         await InvokeTickAsync(sut, CancellationToken.None);
 
         var saved = db.Positions.Single(p => p.Id == pos.Id);
-        saved.PeakMarkPrice.Should().Be(0m, "trailing disable iken peak güncellenmemeli");
+        saved.ExtremeMarkPrice.Should().Be(0m, "trailing disable iken peak güncellenmemeli");
         mediator.VerifyNoOtherCalls();
     }
 
@@ -250,7 +250,7 @@ public class MarkToMarketWorkerTrailingStopTests
         using var db = NewDb();
         var pos = Position.Open(
             Symbol.From(Sym),
-            PositionSide.Long,
+            TradeDirection.Long,
             quantity: 0.01m,
             entryPrice: Entry,
             stopPrice: 94240m,
@@ -276,7 +276,7 @@ public class MarkToMarketWorkerTrailingStopTests
 
         var saved = db.Positions.Single(p => p.Id == pos.Id);
         saved.BreakEvenAppliedAt.Should().Be(T0.AddMinutes(15), "BE bu tick'te uygulandı");
-        saved.PeakMarkPrice.Should().Be(95400m, "trailing aynı tick'te peak'i yatırdı (sıra: BE → trail)");
+        saved.ExtremeMarkPrice.Should().Be(95400m, "trailing aynı tick'te peak'i yatırdı (sıra: BE → trail)");
         mediator.VerifyNoOtherCalls();
     }
 }
