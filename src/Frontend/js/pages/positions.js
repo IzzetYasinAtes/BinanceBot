@@ -66,8 +66,8 @@ const App = {
                                         </span>
                                     </td>
                                     <td>
-                                        <span class="badge" :class="p.side === 'Long' ? 'up' : 'down'">
-                                            {{ p.side === 'Long' ? 'LONG' : 'SHORT' }}
+                                        <span class="badge" :class="p.direction === 'Long' ? 'up' : 'down'">
+                                            {{ p.direction === 'Long' ? 'LONG' : 'SHORT' }}
                                         </span>
                                     </td>
                                     <td class="num">{{ fmt.num4(p.quantity) }}</td>
@@ -126,8 +126,8 @@ const App = {
                                         </span>
                                     </td>
                                     <td>
-                                        <span class="badge" :class="p.side === 'Long' ? 'up' : 'down'">
-                                            {{ p.side === 'Long' ? 'LONG' : 'SHORT' }}
+                                        <span class="badge" :class="p.direction === 'Long' ? 'up' : 'down'">
+                                            {{ p.direction === 'Long' ? 'LONG' : 'SHORT' }}
                                         </span>
                                     </td>
                                     <td class="num">{{ fmt.num4(p.quantity) }}</td>

@@ -431,4 +431,46 @@ public class RiskProfileTests
         act.Should().Throw<BinanceBot.Domain.Common.DomainException>()
             .WithMessage("*only Paper*");
     }
+
+    [Fact]
+    public void Futures_Defaults_AreLoop92Compliant()
+    {
+        var rp = RiskProfile.CreateDefault(TradingMode.Paper, T0);
+        rp.Leverage.Should().Be(1, "Loop 92 default 1x leverage");
+        rp.MaintenanceMarginRatio.Should().Be(0.80m, "Loop 92 default %80 maintenance margin");
+        rp.MaxFundingFeePerHour.Should().Be(0.001m, "Loop 92 default %0.1/saat funding limiti");
+    }
+
+    [Fact]
+    public void SetLeverage_OutOfRange_Throws()
+    {
+        var rp = RiskProfile.CreateDefault(TradingMode.Paper, T0);
+        var actLow = () => rp.SetLeverage(0, T0);
+        var actHigh = () => rp.SetLeverage(4, T0);
+        actLow.Should().Throw<DomainException>().WithMessage("*Leverage*");
+        actHigh.Should().Throw<DomainException>().WithMessage("*Leverage*");
+    }
+
+    [Fact]
+    public void SetLeverage_InRange_Succeeds()
+    {
+        var rp = RiskProfile.CreateDefault(TradingMode.Paper, T0);
+        rp.SetLeverage(3, T0);
+        rp.Leverage.Should().Be(3);
+    }
+
+    [Fact]
+    public void SetMaintenanceMarginRatio_BoundaryGuards()
+    {
+        var rp = RiskProfile.CreateDefault(TradingMode.Paper, T0);
+        var act0 = () => rp.SetMaintenanceMarginRatio(0m, T0);
+        var act1 = () => rp.SetMaintenanceMarginRatio(1m, T0);
+        var actNeg = () => rp.SetMaintenanceMarginRatio(-0.1m, T0);
+        act0.Should().Throw<DomainException>();
+        act1.Should().Throw<DomainException>();
+        actNeg.Should().Throw<DomainException>();
+        rp.SetMaintenanceMarginRatio(0.85m, T0);
+        rp.MaintenanceMarginRatio.Should().Be(0.85m);
+    }
 }
+

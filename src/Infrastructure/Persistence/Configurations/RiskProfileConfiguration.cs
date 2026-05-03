@@ -19,6 +19,11 @@ public sealed class RiskProfileConfiguration : IEntityTypeConfiguration<RiskProf
         builder.Property(r => r.MaxConsecutiveLosses);
         builder.Property(r => r.MaxOpenPositions);
 
+        // Loop 92 — Futures fields (ADR-0025).
+        builder.Property(r => r.Leverage).HasDefaultValue(1);
+        builder.Property(r => r.MaintenanceMarginRatio).HasPrecision(10, 4).HasDefaultValue(0.80m);
+        builder.Property(r => r.MaxFundingFeePerHour).HasPrecision(10, 6).HasDefaultValue(0.001m);
+
         builder.Property(r => r.RiskPerTradeCap).HasPrecision(10, 4);
         builder.Property(r => r.MaxPositionCap).HasPrecision(10, 4);
         builder.Property(r => r.CapsAdminNote).HasMaxLength(500);
@@ -51,6 +56,10 @@ public sealed class RiskProfileConfiguration : IEntityTypeConfiguration<RiskProf
             MaxDrawdownAllTimePct = 0.25m,
             MaxConsecutiveLosses = 3,
             MaxOpenPositions = 2,
+            // Loop 92 — Futures defaults.
+            Leverage = 1,
+            MaintenanceMarginRatio = 0.80m,
+            MaxFundingFeePerHour = 0.001m,
             CircuitBreakerStatus = CircuitBreakerStatus.Healthy,
             ConsecutiveLosses = 0,
             RealizedPnl24h = 0m,

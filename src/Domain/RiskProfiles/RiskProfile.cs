@@ -18,6 +18,26 @@ public sealed class RiskProfile : AggregateRoot<int>
     public int MaxConsecutiveLosses { get; private set; }
 
     /// <summary>
+    /// Loop 92 — Futures kaldıraç (ADR-0025). Default 1x (margin = full notional);
+    /// max bot için 3x. Bot boot'ta her sembol için POST /fapi/v1/leverage
+    /// çağırır.
+    /// </summary>
+    public int Leverage { get; private set; }
+
+    /// <summary>
+    /// Loop 92 — Liquidation alarm eşiği. marginRatio bu değerin üstüne çıkarsa
+    /// MarkToMarketWorker force close dispatcher'ını tetikler. Default 0.80 (%80).
+    /// </summary>
+    public decimal MaintenanceMarginRatio { get; private set; }
+
+    /// <summary>
+    /// Loop 92 — saatlik max funding fee toleransı. 8h funding cycle'da bu
+    /// değerin üstünde net ödeme yapılırsa pozisyon kapatma kararı verilir.
+    /// Default 0.001 (%0.1 saatte = %0.8 günlük).
+    /// </summary>
+    public decimal MaxFundingFeePerHour { get; private set; }
+
+    /// <summary>
     /// Loop 14 (research-paper-live-and-sizing.md §B/C5): hard ceiling on the number
     /// of simultaneously-open positions for this trading mode. The fan-out handler
     /// counts open positions per mode and skips new entries once this limit is reached,
@@ -53,10 +73,58 @@ public sealed class RiskProfile : AggregateRoot<int>
             MaxDrawdownAllTimePct = 0.25m,
             MaxConsecutiveLosses = 3,
             MaxOpenPositions = 2,
+            // Loop 92 — Futures defaults (ADR-0025).
+            Leverage = 1,
+            MaintenanceMarginRatio = 0.80m,
+            MaxFundingFeePerHour = 0.001m,
             CircuitBreakerStatus = CircuitBreakerStatus.Healthy,
             PeakEquity = 0m,
             UpdatedAt = now,
         };
+
+    /// <summary>
+    /// Loop 92 — Futures kaldıraç ayarla. Range [1, 3] (bot için max). Bot boot'tan
+    /// önce her sembol için exchange'e gönderilir (BinanceFuturesClient.SetLeverageAsync).
+    /// </summary>
+    public void SetLeverage(int leverage, DateTimeOffset now)
+    {
+        if (leverage < 1 || leverage > 3)
+        {
+            throw new DomainException($"Leverage must be in [1, 3] (got {leverage}).");
+        }
+        Leverage = leverage;
+        UpdatedAt = now;
+    }
+
+    /// <summary>
+    /// Loop 92 — Maintenance margin ratio eşiği. (0, 1) aralığında. Bot için
+    /// MarkToMarketWorker force close threshold'u — Binance'in gerçek likidasyon
+    /// seviyesinden önce devreye girer.
+    /// </summary>
+    public void SetMaintenanceMarginRatio(decimal ratio, DateTimeOffset now)
+    {
+        if (ratio <= 0m || ratio >= 1m)
+        {
+            throw new DomainException($"MaintenanceMarginRatio must be in (0, 1) (got {ratio}).");
+        }
+        MaintenanceMarginRatio = ratio;
+        UpdatedAt = now;
+    }
+
+    /// <summary>
+    /// Loop 92 — 8h funding cycle limiti. Saatlik birim: %0.001 = %0.1 saatte
+    /// = %0.8 günlük tolerans.
+    /// </summary>
+    public void ApplyFundingFeeAndCheck(decimal hourlyRate, DateTimeOffset now)
+    {
+        if (hourlyRate < 0m)
+        {
+            throw new DomainException("Hourly funding rate must be non-negative.");
+        }
+        // Bu method audit hook'u — gerçek karar FundingRateWorker'da. Şimdilik
+        // sadece UpdatedAt güncelliyoruz; future use için raise event eklenebilir.
+        UpdatedAt = now;
+    }
 
     /// <summary>
     /// Loop 14 (research-paper-live-and-sizing.md §C2): risk envelope widened to make
