@@ -20,15 +20,13 @@ public sealed class VirtualBalanceConfiguration : IEntityTypeConfiguration<Virtu
         builder.Property(b => b.Mode).HasConversion<int>().IsRequired();
 
         builder.Property(b => b.StartingBalance).HasPrecision(28, 10);
-        // Loop 92 — WalletBalance domain field; DB kolonu commit 8 migration'ında
-        // CurrentBalance -> WalletBalance rename edilecek. Şimdilik kolon adı
-        // CurrentBalance kalır (geriye uyumlu mevcut migration).
-        builder.Property(b => b.WalletBalance).HasPrecision(28, 10).HasColumnName("CurrentBalance");
+        // Loop 92 — WalletBalance kolon adı (CurrentBalance'tan rename edildi).
+        builder.Property(b => b.WalletBalance).HasPrecision(28, 10);
         builder.Property(b => b.Equity).HasPrecision(28, 10);
-        // Loop 92 — Futures genişlemesi: AllocatedMargin + UnrealizedPnl (commit 8 migration).
+        // Loop 92 — Futures genişlemesi: AllocatedMargin + UnrealizedPnl yeni kolonlar.
         builder.Property(b => b.AllocatedMargin).HasPrecision(28, 10).HasDefaultValue(0m);
         builder.Property(b => b.UnrealizedPnl).HasPrecision(28, 10).HasDefaultValue(0m);
-        // CurrentBalance computed property — DB'de saklanmaz, sadece domain alias.
+        // Computed properties — DB'de saklanmaz.
         builder.Ignore(b => b.CurrentBalance);
         builder.Ignore(b => b.AvailableBalance);
 
