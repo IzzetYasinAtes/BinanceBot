@@ -1,4 +1,5 @@
 using BinanceBot.Application.Strategies.Patterns;
+using BinanceBot.Domain.Common;
 
 namespace BinanceBot.Infrastructure.Strategies.Patterns.Detectors;
 
@@ -19,6 +20,7 @@ public sealed class BollingerLowerReversalDetector : IPatternDetector
     public string Name => "bollinger_lower_reversal";
     public decimal DefaultWeight => 2m;
     public bool IsHardGate => false;
+    public TradeDirection? Direction => TradeDirection.Long;
 
     private const decimal LowerTouchBuffer = 0.0005m; // %0.05
 

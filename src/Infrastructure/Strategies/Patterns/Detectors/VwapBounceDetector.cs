@@ -1,4 +1,5 @@
 using BinanceBot.Application.Strategies.Patterns;
+using BinanceBot.Domain.Common;
 
 namespace BinanceBot.Infrastructure.Strategies.Patterns.Detectors;
 
@@ -19,6 +20,7 @@ public sealed class VwapBounceDetector : IPatternDetector
     public string Name => "vwap_bounce";
     public decimal DefaultWeight => 2m;
     public bool IsHardGate => false;
+    public TradeDirection? Direction => TradeDirection.Long;
 
     private const decimal RsiMin = 40m;
     private const decimal RsiMax = 65m;

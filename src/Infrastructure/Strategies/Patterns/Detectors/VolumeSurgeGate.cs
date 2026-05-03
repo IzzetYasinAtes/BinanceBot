@@ -1,4 +1,5 @@
 using BinanceBot.Application.Strategies.Patterns;
+using BinanceBot.Domain.Common;
 
 namespace BinanceBot.Infrastructure.Strategies.Patterns.Detectors;
 
@@ -16,6 +17,7 @@ public sealed class VolumeSurgeGate : IPatternDetector
     public string Name => "volume_surge_gate";
     public decimal DefaultWeight => 0m; // Hard-gate, ağırlığı skor toplamına katkısı 0
     public bool IsHardGate => true;
+    public TradeDirection? Direction => null;  // Neutral
 
     private const decimal SurgeMul = 1.0m;
 

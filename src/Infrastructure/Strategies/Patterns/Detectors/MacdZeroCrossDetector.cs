@@ -1,4 +1,5 @@
 using BinanceBot.Application.Strategies.Patterns;
+using BinanceBot.Domain.Common;
 
 namespace BinanceBot.Infrastructure.Strategies.Patterns.Detectors;
 
@@ -17,6 +18,7 @@ public sealed class MacdZeroCrossDetector : IPatternDetector
     public string Name => "macd_zero_cross";
     public decimal DefaultWeight => 2m;
     public bool IsHardGate => false;
+    public TradeDirection? Direction => TradeDirection.Long;
 
     private const decimal MinMagnitudeRatio = 0.00005m;
 

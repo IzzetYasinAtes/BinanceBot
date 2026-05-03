@@ -1,4 +1,5 @@
 using BinanceBot.Application.Strategies.Patterns;
+using BinanceBot.Domain.Common;
 
 namespace BinanceBot.Infrastructure.Strategies.Patterns.Detectors;
 
@@ -20,6 +21,7 @@ public sealed class HigherLowEmaTouchDetector : IPatternDetector
     public string Name => "higher_low_ema_touch";
     public decimal DefaultWeight => 2m;
     public bool IsHardGate => false;
+    public TradeDirection? Direction => TradeDirection.Long;
 
     private const decimal TouchBand = 0.002m; // ±0.2%
 

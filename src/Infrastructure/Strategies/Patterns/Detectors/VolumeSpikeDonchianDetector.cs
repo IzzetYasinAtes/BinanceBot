@@ -1,4 +1,5 @@
 using BinanceBot.Application.Strategies.Patterns;
+using BinanceBot.Domain.Common;
 
 namespace BinanceBot.Infrastructure.Strategies.Patterns.Detectors;
 
@@ -18,6 +19,7 @@ public sealed class VolumeSpikeDonchianDetector : IPatternDetector
     public string Name => "volume_spike_donchian";
     public decimal DefaultWeight => 4m;
     public bool IsHardGate => false;
+    public TradeDirection? Direction => TradeDirection.Long;
 
     private const decimal SpikeFull = 2.5m;
     private const decimal SpikeWeak = 1.5m;

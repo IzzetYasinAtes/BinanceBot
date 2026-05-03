@@ -1,4 +1,5 @@
 using BinanceBot.Application.Strategies.Patterns;
+using BinanceBot.Domain.Common;
 
 namespace BinanceBot.Infrastructure.Strategies.Patterns.Detectors;
 
@@ -19,6 +20,7 @@ public sealed class HammerReversalDetector : IPatternDetector
     public string Name => "hammer_reversal";
     public decimal DefaultWeight => 2m;
     public bool IsHardGate => false;
+    public TradeDirection? Direction => TradeDirection.Long;
 
     private const decimal LowerWickFull = 2.5m;
     private const decimal LowerWickWeak = 2.0m;

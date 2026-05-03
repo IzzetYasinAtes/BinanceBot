@@ -197,6 +197,14 @@ public static class DependencyInjection
         services.AddSingleton<IPatternDetector, VolumeSurgeGate>();
         services.AddSingleton<IPatternDetector, SpreadGuardGate>();
         services.AddSingleton<IPatternDetector, AdxRegimeFilter>();
+        // Loop 92 — Short-bias detectors (ADR-0025 Long+Short pivot).
+        services.AddSingleton<IPatternDetector, BearishEngulfingDetector>();
+        services.AddSingleton<IPatternDetector, ShootingStarDetector>();
+        services.AddSingleton<IPatternDetector, BollingerUpperReversalDetector>();
+        services.AddSingleton<IPatternDetector, BollingerSqueezeBreakDownDetector>();
+        services.AddSingleton<IPatternDetector, RsiOverboughtPullbackDetector>();
+        services.AddSingleton<IPatternDetector, Ema9SlopeDownDetector>();
+        services.AddSingleton<IPatternDetector, DonchianBreakdownDetector>();
 
         services.AddSingleton<IPatternRegistry, PatternRegistry>();
         services.AddSingleton<IPatternSignalComposer, WeightedScorePatternComposer>();

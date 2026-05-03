@@ -1,4 +1,5 @@
 using BinanceBot.Application.Strategies.Patterns;
+using BinanceBot.Domain.Common;
 
 namespace BinanceBot.Infrastructure.Strategies.Patterns.Detectors;
 
@@ -20,6 +21,7 @@ public sealed class RsiOversoldRecoveryDetector : IPatternDetector
     public string Name => "rsi_oversold_recovery";
     public decimal DefaultWeight => 2m;
     public bool IsHardGate => false;
+    public TradeDirection? Direction => TradeDirection.Long;
 
     private const decimal OversoldStrict = 35m;
     private const decimal OversoldWeak = 40m;

@@ -1,4 +1,5 @@
 using BinanceBot.Application.Strategies.Patterns;
+using BinanceBot.Domain.Common;
 
 namespace BinanceBot.Infrastructure.Strategies.Patterns.Detectors;
 
@@ -19,6 +20,7 @@ public sealed class InsideBarBreakoutDetector : IPatternDetector
     public string Name => "inside_bar_breakout";
     public decimal DefaultWeight => 3m;
     public bool IsHardGate => false;
+    public TradeDirection? Direction => TradeDirection.Long;
 
     private const decimal VolumeSurgeMul = 1.5m;
     private const decimal VolumeWeakMul = 1.0m;

@@ -1,4 +1,5 @@
 using BinanceBot.Application.Strategies.Patterns;
+using BinanceBot.Domain.Common;
 
 namespace BinanceBot.Infrastructure.Strategies.Patterns.Detectors;
 
@@ -21,6 +22,7 @@ public sealed class EmaSqueezeBreakDetector : IPatternDetector
     public string Name => "ema_squeeze_break";
     public decimal DefaultWeight => 3m;
     public bool IsHardGate => false;
+    public TradeDirection? Direction => TradeDirection.Long;
 
     private const decimal SqueezeBbwMax = 0.0025m;
     private const decimal VolumeSurgeMul = 1.3m;

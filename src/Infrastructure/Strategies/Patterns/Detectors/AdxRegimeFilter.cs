@@ -1,4 +1,5 @@
 using BinanceBot.Application.Strategies.Patterns;
+using BinanceBot.Domain.Common;
 
 namespace BinanceBot.Infrastructure.Strategies.Patterns.Detectors;
 
@@ -23,6 +24,7 @@ public sealed class AdxRegimeFilter : IPatternDetector
     public string Name => "adx_regime_filter";
     public decimal DefaultWeight => 0m;
     public bool IsHardGate => false;
+    public TradeDirection? Direction => null;  // Neutral
 
     private const decimal AdxMin = 15m;
     private const decimal AdxMax = 35m;

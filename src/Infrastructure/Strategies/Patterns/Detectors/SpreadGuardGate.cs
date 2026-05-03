@@ -1,4 +1,5 @@
 using BinanceBot.Application.Strategies.Patterns;
+using BinanceBot.Domain.Common;
 
 namespace BinanceBot.Infrastructure.Strategies.Patterns.Detectors;
 
@@ -17,6 +18,7 @@ public sealed class SpreadGuardGate : IPatternDetector
     public string Name => "spread_guard_gate";
     public decimal DefaultWeight => 0m;
     public bool IsHardGate => true;
+    public TradeDirection? Direction => null;  // Neutral
 
     private const decimal MaxSpreadPct = 0.001m; // %0.1
 
