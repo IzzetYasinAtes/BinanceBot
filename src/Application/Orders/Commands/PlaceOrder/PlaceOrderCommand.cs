@@ -2,6 +2,7 @@ using System.Text.Json;
 using Ardalis.Result;
 using BinanceBot.Application.Abstractions;
 using BinanceBot.Application.Abstractions.Binance;
+using BinanceBot.Application.Abstractions.Exchange;
 using BinanceBot.Application.Abstractions.Trading;
 using BinanceBot.Domain.Balances;
 using BinanceBot.Domain.Common;
@@ -59,7 +60,7 @@ public sealed class PlaceOrderCommandHandler
     : IRequestHandler<PlaceOrderCommand, Result<PlacedOrderDto>>
 {
     private readonly IApplicationDbContext _db;
-    private readonly IBinanceTrading _trading;
+    private readonly IExchangeClient _trading;
     private readonly IBinanceCredentialsProvider _credentials;
     private readonly IPaperFillSimulator _paperFills;
     private readonly IClock _clock;
@@ -68,7 +69,7 @@ public sealed class PlaceOrderCommandHandler
 
     public PlaceOrderCommandHandler(
         IApplicationDbContext db,
-        IBinanceTrading trading,
+        IExchangeClient trading,
         IBinanceCredentialsProvider credentials,
         IPaperFillSimulator paperFills,
         IClock clock,
@@ -243,26 +244,36 @@ public sealed class PlaceOrderCommandHandler
             return;
         }
 
+        // Loop 92 — Direction, OrderSide BUY/SELL ile Long/Short eşlemesi yapılır.
+        // Futures one-way mode'da BUY=Long open, SELL=Short open (positionSide=BOTH).
+        var direction = side == OrderSide.Buy ? TradeDirection.Long : TradeDirection.Short;
         var binanceReq = new PlaceOrderRequest(
-            symbolVo.Value, side.ToString().ToUpperInvariant(),
+            symbolVo.Value, side.ToString().ToUpperInvariant(), direction,
             type.ToString().ToUpperInvariant(), tif.ToString().ToUpperInvariant(),
             request.Quantity, request.Price, request.StopPrice, request.ClientOrderId);
 
-        _logger.LogInformation("Placing LIVE-TESTNET order {Cid} {Symbol} {Side} {Qty}",
-            order.ClientOrderId, symbolVo, side, request.Quantity);
+        _logger.LogInformation("Placing LIVE-TESTNET order {Cid} {Symbol} {Side} {Direction} {Qty}",
+            order.ClientOrderId, symbolVo, side, direction, request.Quantity);
 
         var liveResult = await _trading.PlaceLiveOrderAsync(binanceReq, ct);
-        if (!liveResult.Accepted)
+        if (!liveResult.IsSuccess)
         {
-            order.Reject(liveResult.ErrorMessage ?? liveResult.ErrorCode ?? "live_endpoint_failed", _clock.UtcNow);
+            order.Reject(string.Join(";", liveResult.Errors), _clock.UtcNow);
+            return;
+        }
+
+        var orderResp = liveResult.Value;
+        if (!orderResp.Accepted)
+        {
+            order.Reject(orderResp.ErrorMessage ?? orderResp.ErrorCode ?? "live_endpoint_failed", _clock.UtcNow);
         }
         else
         {
-            if (liveResult.ExchangeOrderId is long xid)
+            if (orderResp.ExchangeOrderId is long xid)
             {
                 order.AttachExchangeId(xid, _clock.UtcNow);
             }
-            foreach (var fill in liveResult.Fills)
+            foreach (var fill in orderResp.Fills)
             {
                 order.RegisterFill(
                     fill.TradeId, fill.Price, fill.Quantity,

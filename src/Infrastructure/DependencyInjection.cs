@@ -1,5 +1,6 @@
 using BinanceBot.Application.Abstractions;
 using BinanceBot.Application.Abstractions.Binance;
+using BinanceBot.Application.Abstractions.Exchange;
 using BinanceBot.Application.Abstractions.Trading;
 using BinanceBot.Application.Strategies.Cooldowns;
 using BinanceBot.Application.Strategies.Evaluation;
@@ -131,7 +132,7 @@ public static class DependencyInjection
             .AddHttpMessageHandler<SignedRequestHandler>()
             .AddHttpMessageHandler<RateLimitHeaderHandler>();
 
-        services.AddScoped<IBinanceTrading>(sp =>
+        services.AddScoped<IExchangeClient>(sp =>
         {
             var factory = sp.GetRequiredService<IHttpClientFactory>();
             var http = factory.CreateClient(BinanceTradingClient.HttpClientName);

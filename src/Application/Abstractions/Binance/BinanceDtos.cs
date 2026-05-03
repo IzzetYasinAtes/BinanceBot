@@ -1,3 +1,4 @@
+using BinanceBot.Domain.Common;
 using BinanceBot.Domain.MarketData;
 
 namespace BinanceBot.Application.Abstractions.Binance;
@@ -68,3 +69,39 @@ public sealed record WsDepthDiffPayload(
     IReadOnlyList<OrderBookLevelDto> BidUpdates,
     IReadOnlyList<OrderBookLevelDto> AskUpdates,
     DateTimeOffset ReceivedAt);
+
+/// <summary>
+/// Loop 92 — Futures pivot. <c>Direction</c> alanı eklendi (Long/Short hint).
+/// Spot'ta Side BUY=Long open, SELL=Long close idi; Futures'ta Side BUY/SELL
+/// exchange protokol değeri, Direction botun pozisyon yönü hint'i (audit + logging).
+/// </summary>
+public sealed record PlaceOrderRequest(
+    string Symbol,
+    string Side,
+    TradeDirection Direction,
+    string Type,
+    string TimeInForce,
+    decimal Quantity,
+    decimal? Price,
+    decimal? StopPrice,
+    string ClientOrderId);
+
+public sealed record TestOrderResponse(bool Accepted, string? ErrorCode, string? ErrorMessage);
+public sealed record CancelOrderResponse(bool Accepted, string? ErrorCode, string? ErrorMessage);
+
+public sealed record LiveOrderResponse(
+    bool Accepted,
+    long? ExchangeOrderId,
+    string Status,
+    decimal ExecutedQuantity,
+    decimal CummulativeQuoteQty,
+    IReadOnlyList<LiveFillDto> Fills,
+    string? ErrorCode,
+    string? ErrorMessage);
+
+public sealed record LiveFillDto(
+    long TradeId,
+    decimal Price,
+    decimal Quantity,
+    decimal Commission,
+    string CommissionAsset);

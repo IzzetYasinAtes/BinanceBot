@@ -1,12 +1,14 @@
 using System.Text.Json;
+using Ardalis.Result;
 using BinanceBot.Application.Abstractions.Binance;
+using BinanceBot.Application.Abstractions.Exchange;
 using BinanceBot.Infrastructure.Binance.Handlers;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 namespace BinanceBot.Infrastructure.Binance;
 
-public sealed class BinanceTradingClient : IBinanceTrading
+public sealed class BinanceTradingClient : IExchangeClient
 {
     public const string HttpClientName = "binance-trade";
 
@@ -27,6 +29,57 @@ public sealed class BinanceTradingClient : IBinanceTrading
     private bool HasApiCredentials =>
         !string.IsNullOrWhiteSpace(_options.CurrentValue.ApiKey)
         && !string.IsNullOrWhiteSpace(_options.CurrentValue.ApiSecret);
+
+    // Loop 92 — IExchangeClient adapter shims (Result<T> wrapping). Commit 4'te
+    // BinanceFuturesClient ile tamamen rewrite edilecek; bu sürüm Spot endpoint'leriyle
+    // koşuyor ama interface contract'a uyacak şekilde Result<T> dönüyor.
+    Task<Result<TestOrderResponse>> IExchangeClient.PlaceTestOrderAsync(PlaceOrderRequest request, CancellationToken cancellationToken) =>
+        WrapAsync(() => PlaceTestOrderAsync(request, cancellationToken));
+
+    Task<Result<LiveOrderResponse>> IExchangeClient.PlaceLiveOrderAsync(PlaceOrderRequest request, CancellationToken cancellationToken) =>
+        WrapAsync(() => PlaceLiveOrderAsync(request, cancellationToken));
+
+    Task<Result<CancelOrderResponse>> IExchangeClient.CancelLiveOrderAsync(string symbol, string clientOrderId, CancellationToken cancellationToken) =>
+        WrapAsync(() => CancelLiveOrderAsync(symbol, clientOrderId, cancellationToken));
+
+    Task<Result<CancelOrderResponse>> IExchangeClient.CancelTestOrderAsync(string symbol, string clientOrderId, CancellationToken cancellationToken) =>
+        WrapAsync(() => CancelTestOrderAsync(symbol, clientOrderId, cancellationToken));
+
+    Task<Result> IExchangeClient.SetLeverageAsync(string symbol, int leverage, CancellationToken cancellationToken)
+    {
+        // Spot mode'da no-op (futures-only setting). Commit 4'te BinanceFuturesClient gerçek call yapacak.
+        _logger.LogDebug("SetLeverage no-op (Spot client) symbol={Symbol} leverage={Leverage}", symbol, leverage);
+        return Task.FromResult(Result.Success());
+    }
+
+    Task<Result> IExchangeClient.SetMarginTypeAsync(string symbol, MarginType marginType, CancellationToken cancellationToken)
+    {
+        _logger.LogDebug("SetMarginType no-op (Spot client) symbol={Symbol} marginType={MarginType}", symbol, marginType);
+        return Task.FromResult(Result.Success());
+    }
+
+    Task<Result> IExchangeClient.SetPositionModeAsync(bool dualSidePosition, CancellationToken cancellationToken)
+    {
+        _logger.LogDebug("SetPositionMode no-op (Spot client) dualSide={Dual}", dualSidePosition);
+        return Task.FromResult(Result.Success());
+    }
+
+    Task<Result<ExchangeAccountInfo>> IExchangeClient.GetAccountInfoAsync(CancellationToken cancellationToken)
+    {
+        // Spot client placeholder — commit 4'te /fapi/v3/balance gerçek call yapacak.
+        return Task.FromResult(Result.Success(new ExchangeAccountInfo(0m, 0m, 0m)));
+    }
+
+    Task<Result<IReadOnlyList<ExchangePositionDto>>> IExchangeClient.GetOpenPositionsAsync(CancellationToken cancellationToken)
+    {
+        return Task.FromResult(Result.Success((IReadOnlyList<ExchangePositionDto>)Array.Empty<ExchangePositionDto>()));
+    }
+
+    private static async Task<Result<T>> WrapAsync<T>(Func<Task<T>> op)
+    {
+        var value = await op();
+        return Result.Success(value);
+    }
 
     public async Task<TestOrderResponse> PlaceTestOrderAsync(PlaceOrderRequest request, CancellationToken cancellationToken)
     {

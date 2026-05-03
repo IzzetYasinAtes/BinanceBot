@@ -1,6 +1,6 @@
 using Ardalis.Result;
 using BinanceBot.Application.Abstractions;
-using BinanceBot.Application.Abstractions.Binance;
+using BinanceBot.Application.Abstractions.Exchange;
 using BinanceBot.Domain.Common;
 using FluentValidation;
 using MediatR;
@@ -22,10 +22,10 @@ public sealed class CancelOrderCommandValidator : AbstractValidator<CancelOrderC
 public sealed class CancelOrderCommandHandler : IRequestHandler<CancelOrderCommand, Result>
 {
     private readonly IApplicationDbContext _db;
-    private readonly IBinanceTrading _trading;
+    private readonly IExchangeClient _trading;
     private readonly IClock _clock;
 
-    public CancelOrderCommandHandler(IApplicationDbContext db, IBinanceTrading trading, IClock clock)
+    public CancelOrderCommandHandler(IApplicationDbContext db, IExchangeClient trading, IClock clock)
     {
         _db = db;
         _trading = trading;
