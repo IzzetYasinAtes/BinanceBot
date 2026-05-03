@@ -87,7 +87,7 @@ public static class DependencyInjection
         services.AddTransient<ApiKeyHandler>();
         services.AddTransient<SignedRequestHandler>();
 
-        services.AddHttpClient(BinanceMarketDataClient.HttpClientName, (sp, client) =>
+        services.AddHttpClient(BinanceFuturesMarketDataClient.HttpClientName, (sp, client) =>
             {
                 var opts = sp.GetRequiredService<IOptionsMonitor<BinanceOptions>>().CurrentValue;
                 client.BaseAddress = new Uri(opts.RestBaseUrl);
@@ -116,12 +116,12 @@ public static class DependencyInjection
         services.AddScoped<IBinanceMarketData>(sp =>
         {
             var factory = sp.GetRequiredService<IHttpClientFactory>();
-            var http = factory.CreateClient(BinanceMarketDataClient.HttpClientName);
-            var logger = sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<BinanceMarketDataClient>>();
-            return new BinanceMarketDataClient(http, logger);
+            var http = factory.CreateClient(BinanceFuturesMarketDataClient.HttpClientName);
+            var logger = sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<BinanceFuturesMarketDataClient>>();
+            return new BinanceFuturesMarketDataClient(http, logger);
         });
 
-        services.AddHttpClient(BinanceTradingClient.HttpClientName, (sp, client) =>
+        services.AddHttpClient(BinanceFuturesClient.HttpClientName, (sp, client) =>
             {
                 var opts = sp.GetRequiredService<IOptionsMonitor<BinanceOptions>>().CurrentValue;
                 client.BaseAddress = new Uri(opts.RestBaseUrl);
@@ -135,10 +135,10 @@ public static class DependencyInjection
         services.AddScoped<IExchangeClient>(sp =>
         {
             var factory = sp.GetRequiredService<IHttpClientFactory>();
-            var http = factory.CreateClient(BinanceTradingClient.HttpClientName);
+            var http = factory.CreateClient(BinanceFuturesClient.HttpClientName);
             var opts = sp.GetRequiredService<IOptionsMonitor<BinanceOptions>>();
-            var logger = sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<BinanceTradingClient>>();
-            return new BinanceTradingClient(http, opts, logger);
+            var logger = sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<BinanceFuturesClient>>();
+            return new BinanceFuturesClient(http, opts, logger);
         });
 
         services.AddSingleton<IBinanceCredentialsProvider, BinanceCredentialsProvider>();

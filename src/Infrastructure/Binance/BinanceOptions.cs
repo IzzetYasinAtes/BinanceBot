@@ -6,13 +6,14 @@ public sealed class BinanceOptions
 {
     public const string SectionName = "Binance";
 
+    // Loop 92 — Futures testnet (ADR-0025). Mainnet için AllowMainnet=true + URL override gerekir.
     [Required]
     [Url]
-    public string RestBaseUrl { get; init; } = "https://testnet.binance.vision";
+    public string RestBaseUrl { get; init; } = "https://demo-fapi.binance.com";
 
     [Required]
     [RegularExpression(@"^wss?://.+", ErrorMessage = "WsBaseUrl must start with ws:// or wss://")]
-    public string WsBaseUrl { get; init; } = "wss://stream.testnet.binance.vision";
+    public string WsBaseUrl { get; init; } = "wss://fstream.binancefuture.com";
 
     [Required]
     [MinLength(1)]
