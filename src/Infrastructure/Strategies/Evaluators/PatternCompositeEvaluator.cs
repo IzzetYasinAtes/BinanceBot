@@ -3,6 +3,7 @@ using BinanceBot.Application.Strategies.Cooldowns;
 using BinanceBot.Application.Strategies.Evaluation;
 using BinanceBot.Application.Strategies.Indicators;
 using BinanceBot.Application.Strategies.Patterns;
+using BinanceBot.Domain.Common;
 using BinanceBot.Domain.MarketData;
 using BinanceBot.Domain.Strategies;
 using Microsoft.Extensions.Logging;
@@ -67,30 +68,10 @@ public sealed class PatternCompositeEvaluator : IStrategyEvaluator
             return Task.FromResult<StrategyEvaluation?>(null);
         }
 
-        // Loop 91 — MTF gate GERİ EKLENDİ (yumuşak: slope < -%0.1 strict).
-        //   L90'da MTF kapatıldı, 3/3 yeni emit kötü başlangıç (sahte breakout).
-        //   Pazar downtrend olduğunda emit yapma daha doğru — Memory #12 ile
-        //   çelişse bile. Pivot yerine pazar dönmesini bekle.
-        var slope15m = snapshot.Ema21_15m - snapshot.Ema21Prev5_15m;
-        var mtfStrongDownThreshold = -snapshot.Ema21_15m * 0.001m;
-        if (snapshot.Ema21_15m <= 0m || slope15m < mtfStrongDownThreshold)
-        {
-            _logger.LogDebug(
-                "PatternComposite skip symbol={Symbol} strategyId={StrategyId} " +
-                "ema21_15m={Ema} slope15m={Slope} reason=mtf_15m_slope_down",
-                symbol, strategyId, snapshot.Ema21_15m, slope15m);
-            return Task.FromResult<StrategyEvaluation?>(null);
-        }
-
-        // Loop 87 — RSI cap gate: aşırı alım breakout'u ele.
-        if (snapshot.Rsi14 > options.RsiMaxEmit)
-        {
-            _logger.LogDebug(
-                "PatternComposite skip symbol={Symbol} strategyId={StrategyId} " +
-                "rsi14={Rsi} cap={Cap} reason=rsi_overbought",
-                symbol, strategyId, snapshot.Rsi14, options.RsiMaxEmit);
-            return Task.FromResult<StrategyEvaluation?>(null);
-        }
+        // Loop 92 — MTF gate Direction'a göre composer kararı sonrası uygulanır.
+        // Önce composer evaluations + iki-kova skor topla; emit yön belirledikten sonra
+        // MTF gate Long: slope > +%0.1, Short: slope < -%0.1; RSI cap Long: > 75,
+        // Short: < 25 (simetrik). Önceki Loop 91 sadece downtrend'de skip yapıyordu.
 
         // Detector'ları sırayla değerlendir
         var detectors = _registry.Detectors;
@@ -122,6 +103,53 @@ public sealed class PatternCompositeEvaluator : IStrategyEvaluator
             return Task.FromResult<StrategyEvaluation?>(null);
         }
 
+        // Loop 92 — MTF gate Direction-aware (ADR-0025 §4 yön asimetrisi).
+        // 15m warmup yetersiz (Ema21_15m == 0) ⇒ skip (güvenli taraf, eski davranış korunuyor).
+        var direction = decision.Direction ?? TradeDirection.Long;
+        if (snapshot.Ema21_15m <= 0m)
+        {
+            _logger.LogDebug(
+                "PatternComposite skip symbol={Symbol} ema21_15m={Ema} reason=mtf_15m_warmup",
+                symbol, snapshot.Ema21_15m);
+            return Task.FromResult<StrategyEvaluation?>(null);
+        }
+
+        var slope15m = snapshot.Ema21_15m - snapshot.Ema21Prev5_15m;
+        var mtfThreshold = snapshot.Ema21_15m * 0.001m;  // %0.1 kademe
+
+        if (direction == TradeDirection.Long && slope15m < -mtfThreshold)
+        {
+            _logger.LogDebug(
+                "PatternComposite skip Long symbol={Symbol} ema21_15m={Ema} slope15m={Slope} reason=mtf_15m_slope_down",
+                symbol, snapshot.Ema21_15m, slope15m);
+            return Task.FromResult<StrategyEvaluation?>(null);
+        }
+        if (direction == TradeDirection.Short && slope15m > mtfThreshold)
+        {
+            _logger.LogDebug(
+                "PatternComposite skip Short symbol={Symbol} ema21_15m={Ema} slope15m={Slope} reason=mtf_15m_slope_up",
+                symbol, snapshot.Ema21_15m, slope15m);
+            return Task.FromResult<StrategyEvaluation?>(null);
+        }
+
+        // Loop 92 — RSI cap Direction-aware. Long: RSI > MaxEmit (örn. 85) skip.
+        // Short: RSI < (100 - MaxEmit) (örn. 15) skip — aşırı satılmışta short açma.
+        var rsiMin = 100m - options.RsiMaxEmit;
+        if (direction == TradeDirection.Long && snapshot.Rsi14 > options.RsiMaxEmit)
+        {
+            _logger.LogDebug(
+                "PatternComposite skip Long symbol={Symbol} rsi14={Rsi} cap={Cap} reason=rsi_overbought",
+                symbol, snapshot.Rsi14, options.RsiMaxEmit);
+            return Task.FromResult<StrategyEvaluation?>(null);
+        }
+        if (direction == TradeDirection.Short && snapshot.Rsi14 < rsiMin)
+        {
+            _logger.LogDebug(
+                "PatternComposite skip Short symbol={Symbol} rsi14={Rsi} cap={Cap} reason=rsi_oversold",
+                symbol, snapshot.Rsi14, rsiMin);
+            return Task.FromResult<StrategyEvaluation?>(null);
+        }
+
         // Cooldown kontrolü — emit kararından sonra (KMS pattern aynısı)
         var now = _clock.UtcNow;
         if (_cooldown.IsCooldown(strategyId, symbol, options.CooldownBarsAfterSignal, BarMinutes5m, now))
@@ -150,8 +178,14 @@ public sealed class PatternCompositeEvaluator : IStrategyEvaluator
 
         _cooldown.RecordSignal(strategyId, symbol, now);
 
+        // Loop 92 — Direction propagation. Composer Long ise StrategySignalDirection.Long,
+        // Short ise StrategySignalDirection.Short. StrategySignal aggregate aynı yapı.
+        var sigDirection = direction == TradeDirection.Long
+            ? StrategySignalDirection.Long
+            : StrategySignalDirection.Short;
+
         return Task.FromResult<StrategyEvaluation?>(new StrategyEvaluation(
-            Direction: StrategySignalDirection.Long,
+            Direction: sigDirection,
             SuggestedQuantity: 0.00000001m,
             SuggestedPrice: decision.EntryPrice,
             SuggestedStopPrice: decision.StopPrice,
