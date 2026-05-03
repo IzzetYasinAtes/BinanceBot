@@ -95,28 +95,14 @@ public sealed class WeightedScorePatternComposer : IPatternSignalComposer
                 Reason: ev.Reason));
         }
 
-        // 3. Loop 86 — Hard-gate skip GERİ EKLENDİ. Loop 84'te kaldırılmıştı,
-        //    ama Loop 85'te yeni param ile 3 ardışık SL pattern (peak=0, BE
-        //    armed olmadan) sahte breakout sorununu doğruladı (-$1.59 toplam).
-        //    Volume_surge_gate ve spread_guard_gate kalitesiz emit'leri eler;
-        //    frekans için RequiredScore 4 (Loop 83) ve hızlı tick 5s (Loop 85)
-        //    korunuyor.
-        if (hardGateFails.Count > 0)
-        {
-            var reason = "hard_gate:" + string.Join(",", hardGateFails);
-            var ctxSkip = SerializeContext(snapshot, total, options.RequiredScore,
-                contribs, softMultiplier, emit: false, skipReason: reason);
-            return new CompositeSignalDecision(
-                Emit: false,
-                TotalScore: total,
-                RequiredScore: options.RequiredScore,
-                SkipReason: reason,
-                EntryPrice: null,
-                StopPrice: null,
-                TakeProfitPrice: null,
-                MaxHoldMinutes: null,
-                ContextJson: ctxSkip);
-        }
+        // 4. Loop 89 — Hard-gate skip TEKRAR DEVRE DIŞI. Loop 88'de 1h+ 0 emit
+        //    pivot kararı: hard-gate (gece düşük volume + alt-coin spread)
+        //    + MTF + RSI üçlüsü kombinasyon olarak çok katı. Hard-gate
+        //    tracking ContextJson'da bırakıldı; sahte breakout filtresi
+        //    artık MTF gate (PatternCompositeEvaluator Loop 87/88) + RSI cap
+        //    (Loop 87) ile yapılır. Loop 84'ün hard-gate-off davranışına
+        //    geri dönüldü AMA bu sefer ek kalite filtreleri var.
+        _ = hardGateFails;
 
         // 4. Threshold kontrolü
         if (total < options.RequiredScore)
