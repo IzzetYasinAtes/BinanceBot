@@ -32,27 +32,6 @@ namespace BinanceBot.Infrastructure.Persistence.Migrations
                 scale: 10,
                 nullable: false,
                 defaultValue: 0m);
-
-            migrationBuilder.UpdateData(
-                table: "VirtualBalances",
-                keyColumn: "Id",
-                keyValue: 1,
-                columns: new string[0],
-                values: new object[0]);
-
-            migrationBuilder.UpdateData(
-                table: "VirtualBalances",
-                keyColumn: "Id",
-                keyValue: 2,
-                columns: new string[0],
-                values: new object[0]);
-
-            migrationBuilder.UpdateData(
-                table: "VirtualBalances",
-                keyColumn: "Id",
-                keyValue: 3,
-                columns: new string[0],
-                values: new object[0]);
         }
 
         /// <inheritdoc />
