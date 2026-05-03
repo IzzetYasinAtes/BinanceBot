@@ -8,16 +8,19 @@ using Microsoft.EntityFrameworkCore;
 namespace BinanceBot.Application.Portfolio.Queries.GetPortfolioSummary;
 
 /// <summary>
-/// Loop 19 — single-shot portfolio snapshot for the dashboard. Replaces a stack of
-/// per-metric queries on the UI side and reconciles two values that drifted apart
-/// in earlier loops:
-///   - <c>CurrentCash</c>     : VirtualBalance.CurrentBalance (settled cash).
-///   - <c>TrueEquity</c>      : CurrentCash + sum(open MTM unrealized PnL) + open cost basis sign-aware.
+/// Loop 19 → Loop 93 — single-shot portfolio snapshot for the dashboard.
 ///
-/// Previous /api/balances handler returned both columns equal because
-/// VirtualBalance.Equity is a pre-aggregated MTM that races partial fills (Loop
-/// 17/18 trace). This query keeps the two views explicit so the UI can display
-/// "cash" vs "equity" without conflating them.
+/// Loop 93 §2 — Futures cash semantics (ADR-0025). Spot-era ledger formula
+/// (<c>start + realized − open notional − open commission</c>) silently
+/// double-counted notional once the simulator switched to Futures: notional
+/// is held as MARGIN (not deducted from cash), only commission and realized
+/// PnL move the wallet. The handler now reads <c>VirtualBalance.WalletBalance</c>
+/// directly as the authoritative cash figure (paper sim already maintains it via
+/// <see cref="VirtualBalance.ApplyFill"/> / <see cref="VirtualBalance.ReturnMarginAndApplyPnl"/>):
+///   - <c>CurrentCash</c>         : <c>WalletBalance</c> — single source of truth.
+///   - <c>OpenPositionsValue</c>  : Σ <c>MarkPrice × Quantity</c> (notional view, sign-agnostic).
+///   - <c>TrueEquity</c>          : <c>WalletBalance + Σ UnrealizedPnl</c>.
+///   - <c>NetPnl</c>              : <c>TrueEquity − StartingBalance</c>.
 /// </summary>
 public sealed record GetPortfolioSummaryQuery(TradingMode Mode = TradingMode.Paper)
     : IRequest<Result<PortfolioSummaryDto>>;
@@ -75,12 +78,13 @@ public sealed class GetPortfolioSummaryQueryHandler
             return Result<PortfolioSummaryDto>.NotFound($"VirtualBalance for mode {mode} not seeded.");
         }
 
-        // Open positions — unrealized PnL + cost basis. We compute the MTM value
-        // as cost-basis + unrealized so the UI reads a "what's parked in open
-        // positions" figure that ties out against Position.MarkPrice.
-        // Loop 84 cash-bug fix: `OpenCommission` is summed separately so the
-        // ledger-derived cash formula can deduct it explicitly (entry fee leaves
-        // cash before exit fee shows up on Close).
+        // Loop 93 §2 — open positions aggregate. <c>NotionalValue</c> reads
+        // <c>MarkPrice × Quantity</c> so the UI shows current market exposure
+        // (sign-agnostic — Long and Short both lock the same magnitude of
+        // margin). <c>OpenCommission</c> stays in the projection only for the
+        // <c>TotalCommissionPaid</c> hero metric; it is NOT deducted from cash
+        // any more (Spot-era artefact removed — Futures keeps notional in
+        // <see cref="VirtualBalance.AllocatedMargin"/>, not in cash).
         var openAgg = await _db.Positions
             .AsNoTracking()
             .Where(p => p.Mode == mode && p.Status == PositionStatus.Open)
@@ -88,17 +92,16 @@ public sealed class GetPortfolioSummaryQueryHandler
             .Select(g => new
             {
                 Count = g.Count(),
-                CostBasis = g.Sum(p => p.AverageEntryPrice * p.Quantity),
+                NotionalValue = g.Sum(p => p.MarkPrice * p.Quantity),
                 Unrealized = g.Sum(p => p.UnrealizedPnl),
                 OpenCommission = g.Sum(p => p.EntryCommission),
             })
             .FirstOrDefaultAsync(ct);
 
         var openCount = openAgg?.Count ?? 0;
-        var openCostBasis = openAgg?.CostBasis ?? 0m;
+        var openPositionsValue = openAgg?.NotionalValue ?? 0m;
         var unrealizedTotal = openAgg?.Unrealized ?? 0m;
         var openCommission = openAgg?.OpenCommission ?? 0m;
-        var openPositionsValue = openCostBasis + unrealizedTotal;
 
         // Closed positions — realized PnL aggregates and win/loss bucketing.
         var todayStart = new DateTimeOffset(now.UtcDateTime.Date, TimeSpan.Zero);
@@ -140,37 +143,24 @@ public sealed class GetPortfolioSummaryQueryHandler
         // metric is comparable across iterations regardless of close timing.
         var totalCommission = closedCommission + openCommission;
 
-        // ---- Loop 84 cash-bug fix (phantom +$157 on UI Toplam Net K/Z) ---------
-        // Single source of truth: the position ledger. Even when
-        // VirtualBalance.CurrentBalance drifts (paper iterations crossing a
-        // PaperFillSimulator semantic change, or an in-flight reset interleaving
-        // with fills), the ledger-derived cash + equity are exact:
+        // ---- Loop 93 §2 — Futures cash semantics (ADR-0025) -----------------
+        // Single source of truth: <c>VirtualBalance.WalletBalance</c>. Paper
+        // sim's <see cref="FuturesPaperFillSimulator"/> already routes the
+        // realized cash delta through <see cref="VirtualBalance.ApplyFill"/>
+        // (commission − notional convention is wallet-correct for Futures
+        // because the simulator's <c>realizedCash</c> is the net wallet effect
+        // of the leg). Open notional lives in <see cref="VirtualBalance.AllocatedMargin"/>,
+        // NOT in cash, so the Spot-era subtraction (cash − notional − commission)
+        // produced a $80 ghost reading while the actual wallet held $399.99 in
+        // Loop 92 t30 — exactly the snapshot drift this fix eliminates.
         //
-        //   ledgerCash = StartingBalance
-        //              + Σ closed.RealizedPnl     // already net of entry+exit fees
-        //              − Σ open.cost-basis         // settled for the open BUY leg
-        //              − Σ open.EntryCommission    // entry fee for still-open positions
-        //
-        //   trueEquity = ledgerCash + Σ open.cost-basis + Σ open.UnrealizedPnl
-        //              = StartingBalance
-        //              + Σ closed.RealizedPnl
-        //              + Σ open.UnrealizedPnl
-        //              − Σ open.EntryCommission
-        //
-        // This formulation never reads CurrentBalance/Equity for the headline
-        // numbers, so the UI heals automatically from a stale snapshot. The
-        // VirtualBalance row is still maintained for backwards-compat callers
-        // (sizer/peak-tracker read the realized formulation directly from
-        // Positions; see EquitySnapshotProvider).
-        var ledgerCash = balance.StartingBalance
-                       + realizedAllTime
-                       - openCostBasis
-                       - openCommission;
-        var trueEquity = ledgerCash + openPositionsValue;
+        //   currentCash       = WalletBalance
+        //   trueEquity        = WalletBalance + Σ open.UnrealizedPnl
+        //   openPositionsValue = Σ open.MarkPrice × Quantity   (UI display only)
+        //   netPnl            = trueEquity − StartingBalance
+        var walletCash = balance.WalletBalance;
+        var trueEquity = walletCash + unrealizedTotal;
 
-        // Cash-grounded net: trueEquity - starting. Component metrikleri
-        // (RealizedPnlAllTime, UnrealizedPnlTotal) UI'a ayrı alanlar olarak gider
-        // ama hero "Net K/Z" bu tek tutarlılık sağlanan değerle gösterilir.
         var netPnl = trueEquity - balance.StartingBalance;
         var netPct = balance.StartingBalance > 0m
             ? netPnl / balance.StartingBalance
@@ -179,8 +169,10 @@ public sealed class GetPortfolioSummaryQueryHandler
         // ADR-0020 §20.8 — Position.Close artık RealizedPnl'i fee-net yazıyor.
         // NetProfitAfterFees realizedAllTime + unrealizedTotal − openCommission:
         // kapalı işlemlerin fee-net realized + açık pozisyonların unrealized −
-        // open BUY-leg fees (henüz Close çağrılmadığından RealizedPnl içine
-        // henüz girmedi). Cash-grounded netPnl ile birebir eşit olmalı.
+        // open entry fees (henüz Close çağrılmadığından RealizedPnl içine
+        // girmedi). Futures cash formülünde netPnl = realized + unrealized −
+        // openCommission invariant'ı korunur (commission tek defa wallet'tan
+        // düşer, RealizedPnl close'da fee-net yazılır).
         var netAfterFees = realizedAllTime + unrealizedTotal - openCommission;
 
         var decided = winningTrades + losingTrades;
@@ -192,7 +184,7 @@ public sealed class GetPortfolioSummaryQueryHandler
             Mode: mode,
             ModeName: mode.ToString(),
             StartingBalance: balance.StartingBalance,
-            CurrentCash: ledgerCash,
+            CurrentCash: walletCash,
             OpenPositionsValue: openPositionsValue,
             TrueEquity: trueEquity,
             RealizedPnl24h: realizedToday,

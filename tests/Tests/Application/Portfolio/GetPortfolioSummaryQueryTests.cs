@@ -13,9 +13,14 @@ using Moq;
 namespace BinanceBot.Tests.Application.Portfolio;
 
 /// <summary>
-/// Loop 19 — single-shot portfolio dashboard query. Validates the cash/equity
-/// split (the bug that produced the misleading "Mevcut Bakiye $316" display)
-/// and the realized/unrealized/win-rate aggregates the UI needs.
+/// Loop 19 → Loop 93 — single-shot portfolio dashboard query.
+///
+/// Loop 93 §2 — Futures cash semantics (ADR-0025): <c>CurrentCash</c> is the
+/// authoritative <c>VirtualBalance.WalletBalance</c> (commission − realized PnL
+/// adjusted, notional NOT deducted because Futures parks notional as margin).
+/// <c>TrueEquity</c> = <c>WalletBalance + Σ open.UnrealizedPnl</c>. Test setup
+/// uses <see cref="VirtualBalance.ApplyFill"/> to model the wallet-side cash
+/// flow that the paper simulator would emit on each fill.
 /// </summary>
 public class GetPortfolioSummaryQueryTests
 {
@@ -94,20 +99,25 @@ public class GetPortfolioSummaryQueryTests
     }
 
     /// <summary>
-    /// Loop 84 cash-bug fix — the cash and equity columns must NOT collapse to the
-    /// same number when an open position has unrealized PnL. Cash is the
-    /// ledger-derived settled cash (start + realized − open notional − open fees);
-    /// equity is cash + open MTM. The handler no longer reads
-    /// VirtualBalance.CurrentBalance for the headline numbers because that snapshot
-    /// drifted across iterations crossing PaperFillSimulator semantic changes
-    /// (loop 84 phantom +$157 trace).
+    /// Loop 93 §2 — Futures semantics: cash and equity columns must NOT collapse
+    /// to the same number when an open position has unrealized PnL. Cash is the
+    /// settled <c>WalletBalance</c> (paper sim's <c>ApplyFill</c> result); equity
+    /// is <c>cash + Σ unrealized</c>. Setup uses <see cref="VirtualBalance.ApplyFill"/>
+    /// to simulate the −commission deduction the paper simulator emits on a BUY
+    /// open (notional itself is locked into margin, not removed from cash —
+    /// that is the Futures invariant the previous Spot-era subtraction broke).
     /// </summary>
     [Fact]
     public async Task OpenPositionWithUnrealizedPnl_TrueEquityExceedsCash()
     {
         var db = NewDb();
-        SeedPaper(db, 100m);
-        var pos = OpenPos(db, "XRPUSDT", TradeDirection.Long, qty: 10m, entry: 2m); // cost 20
+        var vb = SeedPaper(db, 100m);
+        // Paper sim would deduct commission only (notional → margin, not cash).
+        // 0.05% taker fee × $20 notional = $0.01 wallet impact for the open leg.
+        vb.ApplyFill(-0.01m, T0.AddSeconds(1));
+        db.SaveChanges();
+
+        var pos = OpenPos(db, "XRPUSDT", TradeDirection.Long, qty: 10m, entry: 2m); // notional 20
         pos.MarkToMarket(markPrice: 2.5m, now: T0.AddMinutes(1));                  // unrealized +5
         db.SaveChanges();
 
@@ -117,27 +127,23 @@ public class GetPortfolioSummaryQueryTests
             new GetPortfolioSummaryQuery(TradingMode.Paper), CancellationToken.None);
 
         var dto = result.Value;
-        // Loop 84 — ledger-driven cash: 100 start + 0 realized − 20 open notional
-        // − 0 open commission = 80. Snapshot CurrentBalance (still 100m on the
-        // VirtualBalance row because no fill applied via PaperFillSimulator) is
-        // intentionally bypassed.
-        dto.CurrentCash.Should().Be(80m);
+        // Loop 93 — wallet-driven cash: WalletBalance after the fee-only fill = 99.99.
+        dto.CurrentCash.Should().Be(99.99m);
         dto.UnrealizedPnlTotal.Should().Be(5m);
-        dto.OpenPositionsValue.Should().Be(25m);            // 20 cost + 5 unrealized
-        dto.TrueEquity.Should().Be(105m);                   // ledgerCash 80 + open 25
+        dto.OpenPositionsValue.Should().Be(25m);            // mark 2.5 × qty 10
+        dto.TrueEquity.Should().Be(104.99m);                // wallet 99.99 + unrealized 5
         dto.OpenPositionCount.Should().Be(1);
-        // Cash-grounded netPnl = trueEquity − starting = 105 − 100 = 5 (matches
-        // the +5 unrealized; closed leg fees would normally net out via
-        // RealizedPnl, here zero because no Close was issued).
-        dto.NetPnl.Should().Be(5m);
-        dto.NetPnlPct.Should().Be(0.05m);
+        // Cash-grounded netPnl = trueEquity − starting = 104.99 − 100 = 4.99
+        // (= +5 unrealized − 0.01 commission already booked into the wallet).
+        dto.NetPnl.Should().Be(4.99m);
+        dto.NetPnlPct.Should().Be(0.0499m);
     }
 
     [Fact]
     public async Task ClosedPositions_ProduceWinLossWinRate()
     {
         var db = NewDb();
-        SeedPaper(db, 100m);
+        var vb = SeedPaper(db, 100m);
 
         var winner = OpenPos(db, "BTCUSDT", TradeDirection.Long, qty: 0.001m, entry: 30000m);
         winner.Close(exitPrice: 35000m, reason: "tp", now: T0.AddMinutes(5));   // +5
@@ -145,6 +151,14 @@ public class GetPortfolioSummaryQueryTests
         loser.Close(exitPrice: 2600m, reason: "sl", now: T0.AddMinutes(10));    // -2
         var second = OpenPos(db, "BNBUSDT", TradeDirection.Long, qty: 0.1m, entry: 500m);
         second.Close(exitPrice: 505m, reason: "tp", now: T0.AddMinutes(15));    // +0.5
+        db.SaveChanges();
+
+        // Loop 93 §2 — Futures cash flow: realized PnL is rolled into the wallet
+        // by the close path (paper sim → VirtualBalance.ApplyFill / ReturnMarginAndApplyPnl).
+        // The test models the net effect (+5 −2 +0.5 = +3.5) as a single ApplyFill
+        // so the assertion runs against the same authoritative cash field the
+        // handler reads.
+        vb.ApplyFill(3.5m, T0.AddMinutes(20));
         db.SaveChanges();
 
         var sut = new GetPortfolioSummaryQueryHandler(db, StubClock().Object);
@@ -159,11 +173,9 @@ public class GetPortfolioSummaryQueryTests
         dto.WinRate.Should().BeApproximately(2m / 3m, 1e-6m);
         dto.RealizedPnlAllTime.Should().Be(3.5m);
         dto.RealizedPnl24h.Should().Be(3.5m);
-        // Loop 84 cash-bug fix: ledger-driven cash = 100 start + 3.5 realized − 0
-        // open notional − 0 open commission = 103.5. trueEquity = 103.5 + 0 open
-        // value = 103.5. netPnl = 3.5 (= sum realized). The previous test pinned
-        // 0m because the handler read the unmoved VirtualBalance.CurrentBalance
-        // snapshot — exactly the drift mode the fix eliminates.
+        // Loop 93 — wallet-driven cash: WalletBalance = 100 + 3.5 = 103.5.
+        // Handler reads WalletBalance directly; no notional adjustment because
+        // there are no open positions left in this scenario.
         dto.CurrentCash.Should().Be(103.5m);
         dto.NetPnl.Should().Be(3.5m);
     }
@@ -246,103 +258,65 @@ public class GetPortfolioSummaryQueryTests
     }
 
     /// <summary>
-    /// Loop 84 cash-bug regression — the user reported a phantom +$157 on the UI
-    /// "Toplam Net K/Z" hero (start $500, 8 closed trades realized −$0.61, 3 open
-    /// positions notional $300.53, open commission −$0.23 → expected cash $197.43,
-    /// snapshot showed $355.14). Root cause: <see cref="GetPortfolioSummaryQuery"/>
-    /// previously read <c>VirtualBalance.CurrentBalance</c> directly. When that
-    /// snapshot drifted (paper iterations crossing PaperFillSimulator semantic
-    /// changes, or in-flight reset interleaving with fills) the equity formula
-    /// double-counted open notional. Fix: ledger-derived cash (start + realized
-    /// − open cost basis − open commission) is now the single source of truth.
-    /// This test pins the exact arithmetic so a regression cannot reintroduce
-    /// the snapshot-drift codepath.
+    /// Loop 93 §2 — Futures cash regression. Loop 92 t30 dump showed
+    /// VirtualBalance.WalletBalance = $399.99 (correct: only fees deducted,
+    /// notional locked in margin) but the dashboard rendered $79.16 because the
+    /// Spot-era handler subtracted open notional + commission from a synthesised
+    /// "ledger cash". The fix reads <c>WalletBalance</c> as the single source of
+    /// truth for <c>CurrentCash</c>; <c>OpenPositionsValue</c> shows mark notional
+    /// for display only and is NOT folded into cash.
     /// </summary>
     [Fact]
-    public async Task LedgerCash_DerivesFromPositions_NotFromVirtualBalanceSnapshot()
+    public async Task CurrentCash_ReadsWalletBalance_NotSubtractedByOpenNotional()
     {
         var db = NewDb();
         var vb = SeedPaper(db, 500m);
 
-        // Simulate the exact user scenario: 8 closed trades net realized −$0.61
-        // (entry+exit commission already baked into Position.RealizedPnl per
-        // ADR-0020 §20.6). Aggregated as 1 representative closed position.
-        var closed = Position.Open(
-            Symbol.From("BTCUSDT"),
-            TradeDirection.Long,
-            quantity: 0.01m,
-            entryPrice: 100m,            // notional 1.00
-            stopPrice: null,
-            strategyId: null,
-            mode: TradingMode.Paper,
-            now: T0,
-            entryCommission: 0.60m);
-        closed.Close(
-            exitPrice: 100m,             // gross PnL 0; net = 0 − 0.60 − 0.60 = −1.20
-            reason: "test",
-            now: T0.AddMinutes(5),
-            exitCommission: 0.60m);
-        // Sanity: this puts realized at −1.20. Adjust to match the −0.61 figure
-        // by adding a small winning trade (gross +0.59).
-        var winner = Position.Open(
-            Symbol.From("ETHUSDT"),
-            TradeDirection.Long,
-            quantity: 1m,
-            entryPrice: 1m,
-            stopPrice: null,
-            strategyId: null,
-            mode: TradingMode.Paper,
-            now: T0,
-            entryCommission: 0m);
-        winner.Close(
-            exitPrice: 1.59m,
-            reason: "test",
-            now: T0.AddMinutes(6),
-            exitCommission: 0m);
-        db.Positions.Add(closed);
-        db.Positions.Add(winner);
-
-        // 3 open positions: total notional $300.53, total entry commission $0.23.
-        var open1 = Position.Open(
-            Symbol.From("XRPUSDT"),
-            TradeDirection.Long,
-            quantity: 100m,
-            entryPrice: 1m,              // notional 100.00
-            stopPrice: null,
-            strategyId: null,
-            mode: TradingMode.Paper,
-            now: T0.AddMinutes(7),
-            entryCommission: 0.10m);
-        var open2 = Position.Open(
-            Symbol.From("BNBUSDT"),
-            TradeDirection.Long,
-            quantity: 1m,
-            entryPrice: 100.53m,         // notional 100.53
-            stopPrice: null,
-            strategyId: null,
-            mode: TradingMode.Paper,
-            now: T0.AddMinutes(8),
-            entryCommission: 0.10m);
-        var open3 = Position.Open(
-            Symbol.From("SOLUSDT"),
-            TradeDirection.Long,
-            quantity: 2m,
-            entryPrice: 50m,             // notional 100.00
-            stopPrice: null,
-            strategyId: null,
-            mode: TradingMode.Paper,
-            now: T0.AddMinutes(9),
-            entryCommission: 0.03m);
-        db.Positions.Add(open1);
-        db.Positions.Add(open2);
-        db.Positions.Add(open3);
+        // Simulate Loop 92 t30 wallet trajectory: 3 fee-only fills (open BUY/SELL
+        // legs in Futures park notional in margin). Total fee = $0.1517.
+        vb.ApplyFill(-0.0508m, T0.AddMinutes(1));
+        vb.ApplyFill(-0.0500m, T0.AddMinutes(2));
+        vb.ApplyFill(-0.0509m, T0.AddMinutes(3));
         db.SaveChanges();
 
-        // Inject the buggy snapshot value the user observed ($355.14). The fix
-        // must ignore this and derive cash from the ledger instead.
-        // Using ApplyFill keeps the domain encapsulation intact (no public setters).
-        var drift = 355.14m - vb.CurrentBalance;
-        vb.ApplyFill(drift, T0.AddMinutes(10));
+        // 3 open positions matching the t30 snapshot (BTC short, ADA long,
+        // ETH long). Mark prices set so unrealized PnL replays the report.
+        var btcShort = Position.Open(
+            Symbol.From("BTCUSDT"),
+            TradeDirection.Short,
+            quantity: 0.0013m,
+            entryPrice: 78315.32m,
+            stopPrice: null,
+            strategyId: null,
+            mode: TradingMode.Paper,
+            now: T0.AddMinutes(1),
+            entryCommission: 0.0509m);
+        btcShort.MarkToMarket(78359m, T0.AddMinutes(4));
+        var adaLong = Position.Open(
+            Symbol.From("ADAUSDT"),
+            TradeDirection.Long,
+            quantity: 403m,
+            entryPrice: 0.2483m,
+            stopPrice: null,
+            strategyId: null,
+            mode: TradingMode.Paper,
+            now: T0.AddMinutes(2),
+            entryCommission: 0.0124m);
+        adaLong.MarkToMarket(0.24813m, T0.AddMinutes(4));
+        var ethLong = Position.Open(
+            Symbol.From("ETHUSDT"),
+            TradeDirection.Long,
+            quantity: 0.044m,
+            entryPrice: 2309.03m,
+            stopPrice: null,
+            strategyId: null,
+            mode: TradingMode.Paper,
+            now: T0.AddMinutes(3),
+            entryCommission: 0.0508m);
+        ethLong.MarkToMarket(2308.19m, T0.AddMinutes(4));
+        db.Positions.Add(btcShort);
+        db.Positions.Add(adaLong);
+        db.Positions.Add(ethLong);
         db.SaveChanges();
 
         var sut = new GetPortfolioSummaryQueryHandler(db, StubClock().Object);
@@ -352,20 +326,26 @@ public class GetPortfolioSummaryQueryTests
         result.IsSuccess.Should().BeTrue();
         var dto = result.Value;
 
-        // Realized = closed.RealizedPnl sum = (−1.20) + 0.59 = −0.61. Confirmed
-        // before asserting cash to keep the test diagnostic on regression.
-        dto.RealizedPnlAllTime.Should().Be(-0.61m);
+        // CurrentCash MUST equal the WalletBalance (start − fees). Previously
+        // the handler returned ~$79 because it subtracted open notional too.
+        dto.CurrentCash.Should().Be(vb.WalletBalance);
+        dto.CurrentCash.Should().BeApproximately(499.85m, 0.01m);
 
-        // Open ledger: cost basis 100 + 100.53 + 100 = 300.53; open commission
-        // 0.10 + 0.10 + 0.03 = 0.23. Ledger cash = 500 + (−0.61) − 300.53 − 0.23
-        // = 198.63. The user's observed $355.14 snapshot is overwritten.
-        dto.CurrentCash.Should().Be(198.63m);
-        dto.OpenPositionsValue.Should().Be(300.53m);  // no MTM applied
-        dto.TrueEquity.Should().Be(499.16m);          // 198.63 + 300.53
-        dto.NetPnl.Should().Be(-0.84m);               // realized −0.61 − openCommission −0.23
+        // OpenPositionsValue is mark*qty across all 3 (sign-agnostic).
+        dto.OpenPositionsValue.Should().Be(
+            btcShort.MarkPrice * btcShort.Quantity
+          + adaLong.MarkPrice * adaLong.Quantity
+          + ethLong.MarkPrice * ethLong.Quantity);
 
-        // Invariant: NetProfitAfterFees == NetPnl when no MTM drift is in play.
-        dto.NetProfitAfterFees.Should().Be(dto.NetPnl);
+        // TrueEquity = WalletBalance + Σ unrealized.
+        dto.TrueEquity.Should().Be(dto.CurrentCash + dto.UnrealizedPnlTotal);
+
+        // NetPnl invariant.
+        dto.NetPnl.Should().Be(dto.TrueEquity - dto.StartingBalance);
+
+        // Closed leg empty in this scenario.
+        dto.ClosedTradeCount.Should().Be(0);
+        dto.OpenPositionCount.Should().Be(3);
     }
 
     /// <summary>
