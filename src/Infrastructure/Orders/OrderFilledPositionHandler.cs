@@ -61,18 +61,20 @@ public sealed class OrderFilledPositionHandler : INotificationHandler<OrderFille
         var fillQty = order.ExecutedQuantity;
         var now = _clock.UtcNow;
 
-        // ADR-0020 §20.7 — aggregate quote-denominated commission for this order's
-        // fills so the Position aggregate tracks fee-aware RealizedPnl. BUY legs
-        // report commission in base asset (quote-equivalent = fee * price); SELL
-        // legs report commission already in quote currency. Same aggregation
-        // applies for live fills so mainnet/testnet reuse the same pathway when
-        // ADR-0006 unblocks.
+        // ADR-0025 (Loop 92 Futures pivot) + Loop 93 §1 — Futures contracts
+        // settle commission in QUOTE asset (USDT) for BOTH BUY and SELL legs.
+        // <see cref="FuturesPaperFillSimulator"/> writes <c>OrderFill.Commission</c>
+        // already denominated in USDT (taker fee × notional, line ~160), and
+        // Binance Futures live fills use the same convention. The previous
+        // <c>order.Side == Buy ? f.Commission * f.Price : f.Commission</c>
+        // multiplier was a Spot-era artefact that produced absurd values on
+        // BUY legs (e.g. ETH $2309 × $0.05 fee → $117 written into
+        // Position.EntryCommission while OrderFill row correctly held $0.05).
+        // Single SUM over <c>f.Commission</c> is exact for Futures.
         var orderQuoteFee = await db.OrderFills
             .AsNoTracking()
             .Where(f => f.OrderId == order.Id)
-            .SumAsync(f => order.Side == OrderSide.Buy
-                ? f.Commission * f.Price
-                : f.Commission, cancellationToken);
+            .SumAsync(f => f.Commission, cancellationToken);
 
         var openPosition = await db.Positions
             .FirstOrDefaultAsync(p =>

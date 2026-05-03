@@ -141,11 +141,14 @@ public class OrderFilledPositionHandlerTests
         decimal fillPrice,
         DateTimeOffset now,
         decimal? stopPrice = null,
-        decimal? takeProfit = null)
+        decimal? takeProfit = null,
+        decimal commission = 0m,
+        OrderSide side = OrderSide.Buy,
+        string symbol = "BTCUSDT")
     {
         var order = Order.Place(
-            cid, Symbol.From("BTCUSDT"),
-            OrderSide.Buy, OrderType.Market, TimeInForce.Ioc,
+            cid, Symbol.From(symbol),
+            side, OrderType.Market, TimeInForce.Ioc,
             qty, price: null, stopPrice: stopPrice,
             strategyId: strategyId, mode: TradingMode.Paper, now: now,
             takeProfit: takeProfit);
@@ -153,10 +156,36 @@ public class OrderFilledPositionHandlerTests
             exchangeTradeId: 1,
             price: fillPrice,
             quantity: qty,
-            commission: 0m, commissionAsset: "USDT",
+            commission: commission, commissionAsset: "USDT",
             filledAt: now);
         db.Orders.Add(order);
         db.SaveChanges();
+
+        // Mirror the fill into the OrderFill table directly. Production EF
+        // configuration owns this through the Order aggregate's Fills collection,
+        // but TestDbContext maps OrderFill as a free-standing entity so the
+        // handler's <c>db.OrderFills.Where(f => f.OrderId == order.Id)</c> read
+        // can resolve. The Order aggregate keeps its <c>Fills</c> collection
+        // private (DDD encapsulation); we use the public <c>Order.Fills</c>
+        // accessor and reflection to set the FK + reset the synthetic Id so
+        // the InMemory provider assigns a fresh primary key.
+        if (commission > 0m)
+        {
+            var fill = order.Fills.Last();
+            var idSetter = typeof(BinanceBot.Domain.Common.Entity<long>)
+                .GetProperty(nameof(OrderFill.Id))!
+                .GetSetMethod(nonPublic: true)!;
+            idSetter.Invoke(fill, new object[] { 0L });
+
+            var fkSetter = typeof(OrderFill)
+                .GetProperty(nameof(OrderFill.OrderId))!
+                .GetSetMethod(nonPublic: true)!;
+            fkSetter.Invoke(fill, new object[] { order.Id });
+
+            db.OrderFills.Add(fill);
+            db.SaveChanges();
+        }
+
         return order;
     }
 
@@ -318,5 +347,52 @@ public class OrderFilledPositionHandlerTests
             CancellationToken.None);
 
         db.Positions.Single().MaxHoldDuration.Should().BeNull();
+    }
+
+    /// <summary>
+    /// Loop 93 §1 regression — Position.EntryCommission must equal the
+    /// quote-denominated <c>OrderFill.Commission</c> directly, NOT
+    /// <c>commission × price</c>. Loop 92 t30 dump observed
+    /// <c>Position.EntryCommission = $117.29</c> for an ETH BUY where the
+    /// underlying <c>OrderFill.Commission = $0.0508</c>: the Spot-era
+    /// multiplier (treating BUY commission as base-asset and converting to
+    /// quote via × price) survived the Futures pivot. Futures contracts
+    /// settle commission in QUOTE asset for both legs, so the multiplier is
+    /// always wrong. This test pins the exact aggregation across the three
+    /// open positions captured at halt: BTC short, ADA long, ETH long.
+    /// </summary>
+    [Theory]
+    [InlineData("ETHUSDT", "Buy", 0.044, 2309.03, 0.0508)]
+    [InlineData("ADAUSDT", "Buy", 403.0, 0.2483, 0.0500)]
+    [InlineData("BTCUSDT", "Sell", 0.0013, 78315.32, 0.0509)]
+    public async Task Fill_EntryCommission_EqualsRawOrderFillCommission_NoPriceMultiplier(
+        string symbol, string sideText, double qtyD, double priceD, double commissionD)
+    {
+        var qty = (decimal)qtyD;
+        var price = (decimal)priceD;
+        var commission = (decimal)commissionD;
+        var side = Enum.Parse<OrderSide>(sideText);
+        var now = DateTimeOffset.UtcNow;
+        var (scopeFactory, db) = BuildHarness(now);
+
+        var cid = $"loop93-{symbol}-{sideText}".ToLowerInvariant();
+        SeedFilledOrder(db, cid, strategyId: 100, qty: qty, fillPrice: price,
+            now: now, commission: commission, side: side, symbol: symbol);
+
+        var sut = new OrderFilledPositionHandler(
+            scopeFactory, new FixedClock(now),
+            NullLogger<OrderFilledPositionHandler>.Instance);
+
+        await sut.Handle(new OrderFilledEvent(
+            cid, symbol, qty, qty * price, TradingMode.Paper),
+            CancellationToken.None);
+
+        var pos = db.Positions.Single(p => p.Symbol == Symbol.From(symbol));
+        // Aggregate must echo the raw fill fee (USDT, no price multiplier).
+        pos.EntryCommission.Should().Be(commission);
+        // Direction follows OrderSide: BUY → Long, SELL → Short.
+        pos.Direction.Should().Be(side == OrderSide.Buy
+            ? TradeDirection.Long
+            : TradeDirection.Short);
     }
 }
