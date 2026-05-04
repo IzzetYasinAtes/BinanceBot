@@ -115,7 +115,7 @@ public sealed class PatternCompositeEvaluator : IStrategyEvaluator
         }
 
         var slope15m = snapshot.Ema21_15m - snapshot.Ema21Prev5_15m;
-        var mtfThreshold = snapshot.Ema21_15m * 0.005m;  // %0.5 kademe (Loop 99: pazar yatay 0 emit, daha gevşek)
+        var mtfThreshold = snapshot.Ema21_15m * 0.001m;  // %0.1 strict (Loop 101 — Loop 91 değer, downtrend Long filter)
 
         if (direction == TradeDirection.Long && slope15m < -mtfThreshold)
         {
