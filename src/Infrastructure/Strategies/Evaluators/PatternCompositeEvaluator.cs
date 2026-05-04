@@ -62,7 +62,7 @@ public sealed class PatternCompositeEvaluator : IStrategyEvaluator
         var snapshot = _indicators.TryGetBarSnapshot(symbol);
         if (snapshot is null)
         {
-            _logger.LogDebug(
+            _logger.LogInformation(
                 "PatternComposite snapshot not ready symbol={Symbol} strategyId={StrategyId}",
                 symbol, strategyId);
             return Task.FromResult<StrategyEvaluation?>(null);
@@ -96,7 +96,7 @@ public sealed class PatternCompositeEvaluator : IStrategyEvaluator
 
         if (!decision.Emit)
         {
-            _logger.LogDebug(
+            _logger.LogInformation(
                 "PatternComposite skip symbol={Symbol} strategyId={StrategyId} " +
                 "totalScore={Total} required={Req} reason={Reason}",
                 symbol, strategyId, decision.TotalScore, decision.RequiredScore, decision.SkipReason);
@@ -108,7 +108,7 @@ public sealed class PatternCompositeEvaluator : IStrategyEvaluator
         var direction = decision.Direction ?? TradeDirection.Long;
         if (snapshot.Ema21_15m <= 0m)
         {
-            _logger.LogDebug(
+            _logger.LogInformation(
                 "PatternComposite skip symbol={Symbol} ema21_15m={Ema} reason=mtf_15m_warmup",
                 symbol, snapshot.Ema21_15m);
             return Task.FromResult<StrategyEvaluation?>(null);
@@ -119,14 +119,14 @@ public sealed class PatternCompositeEvaluator : IStrategyEvaluator
 
         if (direction == TradeDirection.Long && slope15m < -mtfThreshold)
         {
-            _logger.LogDebug(
+            _logger.LogInformation(
                 "PatternComposite skip Long symbol={Symbol} ema21_15m={Ema} slope15m={Slope} reason=mtf_15m_slope_down",
                 symbol, snapshot.Ema21_15m, slope15m);
             return Task.FromResult<StrategyEvaluation?>(null);
         }
         if (direction == TradeDirection.Short && slope15m > mtfThreshold)
         {
-            _logger.LogDebug(
+            _logger.LogInformation(
                 "PatternComposite skip Short symbol={Symbol} ema21_15m={Ema} slope15m={Slope} reason=mtf_15m_slope_up",
                 symbol, snapshot.Ema21_15m, slope15m);
             return Task.FromResult<StrategyEvaluation?>(null);
@@ -137,14 +137,14 @@ public sealed class PatternCompositeEvaluator : IStrategyEvaluator
         var rsiMin = 100m - options.RsiMaxEmit;
         if (direction == TradeDirection.Long && snapshot.Rsi14 > options.RsiMaxEmit)
         {
-            _logger.LogDebug(
+            _logger.LogInformation(
                 "PatternComposite skip Long symbol={Symbol} rsi14={Rsi} cap={Cap} reason=rsi_overbought",
                 symbol, snapshot.Rsi14, options.RsiMaxEmit);
             return Task.FromResult<StrategyEvaluation?>(null);
         }
         if (direction == TradeDirection.Short && snapshot.Rsi14 < rsiMin)
         {
-            _logger.LogDebug(
+            _logger.LogInformation(
                 "PatternComposite skip Short symbol={Symbol} rsi14={Rsi} cap={Cap} reason=rsi_oversold",
                 symbol, snapshot.Rsi14, rsiMin);
             return Task.FromResult<StrategyEvaluation?>(null);
