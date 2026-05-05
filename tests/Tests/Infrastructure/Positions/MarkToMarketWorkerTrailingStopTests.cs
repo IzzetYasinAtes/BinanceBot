@@ -62,6 +62,14 @@ public class MarkToMarketWorkerTrailingStopTests
         => new StaticOptionsMonitor<TrailingStopOptions>(value);
 
     /// <summary>
+    /// Loop 109 — varsayılan safety net opts (trailing testleri redundancy
+    /// dalını tetiklemesin diye <c>Enabled=false</c>).
+    /// </summary>
+    private static IOptionsMonitor<PositionSafetyOptions> SafetyOptsDisabled()
+        => new StaticOptionsMonitor<PositionSafetyOptions>(
+            new PositionSafetyOptions { Enabled = false });
+
+    /// <summary>
     /// Position'u BE applied state'iyle seed et — trailing'i hemen "armed" başlat.
     /// Üretim path'inde MarkToMarketWorker BE'yi ilk tick'te uygular; testin
     /// trailing-only odaklılığını bozmamak için domain method direkt çağrılıyor.
@@ -123,7 +131,8 @@ public class MarkToMarketWorkerTrailingStopTests
             BuildScope(db, new FixedClock(T0.AddMinutes(15)), mediator.Object),
             NullLogger<MarkToMarketWorker>.Instance,
             BeOpts(new BreakEvenOptions { Enabled = false }),  // BE zaten applied; bu tick BE dalını atlasın
-            TrailOpts(new TrailingStopOptions { Enabled = true, TrailPct = 0.0015m }));
+            TrailOpts(new TrailingStopOptions { Enabled = true, TrailPct = 0.0015m }),
+            SafetyOptsDisabled());
 
         await InvokeTickAsync(sut, CancellationToken.None);
 
@@ -155,7 +164,8 @@ public class MarkToMarketWorkerTrailingStopTests
             BuildScope(db, new FixedClock(T0.AddMinutes(20)), mediator.Object),
             NullLogger<MarkToMarketWorker>.Instance,
             BeOpts(new BreakEvenOptions { Enabled = false }),
-            TrailOpts(new TrailingStopOptions { Enabled = true, TrailPct = 0.0015m }));
+            TrailOpts(new TrailingStopOptions { Enabled = true, TrailPct = 0.0015m }),
+            SafetyOptsDisabled());
         await InvokeTickAsync(sut, CancellationToken.None);
 
         var afterFirst = db.Positions.Single(p => p.Id == pos.Id);
@@ -167,7 +177,8 @@ public class MarkToMarketWorkerTrailingStopTests
             BuildScope(db, new FixedClock(T0.AddMinutes(25)), mediator.Object),
             NullLogger<MarkToMarketWorker>.Instance,
             BeOpts(new BreakEvenOptions { Enabled = false }),
-            TrailOpts(new TrailingStopOptions { Enabled = true, TrailPct = 0.0015m }));
+            TrailOpts(new TrailingStopOptions { Enabled = true, TrailPct = 0.0015m }),
+            SafetyOptsDisabled());
         await InvokeTickAsync(sut2, CancellationToken.None);
 
         captured.Should().NotBeNull("trail eşiği aşıldı, exit dispatch zorunlu");
@@ -211,7 +222,8 @@ public class MarkToMarketWorkerTrailingStopTests
             // BE'yi de false bırak → bu test artık "BE null → peak tracking yapar
             // ama exit yok" yolunu doğrular (Loop 94).
             BeOpts(new BreakEvenOptions { Enabled = false }),
-            TrailOpts(new TrailingStopOptions { Enabled = true, TrailPct = 0.0015m }));
+            TrailOpts(new TrailingStopOptions { Enabled = true, TrailPct = 0.0015m }),
+            SafetyOptsDisabled());
 
         await InvokeTickAsync(sut, CancellationToken.None);
 
@@ -236,7 +248,8 @@ public class MarkToMarketWorkerTrailingStopTests
             BuildScope(db, new FixedClock(T0.AddMinutes(20)), mediator.Object),
             NullLogger<MarkToMarketWorker>.Instance,
             BeOpts(new BreakEvenOptions { Enabled = false }),
-            TrailOpts(new TrailingStopOptions { Enabled = false, TrailPct = 0.0015m }));
+            TrailOpts(new TrailingStopOptions { Enabled = false, TrailPct = 0.0015m }),
+            SafetyOptsDisabled());
 
         await InvokeTickAsync(sut, CancellationToken.None);
 
@@ -274,7 +287,8 @@ public class MarkToMarketWorkerTrailingStopTests
             BuildScope(db, new FixedClock(T0.AddMinutes(15)), mediator.Object),
             NullLogger<MarkToMarketWorker>.Instance,
             BeOpts(new BreakEvenOptions { Enabled = true, TriggerPct = 0.0010m, OffsetPct = 0.0002m }),
-            TrailOpts(new TrailingStopOptions { Enabled = true, TrailPct = 0.0015m }));
+            TrailOpts(new TrailingStopOptions { Enabled = true, TrailPct = 0.0015m }),
+            SafetyOptsDisabled());
 
         await InvokeTickAsync(sut, CancellationToken.None);
 

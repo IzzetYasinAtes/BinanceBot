@@ -62,6 +62,13 @@ public static class DependencyInjection
         services.Configure<TrailingStopOptions>(
             configuration.GetSection(TrailingStopOptions.SectionName));
 
+        // Loop 109 — defansif safety net (SL/TP redundancy + hard max-hold).
+        // Primary monitor'lar (StopLossMonitorService, TakeProfitMonitorService)
+        // tetiklemediği durumda MarkToMarketWorker ikinci hat olarak kapatır.
+        // Hot-reload destekli (IOptionsMonitor).
+        services.Configure<PositionSafetyOptions>(
+            configuration.GetSection(PositionSafetyOptions.SectionName));
+
         // Loop 107 / ADR-0026 §A — Pullback Limit Order toggle + offset + timeout.
         // StrategySignalToOrderHandler okur; PendingLimitTimeoutWorker timeout polling.
         services.Configure<PullbackLimitOptions>(

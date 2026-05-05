@@ -22,17 +22,20 @@ public sealed class MarkToMarketWorker : BackgroundService
     private readonly ILogger<MarkToMarketWorker> _logger;
     private readonly IOptionsMonitor<BreakEvenOptions> _breakEvenOptions;
     private readonly IOptionsMonitor<TrailingStopOptions> _trailingStopOptions;
+    private readonly IOptionsMonitor<PositionSafetyOptions> _safetyOptions;
 
     public MarkToMarketWorker(
         IServiceScopeFactory scopeFactory,
         ILogger<MarkToMarketWorker> logger,
         IOptionsMonitor<BreakEvenOptions> breakEvenOptions,
-        IOptionsMonitor<TrailingStopOptions> trailingStopOptions)
+        IOptionsMonitor<TrailingStopOptions> trailingStopOptions,
+        IOptionsMonitor<PositionSafetyOptions> safetyOptions)
     {
         _scopeFactory = scopeFactory;
         _logger = logger;
         _breakEvenOptions = breakEvenOptions;
         _trailingStopOptions = trailingStopOptions;
+        _safetyOptions = safetyOptions;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -93,6 +96,7 @@ public sealed class MarkToMarketWorker : BackgroundService
 
         var beOpts = _breakEvenOptions.CurrentValue;
         var trailOpts = _trailingStopOptions.CurrentValue;
+        var safetyOpts = _safetyOptions.CurrentValue;
 
         var dirty = 0;
         // Trailing exit candidates aynı tick içinde toplanır; SaveChanges sonrası
@@ -101,6 +105,15 @@ public sealed class MarkToMarketWorker : BackgroundService
         var trailingExits = new List<(Position pos, decimal markPrice, decimal peakPrice, decimal trailPct)>();
 
         var liquidationExits = new List<(Position pos, decimal markPrice, decimal marginRatio)>();
+
+        // Loop 109 — defansif safety net. Primary monitor'lar (StopLossMonitor /
+        // TakeProfitMonitor) tetiklemediği durumda ikinci hat. Üç sebep:
+        //   (a) SL/TP redundancy — primary monitor 5sn cycle, race window olabilir,
+        //   (b) MaxHoldDuration null pos'lar (signal ContextJson freshness window
+        //       dışında doldu) HardMaxHoldMinutes ile zorla kapatılır,
+        //   (c) StopPrice/TakeProfit set olmayan pos'larda HardMaxHold tek koruma.
+        // CloseSignalPositionCommand idempotenttir (NotFound döner kapalı pos için).
+        var safetyExits = new List<(Position pos, decimal markPrice, string reason, string cidPrefix)>();
 
         foreach (var position in openPositions)
         {
@@ -134,6 +147,10 @@ public sealed class MarkToMarketWorker : BackgroundService
             // burada hemen peak başlangıcını yakalar. BE applied değilse domain
             // method NotEligible döner (no-op).
             TryApplyTrailingStop(position, mid, trailOpts, clock.UtcNow, trailingExits);
+
+            // Loop 109 — defansif safety net (SL hit redundancy, TP hit redundancy,
+            // hard max-hold). Primary path'lar yetmediği durumda ikinci hat.
+            TryQueueSafetyExit(position, mid, safetyOpts, clock.UtcNow, safetyExits);
         }
 
         if (dirty > 0)
@@ -153,6 +170,13 @@ public sealed class MarkToMarketWorker : BackgroundService
         foreach (var (pos, mark, ratio) in liquidationExits)
         {
             await DispatchLiquidationExitAsync(mediator, pos, mark, ratio, clock, ct);
+        }
+
+        // Loop 109 — defansif safety net dispatch. Primary monitor'lar veya
+        // trailing/liquidation tetiklemediyse buradan kapanır.
+        foreach (var (pos, mark, reason, cidPrefix) in safetyExits)
+        {
+            await DispatchSafetyExitAsync(mediator, pos, mark, reason, cidPrefix, ct);
         }
     }
 
@@ -402,5 +426,121 @@ public sealed class MarkToMarketWorker : BackgroundService
                 "TRAILING-EXIT close failed pos={PosId} mode={Mode}: {Errors}",
                 pos.Id, pos.Mode, string.Join(";", result.Errors));
         }
+    }
+
+    /// <summary>
+    /// Loop 109 — defansif safety net. Primary <c>StopLossMonitorService</c>,
+    /// <c>TakeProfitMonitorService</c> veya time-stop dalı tetiklemediyse mark-to-mark
+    /// her tick koşulları yeniden değerlendirir. Tetik sırası (ilk match kazanır):
+    /// <list type="number">
+    ///   <item>SL hit redundancy — Long: <c>mark &lt;= StopPrice</c>; Short: <c>mark &gt;= StopPrice</c>.</item>
+    ///   <item>TP hit redundancy — Long: <c>mark &gt;= TakeProfit</c>; Short: <c>mark &lt;= TakeProfit</c>.</item>
+    ///   <item>Hard max-hold — <c>now - OpenedAt &gt;= HardMaxHoldMinutes</c>; <c>MaxHoldDuration</c> null
+    ///         olsa bile devreye girer (signal ContextJson freshness window dışı senaryoları).</item>
+    /// </list>
+    /// Primary monitor zaten kapatmışsa <see cref="Application.Positions.Commands.ClosePosition.CloseSignalPositionCommand"/>
+    /// NotFound döner — çift dispatch zararsız (idempotency).
+    /// </summary>
+    private void TryQueueSafetyExit(
+        Position position,
+        decimal markPrice,
+        PositionSafetyOptions opts,
+        DateTimeOffset asOf,
+        List<(Position pos, decimal markPrice, string reason, string cidPrefix)> exits)
+    {
+        if (!opts.Enabled) return;
+
+        // 1) SL hit redundancy — primary StopLossMonitorService ile aynı koşul.
+        if (opts.StopLossRedundancyEnabled && position.StopPrice is decimal stop && stop > 0m)
+        {
+            var slHit = position.Direction == TradeDirection.Long
+                ? markPrice <= stop
+                : markPrice >= stop;
+            if (slHit)
+            {
+                var cidPrefix = $"safe-sl-{position.Id}-{asOf.ToUnixTimeSeconds()}";
+                var reason = $"safety_stop_loss@{markPrice:F4}_stop={stop:F4}";
+                exits.Add((position, markPrice, reason, cidPrefix));
+                return;
+            }
+        }
+
+        // 2) TP hit redundancy — primary TakeProfitMonitorService ile aynı koşul.
+        if (opts.TakeProfitRedundancyEnabled && position.TakeProfit is decimal tp && tp > 0m)
+        {
+            var tpHit = position.Direction == TradeDirection.Long
+                ? markPrice >= tp
+                : markPrice <= tp;
+            if (tpHit)
+            {
+                var cidPrefix = $"safe-tp-{position.Id}-{asOf.ToUnixTimeSeconds()}";
+                var reason = $"safety_take_profit@{markPrice:F4}_tp={tp:F4}";
+                exits.Add((position, markPrice, reason, cidPrefix));
+                return;
+            }
+        }
+
+        // 3) Hard max-hold — MaxHoldDuration null olsa bile pos'u zorla kapat.
+        if (opts.HardMaxHoldMinutes > 0)
+        {
+            var age = asOf - position.OpenedAt;
+            var hardCap = TimeSpan.FromMinutes(opts.HardMaxHoldMinutes);
+            if (age >= hardCap)
+            {
+                var cidPrefix = $"safe-mh-{position.Id}-{asOf.ToUnixTimeSeconds()}";
+                var reason = $"safety_hard_max_hold@{(int)age.TotalMinutes}min_cap={opts.HardMaxHoldMinutes}min";
+                exits.Add((position, markPrice, reason, cidPrefix));
+            }
+        }
+    }
+
+    /// <summary>
+    /// Loop 109 — safety net exit dispatch. <see cref="DispatchTrailingExitAsync"/>
+    /// pattern referans alındı: ADR-0006 mainnet defensive guard, NotFound silent
+    /// skip, hata logu structured. CID prefix safety neden tipini taşır
+    /// ("safe-sl-", "safe-tp-", "safe-mh-").
+    /// </summary>
+    private async Task DispatchSafetyExitAsync(
+        IMediator mediator,
+        Position pos,
+        decimal markPrice,
+        string reason,
+        string cidPrefix,
+        CancellationToken ct)
+    {
+        if (pos.Mode == TradingMode.LiveMainnet)
+        {
+            _logger.LogDebug(
+                "SAFETY-EXIT skipped (mainnet blocked) pos={PosId} mark={Mark} reason={Reason}",
+                pos.Id, markPrice, reason);
+            return;
+        }
+
+        _logger.LogWarning(
+            "SAFETY-EXIT triggered pos={PosId} symbol={Symbol} direction={Direction} mark={Mark} reason={Reason}",
+            pos.Id, pos.Symbol.Value, pos.Direction, markPrice, reason);
+
+        var result = await mediator.Send(
+            new CloseSignalPositionCommand(
+                pos.Symbol.Value,
+                pos.StrategyId,
+                pos.Mode,
+                reason,
+                cidPrefix),
+            ct);
+
+        if (result.IsSuccess)
+        {
+            _logger.LogWarning(
+                "SAFETY-EXIT close pos={PosId} mode={Mode} mark={Mark} reason={Reason} cid={Cid}",
+                pos.Id, pos.Mode, markPrice, reason, result.Value.CloseClientOrderId);
+        }
+        else if (result.Status != ResultStatus.NotFound)
+        {
+            _logger.LogError(
+                "SAFETY-EXIT close failed pos={PosId} mode={Mode}: {Errors}",
+                pos.Id, pos.Mode, string.Join(";", result.Errors));
+        }
+        // NotFound = primary monitor zaten kapattı; sessizce geç.
     }
 }

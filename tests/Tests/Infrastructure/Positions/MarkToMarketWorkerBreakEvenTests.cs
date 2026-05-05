@@ -63,6 +63,17 @@ public class MarkToMarketWorkerBreakEvenTests
         return new StaticOptionsMonitor<TrailingStopOptions>(value);
     }
 
+    /// <summary>
+    /// Loop 109 — varsayılan safety net opts (BE/Trailing testleri redundancy
+    /// dalını tetiklemesin diye <c>Enabled=false</c>). Spesifik testler kendi
+    /// override'ını verir.
+    /// </summary>
+    private static IOptionsMonitor<PositionSafetyOptions> SafetyOptsDisabled()
+    {
+        return new StaticOptionsMonitor<PositionSafetyOptions>(
+            new PositionSafetyOptions { Enabled = false });
+    }
+
     private static Position SeedLong(StubDbContext db, decimal stop)
     {
         var pos = Position.Open(
@@ -114,7 +125,8 @@ public class MarkToMarketWorkerBreakEvenTests
                 TriggerPct = 0.0010m,
                 OffsetPct = 0.0002m,
             }),
-            TrailOpts(new TrailingStopOptions { Enabled = false }));
+            TrailOpts(new TrailingStopOptions { Enabled = false }),
+            SafetyOptsDisabled());
 
         await InvokeTickAsync(sut, CancellationToken.None);
 
@@ -140,7 +152,8 @@ public class MarkToMarketWorkerBreakEvenTests
                 TriggerPct = 0.0010m,
                 OffsetPct = 0.0002m,
             }),
-            TrailOpts(new TrailingStopOptions { Enabled = false }));
+            TrailOpts(new TrailingStopOptions { Enabled = false }),
+            SafetyOptsDisabled());
 
         await InvokeTickAsync(sut, CancellationToken.None);
 
@@ -167,7 +180,8 @@ public class MarkToMarketWorkerBreakEvenTests
                 TriggerPct = 0.0010m,
                 OffsetPct = 0.0002m,
             }),
-            TrailOpts(new TrailingStopOptions { Enabled = false }));
+            TrailOpts(new TrailingStopOptions { Enabled = false }),
+            SafetyOptsDisabled());
 
         await InvokeTickAsync(sut, CancellationToken.None);
 
@@ -190,7 +204,8 @@ public class MarkToMarketWorkerBreakEvenTests
                 TriggerPct = 0.0010m,
                 OffsetPct = 0.0002m,
             }),
-            TrailOpts(new TrailingStopOptions { Enabled = false }));
+            TrailOpts(new TrailingStopOptions { Enabled = false }),
+            SafetyOptsDisabled());
 
         await InvokeTickAsync(sut2, CancellationToken.None);
 
@@ -215,7 +230,8 @@ public class MarkToMarketWorkerBreakEvenTests
                 TriggerPct = 0.0010m,
                 OffsetPct = 0.0002m,
             }),
-            TrailOpts(new TrailingStopOptions { Enabled = false }));
+            TrailOpts(new TrailingStopOptions { Enabled = false }),
+            SafetyOptsDisabled());
 
         await InvokeTickAsync(sut, CancellationToken.None);
 
