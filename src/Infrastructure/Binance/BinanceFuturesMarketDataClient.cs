@@ -18,8 +18,10 @@ namespace BinanceBot.Infrastructure.Binance;
 ///   <item>GET /fapi/v1/ticker/24hr — 24 saatlik ticker (volume + change).</item>
 /// </list>
 ///
-/// Public market data endpoint'lerinin signing'e ihtiyacı yok; ticker24h batch
-/// formatı Spot'la özdeş (?symbols=["BTCUSDT","ETHUSDT"] JSON array).
+/// Public market data endpoint'lerinin signing'e ihtiyacı yok. NOT: Futures
+/// /fapi/v1/ticker/24hr — Spot'tan farklı olarak SADECE tek <c>?symbol=X</c>
+/// destekler; <c>?symbols=[..]</c> görmezden gelinir ve tüm tickerlar döner
+/// (Loop 106 bug). Multi-symbol istek paralel single fetch'le yapılır.
 /// </summary>
 public sealed class BinanceFuturesMarketDataClient : IBinanceMarketData
 {
@@ -149,35 +151,37 @@ public sealed class BinanceFuturesMarketDataClient : IBinanceMarketData
     public async Task<IReadOnlyList<Ticker24hDto>> GetTicker24hAsync(
         IReadOnlyCollection<string> symbols, CancellationToken cancellationToken)
     {
-        // Futures /fapi/v1/ticker/24hr accepts ?symbol=X (single) ya da ?symbols=["A","B"] JSON array.
-        // Ardışıl symbol parametresi kabul etmiyor — JSON array kullan.
+        // Futures /fapi/v1/ticker/24hr SADECE tek ?symbol=X destekler.
+        // ?symbols=[...] (Spot API formatı) Futures'ta GÖRMEZDEN gelinir ve TÜM
+        // sembolleri döner — Loop 106'da UI'a random altcoin (PAXG, FOGO, HOOD…)
+        // sızdı. Doğru çözüm: tek symbol → direkt; çoklu → paralel single fetch
+        // (≤10 sembol validator garantisi, weight 1×N kabul edilebilir).
         var sysn = symbols.Select(s => s.ToUpperInvariant()).ToArray();
-        var query = sysn.Length switch
+        if (sysn.Length == 0)
         {
-            0 => "",
-            1 => $"?symbol={sysn[0]}",
-            _ => "?symbols=" + Uri.EscapeDataString("[" + string.Join(",", sysn.Select(s => $"\"{s}\"")) + "]"),
-        };
+            return Array.Empty<Ticker24hDto>();
+        }
 
-        using var resp = await _http.GetAsync("/fapi/v1/ticker/24hr" + query, cancellationToken);
+        if (sysn.Length == 1)
+        {
+            return new[] { await FetchSingleTicker24hAsync(sysn[0], cancellationToken) };
+        }
+
+        var tasks = sysn.Select(s => FetchSingleTicker24hAsync(s, cancellationToken)).ToArray();
+        var results = await Task.WhenAll(tasks);
+        return results;
+    }
+
+    private async Task<Ticker24hDto> FetchSingleTicker24hAsync(
+        string symbol, CancellationToken cancellationToken)
+    {
+        using var resp = await _http.GetAsync(
+            $"/fapi/v1/ticker/24hr?symbol={symbol}", cancellationToken);
         resp.EnsureSuccessStatusCode();
         var body = await resp.Content.ReadAsStringAsync(cancellationToken);
 
         using var doc = JsonDocument.Parse(body);
-        var root = doc.RootElement;
-        var list = new List<Ticker24hDto>();
-        if (root.ValueKind == JsonValueKind.Array)
-        {
-            foreach (var t in root.EnumerateArray())
-            {
-                list.Add(ParseTicker(t));
-            }
-        }
-        else
-        {
-            list.Add(ParseTicker(root));
-        }
-        return list;
+        return ParseTicker(doc.RootElement);
     }
 
     private static Ticker24hDto ParseTicker(JsonElement t)
