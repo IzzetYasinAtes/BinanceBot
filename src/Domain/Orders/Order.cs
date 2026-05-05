@@ -18,6 +18,20 @@ public sealed class Order : AggregateRoot<long>
     public decimal? Price { get; private set; }
     public decimal? StopPrice { get; private set; }
     /// <summary>
+    /// Loop 107 / ADR-0026 §A — Pullback Limit Order. Limit fiyatı (LIMIT type için).
+    /// Market emir için <c>null</c>. Limit type'da <see cref="Price"/> ile aynı değeri
+    /// taşır; ayrı tutulması "limit niyeti" semantiğini DB query (Status=New AND
+    /// LimitPrice IS NOT NULL) ile mümkün kılar — Loop 92 öncesi LIMIT testleri ile
+    /// karışmaz.
+    /// </summary>
+    public decimal? LimitPrice { get; private set; }
+    /// <summary>
+    /// Loop 107 / ADR-0026 §A — pending limit timeout. Bu zamana kadar fill olmayan
+    /// LIMIT emir <see cref="Expire"/> ile <see cref="OrderStatus.Expired"/>
+    /// statüsüne geçirilir. Market emir için <c>null</c>.
+    /// </summary>
+    public DateTimeOffset? ExpiresAt { get; private set; }
+    /// <summary>
     /// Optional profit-taking hint forwarded to the resulting <see cref="Domain.Positions.Position"/>
     /// (Loop 10 fix). Not sent to Binance — MARKET execution ignores it. Pure metadata for the
     /// downstream <c>TakeProfitMonitorService</c>.
@@ -93,6 +107,44 @@ public sealed class Order : AggregateRoot<long>
 
         order.RaiseDomainEvent(new OrderPlacedEvent(
             clientOrderId, symbol.Value, side, type, quantity, price, mode));
+        return order;
+    }
+
+    /// <summary>
+    /// Loop 107 / ADR-0026 §A — Pullback Limit Order factory. Bar close anında market
+    /// yerine bar_close × (1 - offsetPct) (Long) / × (1 + offsetPct) (Short) fiyatında
+    /// GTC LIMIT emir oluşturur; <paramref name="expiresAt"/> dolduğunda
+    /// <see cref="PendingLimitTimeoutWorker"/> tarafından <see cref="Expire"/> ile
+    /// iptal edilir. <see cref="LimitPrice"/> ve <see cref="ExpiresAt"/> ek alanlarla
+    /// pending limit'i market emirden ayırır.
+    /// </summary>
+    public static Order PlaceLimit(
+        string clientOrderId,
+        Symbol symbol,
+        OrderSide side,
+        decimal quantity,
+        decimal limitPrice,
+        decimal? stopPrice,
+        long? strategyId,
+        TradingMode mode,
+        DateTimeOffset now,
+        DateTimeOffset expiresAt,
+        decimal? takeProfit = null)
+    {
+        if (limitPrice <= 0m)
+        {
+            throw new DomainException("LimitPrice must be positive.");
+        }
+        if (expiresAt <= now)
+        {
+            throw new DomainException("ExpiresAt must be in the future.");
+        }
+
+        var order = Place(
+            clientOrderId, symbol, side, OrderType.Limit, TimeInForce.Gtc,
+            quantity, limitPrice, stopPrice, strategyId, mode, now, takeProfit);
+        order.LimitPrice = limitPrice;
+        order.ExpiresAt = expiresAt;
         return order;
     }
 
