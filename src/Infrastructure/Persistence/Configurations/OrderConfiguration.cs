@@ -48,6 +48,11 @@ public sealed class OrderConfiguration : IEntityTypeConfiguration<Order>
         builder.Property(o => o.StopPrice).HasPrecision(28, 10);
         // Loop 10 take-profit fix — pure metadata, never sent to Binance for MARKET orders.
         builder.Property(o => o.TakeProfit).HasColumnType("decimal(18,8)");
+        // Loop 107 / ADR-0026 §A — pullback limit niyetini market'ten ayıran ek alanlar.
+        // LimitPrice null ⇒ market emir; LimitPrice IS NOT NULL ⇒ pending limit.
+        // ExpiresAt PendingLimitTimeoutWorker tarafından polling sorgu predicate'i.
+        builder.Property(o => o.LimitPrice).HasPrecision(28, 10);
+        builder.Property(o => o.ExpiresAt);
         builder.Property(o => o.ExecutedQuantity).HasPrecision(28, 10);
         builder.Property(o => o.CumulativeQuoteQty).HasPrecision(28, 10);
 
@@ -63,6 +68,12 @@ public sealed class OrderConfiguration : IEntityTypeConfiguration<Order>
             .HasDatabaseName("IX_Orders_Symbol_Status_Updated");
         builder.HasIndex(o => o.StrategyId)
             .HasDatabaseName("IX_Orders_StrategyId");
+        // Loop 107 — PendingLimitTimeoutWorker filtered query
+        // (Status=New AND Type=Limit AND ExpiresAt < now). Filtered index
+        // SQL Server için Status=1 AND Type=2 sınırlandırıldı.
+        builder.HasIndex(o => new { o.Status, o.Type, o.ExpiresAt })
+            .HasFilter("[Status] = 1 AND [Type] = 2")
+            .HasDatabaseName("IX_Orders_Pending_Limit_Filtered");
 
         builder.Ignore(o => o.DomainEvents);
     }
