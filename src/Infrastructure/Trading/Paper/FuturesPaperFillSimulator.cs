@@ -73,6 +73,19 @@ public sealed class FuturesPaperFillSimulator : IPaperFillSimulator
                                 || (order.Side == OrderSide.Sell && order.Price.HasValue && order.Price.Value <= bestBid);
                     if (!crossing)
                     {
+                        // Loop 107 / ADR-0026 §A — Pullback Limit Order: ExpiresAt set ise
+                        // pending tutulur (Status=New); PendingLimitTimeoutWorker
+                        // bar_close × (1±0.001) seviyesini ask/bid cross ettiğinde
+                        // fill simulasyonunu yapar veya timeout'ta Expire() çağırır.
+                        // ExpiresAt null ise eski davranış (anında Expire) korunur.
+                        if (order.ExpiresAt.HasValue)
+                        {
+                            _logger.LogDebug(
+                                "Futures paper LIMIT pending {Cid} limit={Limit} ask={Ask} bid={Bid} expiresAt={Exp}",
+                                order.ClientOrderId, order.Price, bestAsk, bestBid, order.ExpiresAt);
+                            return new PaperFillOutcome(false, false, "limit_pending", 0m, 0m, 0m);
+                        }
+
                         order.Expire(now);
                         _logger.LogDebug("Futures paper LIMIT not crossing, expired {Cid}", order.ClientOrderId);
                         return new PaperFillOutcome(false, false, "limit_not_crossing", 0m, 0m, 0m);

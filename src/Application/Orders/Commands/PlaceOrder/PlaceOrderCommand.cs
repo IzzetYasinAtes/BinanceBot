@@ -32,7 +32,11 @@ public sealed record PlaceOrderCommand(
     TradingMode Mode,
     // Loop 10 take-profit fix — optional profit target forwarded onto the resulting Position.
     // Default null preserves backward compatibility with existing call sites and tests.
-    decimal? TakeProfit = null) : IRequest<Result<PlacedOrderDto>>;
+    decimal? TakeProfit = null,
+    // Loop 107 / ADR-0026 §A — Pullback Limit Order pending timeout. Type=Limit ile
+    // doluyken handler Order.PlaceLimit factory'sine geçirir; Type=Market'te kullanılmaz.
+    // Default null = eski Market davranışı, geriye dönük uyumlu.
+    DateTimeOffset? ExpiresAt = null) : IRequest<Result<PlacedOrderDto>>;
 
 public sealed record PlacedOrderDto(
     string ClientOrderId,
@@ -142,11 +146,30 @@ public sealed class PlaceOrderCommandHandler
             }
         }
 
-        var order = Order.Place(
-            request.ClientOrderId, symbolVo, side, type, tif,
-            request.Quantity, request.Price, request.StopPrice,
-            request.StrategyId, request.Mode, _clock.UtcNow,
-            takeProfit: request.TakeProfit);
+        // Loop 107 / ADR-0026 §A — Pullback Limit Order yolu. ExpiresAt set + Type=Limit
+        // ⇒ Order.PlaceLimit factory (LimitPrice + ExpiresAt + GTC sabit). Aksi halde
+        // mevcut Order.Place akışı korunur (Market + Limit/StopLoss legacy).
+        Order order;
+        if (request.ExpiresAt.HasValue && type == OrderType.Limit && request.Price is decimal limitPrice && limitPrice > 0m)
+        {
+            order = Order.PlaceLimit(
+                request.ClientOrderId, symbolVo, side, request.Quantity,
+                limitPrice: limitPrice,
+                stopPrice: request.StopPrice,
+                strategyId: request.StrategyId,
+                mode: request.Mode,
+                now: _clock.UtcNow,
+                expiresAt: request.ExpiresAt.Value,
+                takeProfit: request.TakeProfit);
+        }
+        else
+        {
+            order = Order.Place(
+                request.ClientOrderId, symbolVo, side, type, tif,
+                request.Quantity, request.Price, request.StopPrice,
+                request.StrategyId, request.Mode, _clock.UtcNow,
+                takeProfit: request.TakeProfit);
+        }
 
         _db.Orders.Add(order);
 

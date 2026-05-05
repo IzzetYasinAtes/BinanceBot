@@ -62,6 +62,11 @@ public static class DependencyInjection
         services.Configure<TrailingStopOptions>(
             configuration.GetSection(TrailingStopOptions.SectionName));
 
+        // Loop 107 / ADR-0026 §A — Pullback Limit Order toggle + offset + timeout.
+        // StrategySignalToOrderHandler okur; PendingLimitTimeoutWorker timeout polling.
+        services.Configure<PullbackLimitOptions>(
+            configuration.GetSection(PullbackLimitOptions.SectionName));
+
         var connectionString = configuration.GetConnectionString("Default")
             ?? throw new InvalidOperationException("ConnectionStrings:Default is not configured.");
 
@@ -295,6 +300,12 @@ public static class DependencyInjection
         // the live equity stream — closes alone don't capture unrealized spikes (Loop 6
         // t30 $195 spike was lost, t90 trip computed against stale $99 peak).
         services.AddHostedService<EquityPeakTrackerService>();
+
+        // Loop 107 / ADR-0026 §A — Pullback Limit Order pending timeout + paper fill
+        // worker. 30sn polling, Status=New AND Type=Limit AND ExpiresAt IS NOT NULL
+        // emirleri tarar; ExpiresAt < now ⇒ Order.Expire (+ LiveTestnet'te
+        // CancelLiveOrderAsync); paper'da mark cross ⇒ simulate fill @ limit price.
+        services.AddHostedService<PendingLimitTimeoutWorker>();
 
         return services;
     }

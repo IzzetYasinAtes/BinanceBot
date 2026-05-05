@@ -10,6 +10,7 @@ using BinanceBot.Domain.Strategies;
 using BinanceBot.Domain.Strategies.Events;
 using BinanceBot.Domain.SystemEvents.Events;
 using BinanceBot.Domain.ValueObjects;
+using BinanceBot.Infrastructure.Trading;
 using BinanceBot.Infrastructure.Trading.Paper;
 using MediatR;
 using Microsoft.EntityFrameworkCore;
@@ -57,6 +58,9 @@ public sealed class StrategySignalToOrderHandler : INotificationHandler<Strategy
         var sizing = sp.GetRequiredService<IPositionSizingService>();
         var equityProvider = sp.GetRequiredService<IEquitySnapshotProvider>();
         var paperOpts = sp.GetRequiredService<IOptions<PaperFillOptions>>().Value;
+        // Loop 107 / ADR-0026 §A — Pullback Limit Order toggle.
+        var pullbackOpts = sp.GetRequiredService<IOptionsMonitor<PullbackLimitOptions>>().CurrentValue;
+        var clock = sp.GetRequiredService<IClock>();
 
         var barUnix = notification.BarOpenTime.ToUnixTimeSeconds();
         var cidPrefix = $"sig-{notification.StrategyId}-{barUnix}";
@@ -239,18 +243,56 @@ public sealed class StrategySignalToOrderHandler : INotificationHandler<Strategy
             // preserved on the Order aggregate for downstream stop-monitor wiring.
             // Loop 10 take-profit fix: SuggestedTakeProfit travels via the same channel so the
             // resulting Position carries a TP for TakeProfitMonitorService.
-            var cmd = new PlaceOrderCommand(
-                cid,
-                notification.Symbol,
-                side.ToString(),
-                OrderType.Market.ToString(),
-                TimeInForce.Ioc.ToString(),
-                sizingResult.Quantity,
-                null,
-                notification.SuggestedStopPrice,
-                notification.StrategyId,
-                mode,
-                TakeProfit: notification.SuggestedTakeProfit);
+            //
+            // Loop 107 / ADR-0026 §A — Pullback Limit Order. PullbackLimit:Enabled=true ise
+            // bar close anında market yerine bar_close × (1 - offsetPct) (Long) /
+            // × (1 + offsetPct) (Short) fiyatında GTC LIMIT emir oluşturulur. TimeoutMinutes
+            // dolduğunda PendingLimitTimeoutWorker tarafından Expire edilir.
+            // entry = ticker.AskPrice (Long) / BidPrice (Short) — bar close yakını.
+            PlaceOrderCommand cmd;
+            if (pullbackOpts.Enabled)
+            {
+                var rawLimit = side == OrderSide.Buy
+                    ? entry * (1m - pullbackOpts.OffsetPct)
+                    : entry * (1m + pullbackOpts.OffsetPct);
+                var limitPrice = AlignToTickSize(rawLimit, instrument.TickSize, side);
+                if (limitPrice <= 0m)
+                {
+                    _logger.LogWarning(
+                        "Pullback limit price <= 0 mode={Mode} {Symbol} entry={Entry} offset={Offset} skip {Cid}",
+                        mode, notification.Symbol, entry, pullbackOpts.OffsetPct, cid);
+                    continue;
+                }
+                var expiresAt = clock.UtcNow.AddMinutes(pullbackOpts.TimeoutMinutes);
+                cmd = new PlaceOrderCommand(
+                    cid,
+                    notification.Symbol,
+                    side.ToString(),
+                    OrderType.Limit.ToString(),
+                    TimeInForce.Gtc.ToString(),
+                    sizingResult.Quantity,
+                    limitPrice,
+                    notification.SuggestedStopPrice,
+                    notification.StrategyId,
+                    mode,
+                    TakeProfit: notification.SuggestedTakeProfit,
+                    ExpiresAt: expiresAt);
+            }
+            else
+            {
+                cmd = new PlaceOrderCommand(
+                    cid,
+                    notification.Symbol,
+                    side.ToString(),
+                    OrderType.Market.ToString(),
+                    TimeInForce.Ioc.ToString(),
+                    sizingResult.Quantity,
+                    null,
+                    notification.SuggestedStopPrice,
+                    notification.StrategyId,
+                    mode,
+                    TakeProfit: notification.SuggestedTakeProfit);
+            }
 
             try
             {
@@ -274,6 +316,22 @@ public sealed class StrategySignalToOrderHandler : INotificationHandler<Strategy
                 _logger.LogError(ex, "Fan-out order exception mode={Mode} {Cid}", mode, cid);
             }
         }
+    }
+
+    /// <summary>
+    /// Loop 107 — instrument tickSize'a hizala. Long (BUY) tarafı için aşağı yuvarla
+    /// (limit altında pullback fiyatı, kullanıcıya ekstra düşüş) — Short tarafı yukarı
+    /// yuvarla (limit üstünde, kullanıcıya ekstra yükseliş). PRICE_FILTER ihlali yok.
+    /// </summary>
+    private static decimal AlignToTickSize(decimal price, decimal tickSize, OrderSide side)
+    {
+        if (tickSize <= 0m) return price;
+        var ticks = price / tickSize;
+        var floor = Math.Floor(ticks) * tickSize;
+        var ceil = Math.Ceiling(ticks) * tickSize;
+        // BUY (Long pullback): aşağı yuvarla — daha aşağı limit fill kalitesini artırır.
+        // SELL (Short pullback): yukarı yuvarla — daha yukarı limit fill kalitesini artırır.
+        return side == OrderSide.Buy ? floor : ceil;
     }
 
     private async Task HandleExit(

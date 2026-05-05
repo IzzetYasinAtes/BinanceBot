@@ -13,6 +13,7 @@ using BinanceBot.Domain.Strategies.Events;
 using BinanceBot.Domain.SystemEvents.Events;
 using BinanceBot.Domain.ValueObjects;
 using BinanceBot.Infrastructure.Strategies;
+using BinanceBot.Infrastructure.Trading;
 using BinanceBot.Infrastructure.Trading.Paper;
 using FluentAssertions;
 using MediatR;
@@ -79,6 +80,12 @@ public class StrategySignalToOrderHandlerTests
 
         sc.AddSingleton<IOptions<PaperFillOptions>>(
             Options.Create(new PaperFillOptions { FixedSlippagePct = 0.0005m }));
+
+        // Loop 107 — PullbackLimit options + IClock (Pullback Limit Order yolu).
+        // Default Enabled=true, OffsetPct=0.001, TimeoutMinutes=5.
+        sc.AddSingleton<IOptionsMonitor<PullbackLimitOptions>>(
+            new TestOptionsMonitor<PullbackLimitOptions>(new PullbackLimitOptions()));
+        sc.AddSingleton<IClock>(new TestClock(DateTimeOffset.UtcNow));
 
         var sp = sc.BuildServiceProvider();
         var db = sp.GetRequiredService<StubDbContext>();
@@ -648,4 +655,93 @@ public class StrategySignalToOrderHandlerTests
         // target=1000+0.30=1000.30 → 1000.30/5000 = 0.20006
         captured.MaxPositionPct.Should().BeApproximately(0.20006m, 0.001m);
     }
+
+    // --- Loop 107 / ADR-0026 §A — Pullback Limit Order ----------------------------------
+
+    /// <summary>
+    /// Loop 107 — PullbackLimit:Enabled=true (default) ile Long emit Market değil
+    /// Limit + GTC + Price = ask × (1 - OffsetPct) (tick aligned floor) +
+    /// ExpiresAt = now + TimeoutMinutes.
+    /// </summary>
+    [Fact]
+    public async Task Long_PullbackLimit_EmitLimitGtcWithFloorTickAlignment()
+    {
+        var (scopeFactory, mediator, _, _, _) = BuildHarness();
+
+        var captured = new List<PlaceOrderCommand>();
+        mediator.Setup(m => m.Send(It.IsAny<PlaceOrderCommand>(), It.IsAny<CancellationToken>()))
+            .Callback<IRequest<Result<PlacedOrderDto>>, CancellationToken>((cmd, _) => captured.Add((PlaceOrderCommand)cmd))
+            .ReturnsAsync(Result.Success(new PlacedOrderDto(
+                "x", "BTCUSDT", "New", SizedQty, 29970m, TradingMode.Paper)));
+
+        var sut = new StrategySignalToOrderHandler(
+            scopeFactory, NullLogger<StrategySignalToOrderHandler>.Instance);
+
+        await sut.Handle(new StrategySignalEmittedEvent(
+            1, "BTCUSDT", StrategySignalDirection.Long, DateTimeOffset.UtcNow, 29500m),
+            CancellationToken.None);
+
+        captured.Should().HaveCount(3);
+        captured.Should().AllSatisfy(c =>
+        {
+            c.Type.Should().Be("Limit");
+            c.TimeInForce.Should().Be("Gtc");
+            c.Price.Should().NotBeNull();
+            // ask 30000 × (1 - 0.001) = 29970 (already tick-aligned to 0.01)
+            c.Price.Should().BeApproximately(29970m, 0.01m);
+            c.ExpiresAt.Should().NotBeNull();
+            // Default TimeoutMinutes=5
+            (c.ExpiresAt!.Value - DateTimeOffset.UtcNow).TotalMinutes.Should().BeInRange(4.5, 5.5);
+        });
+    }
+
+    /// <summary>
+    /// Loop 107 — Short pullback: limit = bid × (1 + OffsetPct) (tick aligned ceil).
+    /// </summary>
+    [Fact]
+    public async Task Short_PullbackLimit_EmitsLimitAboveBid()
+    {
+        var (scopeFactory, mediator, _, _, _) = BuildHarness();
+
+        var captured = new List<PlaceOrderCommand>();
+        mediator.Setup(m => m.Send(It.IsAny<PlaceOrderCommand>(), It.IsAny<CancellationToken>()))
+            .Callback<IRequest<Result<PlacedOrderDto>>, CancellationToken>((cmd, _) => captured.Add((PlaceOrderCommand)cmd))
+            .ReturnsAsync(Result.Success(new PlacedOrderDto(
+                "x", "BTCUSDT", "New", SizedQty, 30020m, TradingMode.Paper)));
+
+        var sut = new StrategySignalToOrderHandler(
+            scopeFactory, NullLogger<StrategySignalToOrderHandler>.Instance);
+
+        await sut.Handle(new StrategySignalEmittedEvent(
+            1, "BTCUSDT", StrategySignalDirection.Short, DateTimeOffset.UtcNow, 30100m),
+            CancellationToken.None);
+
+        captured.Should().HaveCount(3);
+        captured.Should().AllSatisfy(c =>
+        {
+            c.Side.Should().Be("Sell");
+            c.Type.Should().Be("Limit");
+            c.TimeInForce.Should().Be("Gtc");
+            // bid 29990 × (1 + 0.001) = 30019.99 → ceil to 30020.00 (tick 0.01)
+            c.Price.Should().BeApproximately(30020m, 0.02m);
+            c.ExpiresAt.Should().NotBeNull();
+        });
+    }
+}
+
+internal sealed class TestOptionsMonitor<T> : IOptionsMonitor<T>
+{
+    private readonly T _current;
+    public TestOptionsMonitor(T current) => _current = current;
+    public T CurrentValue => _current;
+    public T Get(string? name) => _current;
+    public IDisposable? OnChange(Action<T, string?> listener) => null;
+}
+
+internal sealed class TestClock : IClock
+{
+    public TestClock(DateTimeOffset now) => UtcNow = now;
+    public DateTimeOffset UtcNow { get; set; }
+    public long BinanceServerTimeMs => UtcNow.ToUnixTimeMilliseconds();
+    public long DriftMs => 0L;
 }
