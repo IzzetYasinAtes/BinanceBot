@@ -141,7 +141,7 @@ const App = {
                                     <td class="num" :class="fmt.sign(p.realizedPnl)">
                                         {{ closedPnlPct(p) }}
                                     </td>
-                                    <td class="num">{{ fmt.money(p.commissionPaid ?? p.commission ?? 0) }}</td>
+                                    <td class="num">{{ fmt.money(commissionTotal(p)) }}</td>
                                     <td class="num">{{ fmt.duration(p.openedAt, p.closedAt) }}</td>
                                     <td class="num">{{ fmt.dateShort(p.closedAt) }}</td>
                                 </tr>
@@ -188,6 +188,18 @@ const App = {
             return Number(p.exitPrice || 0) * Number(p.quantity || 0);
         }
 
+        // Loop 106 — backend artık totalCommission (entry+exit) döndürüyor.
+        // Geri uyumluluk: eski cache'lenmiş response'larda field'lar olmayabilir,
+        // entry+exit toplamı veya tek field'dan fallback.
+        function commissionTotal(p) {
+            const total = Number(p.totalCommission ?? 0);
+            if (total > 0) return total;
+            const entry = Number(p.entryCommission ?? 0);
+            const exit = Number(p.exitCommission ?? 0);
+            if (entry > 0 || exit > 0) return entry + exit;
+            return Number(p.commissionPaid ?? p.commission ?? 0);
+        }
+
         function pnlPctLabel(p) {
             const cb = costBasis(p);
             if (!cb) return "—";
@@ -204,7 +216,8 @@ const App = {
 
         return {
             tab, openPoll, closedPoll, openList, closedList, closedListSorted,
-            costBasis, entryNotional, exitNotional, pnlPctLabel, closedPnlPct, fmt,
+            costBasis, entryNotional, exitNotional, commissionTotal,
+            pnlPctLabel, closedPnlPct, fmt,
         };
     },
 };

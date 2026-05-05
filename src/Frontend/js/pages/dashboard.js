@@ -14,9 +14,11 @@ import { LiveTradeFeed } from "../components/liveTradeFeed.js";
 import { TradeCounter } from "../components/tradeCounter.js";
 import { SnowballChart } from "../components/snowballChart.js";
 
-const SYMBOLS = ["BTCUSDT", "ETHUSDT", "BNBUSDT", "XRPUSDT"];
-// Loop 106: ticker bar yalnızca 5 işlem coin'i — random altcoin kalıntısı yok.
+// Loop 106: tüm header bileşenleri (PriceTicker + SymbolCarousel) aynı 5 işlem
+// coin'i ile sınırlandı. BNB önceki carousel listesindeydi ama trade evreninde
+// yok; SOL/ADA carousel'da eksikti. Tek bir whitelist iki yerde paylaşılır.
 const TICKER_SYMBOLS = ["BTCUSDT", "ETHUSDT", "XRPUSDT", "SOLUSDT", "ADAUSDT"];
+const SYMBOLS = TICKER_SYMBOLS;
 const HOURLY_TRADE_TARGET = 150;
 const EQUITY_HISTORY_MAX = 120; // ~10 dk @ 5s polling
 
