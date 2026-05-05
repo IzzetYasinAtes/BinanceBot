@@ -6,7 +6,9 @@ import { api } from "../api.js";
 import { fmt } from "../format.js";
 import { SymbolLogo } from "./symbolLogo.js";
 
-const DEFAULT_SYMBOLS = ["BTCUSDT", "ETHUSDT", "BNBUSDT", "XRPUSDT", "SOLUSDT", "DOGEUSDT"];
+// Loop 106: ticker yalnızca 5 işlem coin'i ile sınırlı — backend filtresi düşse de
+// frontend whitelist defansif olarak random altcoin (LA, THE, IDOL, SCRT vb) sızıntısını engeller.
+const DEFAULT_SYMBOLS = ["BTCUSDT", "ETHUSDT", "XRPUSDT", "SOLUSDT", "ADAUSDT"];
 
 export const PriceTicker = {
     components: { SymbolLogo },
@@ -38,34 +40,33 @@ export const PriceTicker = {
         let timer = null;
         let stopped = false;
 
-        async function tick() {
-            if (stopped) return;
+        async function fetchOne(sym) {
             try {
-                const data = await api.marketSummary(props.symbols);
-                if (stopped) return;
-                const arr = Array.isArray(data?.items) ? data.items
-                    : Array.isArray(data) ? data : [];
-                const mapped = arr.map(normalize).filter(Boolean);
-                if (mapped.length > 0) items.value = mapped;
+                const bars = await api.klines(sym, "1h", 24);
+                if (!Array.isArray(bars) || bars.length < 2) return null;
+                const last = Number(bars[bars.length - 1].close);
+                const first = Number(bars[0].open ?? bars[0].close);
+                const pct = first > 0 ? ((last - first) / first) * 100 : 0;
+                if (!isFinite(last) || last <= 0) return null;
+                return {
+                    rawSymbol: sym,
+                    sym: prettySymbol(sym),
+                    price: last,
+                    pct: isFinite(pct) ? pct : 0,
+                };
             } catch {
-                // sessiz — önceki değerler kalsın.
+                return null;
             }
         }
 
-        function normalize(r) {
-            if (!r) return null;
-            const sym = r.symbol || r.Symbol;
-            const price = Number(r.lastPrice ?? r.markPrice ?? r.price ?? r.close ?? 0);
-            const pct = Number(
-                r.change24hPct ?? r.changePct24h ?? r.priceChangePercent ?? r.changePct ?? 0
-            );
-            if (!sym || !isFinite(price)) return null;
-            return {
-                rawSymbol: sym,
-                sym: prettySymbol(sym),
-                price,
-                pct: isFinite(pct) ? pct : 0,
-            };
+        async function tick() {
+            if (stopped) return;
+            // Loop 106: marketSummary backend'i top-mover dönüyor, query filter çalışmıyor.
+            // Bu yüzden per-symbol klines fetch ile garanti 5 coin doldur.
+            const results = await Promise.all(props.symbols.map(fetchOne));
+            if (stopped) return;
+            const mapped = results.filter(Boolean);
+            if (mapped.length > 0) items.value = mapped;
         }
 
         function prettySymbol(s) {

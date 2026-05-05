@@ -1218,7 +1218,7 @@ main {
 .price-ticker-track {
     display: flex;
     width: max-content;
-    animation: marquee 42s linear infinite;
+    animation: marquee 60s linear infinite;
     will-change: transform;
 }
 
@@ -1278,7 +1278,7 @@ main {
     .price-ticker {
         margin: calc(-1 * var(--sp-4)) calc(-1 * var(--sp-4)) var(--sp-4);
     }
-    .price-ticker-track { animation-duration: 30s; }
+    .price-ticker-track { animation-duration: 45s; }
 }
 
 /* ============================================================

@@ -15,7 +15,8 @@ import { TradeCounter } from "../components/tradeCounter.js";
 import { SnowballChart } from "../components/snowballChart.js";
 
 const SYMBOLS = ["BTCUSDT", "ETHUSDT", "BNBUSDT", "XRPUSDT"];
-const TICKER_SYMBOLS = ["BTCUSDT", "ETHUSDT", "BNBUSDT", "XRPUSDT", "SOLUSDT", "DOGEUSDT"];
+// Loop 106: ticker bar yalnızca 5 işlem coin'i — random altcoin kalıntısı yok.
+const TICKER_SYMBOLS = ["BTCUSDT", "ETHUSDT", "XRPUSDT", "SOLUSDT", "ADAUSDT"];
 const HOURLY_TRADE_TARGET = 150;
 const EQUITY_HISTORY_MAX = 120; // ~10 dk @ 5s polling
 
