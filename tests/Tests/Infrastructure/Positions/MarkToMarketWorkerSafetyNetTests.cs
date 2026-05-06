@@ -319,6 +319,80 @@ public class MarkToMarketWorkerSafetyNetTests
     }
 
     /// <summary>
+    /// Loop 111 fix #1+#3 regresyon: Ticker olmasa bile (BookTicker stale, WS disconnect,
+    /// sembol filtresi fail) hard max-hold safety net pos'u kapatır. Loop 110'da
+    /// pozisyonlar 8h+ açık kaldı çünkü MarkToMarketWorker BookTicker query'si
+    /// silently fail oluyordu (Symbol VO Contains EF SQL Server'da çevrilemiyor)
+    /// → tickers boş → ticker null → safety net loop'ta continue → hard max-hold
+    /// dalı tetiklenmiyordu.
+    /// </summary>
+    [Fact]
+    public async Task NoTicker_HardMaxHoldExceeded_StillTriggersSafetyExit()
+    {
+        using var db = NewDb();
+        // Pos 200dk açık AMA HİÇ ticker yok (BookTicker tablo boş).
+        var pos = SeedLong(db, entry: 2400m, stop: 2380m,
+            openedAt: T0.AddMinutes(-200));
+        // BÜYÜLÜ: ticker seed YOK.
+
+        CloseSignalPositionCommand? captured = null;
+        var mediator = new Mock<IMediator>(MockBehavior.Strict);
+        mediator
+            .Setup(m => m.Send(It.IsAny<CloseSignalPositionCommand>(), It.IsAny<CancellationToken>()))
+            .Callback<IRequest<Result<ClosedSignalPositionDto>>, CancellationToken>(
+                (cmd, _) => captured = (CloseSignalPositionCommand)cmd)
+            .ReturnsAsync(Result.Success(new ClosedSignalPositionDto(pos.Id, 0m, "x", "safe-mh-1-x")));
+
+        var sut = new MarkToMarketWorker(
+            BuildScope(db, new FixedClock(T0), mediator.Object),
+            NullLogger<MarkToMarketWorker>.Instance,
+            BeDisabled(), TrailDisabled(),
+            Safety(new PositionSafetyOptions
+            {
+                Enabled = true,
+                StopLossRedundancyEnabled = true,
+                HardMaxHoldMinutes = 60,
+            }));
+
+        await InvokeTickAsync(sut, CancellationToken.None);
+
+        captured.Should().NotBeNull(
+            "Loop 111: ticker yoksa bile hard max-hold dalı tetiklenmeli");
+        captured!.Reason.Should().Contain("safety_hard_max_hold");
+        captured.Reason.Should().Contain("noticker");
+    }
+
+    /// <summary>
+    /// Loop 111 fix: Ticker yoksa AMA pos henüz hard cap'i aşmamışsa exit YOK
+    /// (false-positive yok).
+    /// </summary>
+    [Fact]
+    public async Task NoTicker_PositionWithinHardMaxHold_DoesNotTrigger()
+    {
+        using var db = NewDb();
+        // Pos sadece 30dk açık, hard cap 60dk → tetik YOK.
+        var pos = SeedLong(db, entry: 2400m, stop: 2380m,
+            openedAt: T0.AddMinutes(-30));
+
+        var mediator = new Mock<IMediator>(MockBehavior.Strict);
+        // strict — Send çağrılırsa fail.
+
+        var sut = new MarkToMarketWorker(
+            BuildScope(db, new FixedClock(T0), mediator.Object),
+            NullLogger<MarkToMarketWorker>.Instance,
+            BeDisabled(), TrailDisabled(),
+            Safety(new PositionSafetyOptions
+            {
+                Enabled = true,
+                HardMaxHoldMinutes = 60,
+            }));
+
+        await InvokeTickAsync(sut, CancellationToken.None);
+
+        mediator.VerifyNoOtherCalls();
+    }
+
+    /// <summary>
     /// LiveMainnet defansif guard: safety net mainnet pos'ları atlar (audit pollution
     /// olmasın). ADR-0006 paterni.
     /// </summary>

@@ -104,11 +104,14 @@ public sealed class PendingLimitTimeoutWorker : BackgroundService
         }
 
         // Sembol başına latest BookTicker (paper fill check için)
-        var symbols = pending.Select(o => o.Symbol).Distinct().ToList();
-        var tickers = await db.BookTickers
+        // Loop 111: Symbol VO HasConversion + .Contains(VO) bazı providerlarda
+        // (SQL Server) translate edilemez. StopLossMonitor pattern: string list +
+        // Symbol.Value karşılaştırması. Materialize sonra in-memory filter.
+        var symbolStrings = pending.Select(o => o.Symbol.Value).Distinct().ToList();
+        var allTickers = await db.BookTickers
             .AsNoTracking()
-            .Where(b => symbols.Contains(b.Symbol))
             .ToListAsync(ct);
+        var tickers = allTickers.Where(b => symbolStrings.Contains(b.Symbol.Value)).ToList();
         var tickerBySymbol = tickers.ToDictionary(t => t.Symbol);
 
         var filledCount = 0;

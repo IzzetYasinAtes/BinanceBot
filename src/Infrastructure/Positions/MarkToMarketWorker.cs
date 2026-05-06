@@ -88,11 +88,17 @@ public sealed class MarkToMarketWorker : BackgroundService
 
         if (openPositions.Count == 0) return;
 
-        var symbols = openPositions.Select(p => p.Symbol).Distinct().ToList();
-        var tickers = await db.BookTickers
+        // Loop 4 / Loop 111 — EF Symbol VO HasConversion → Contains(VO) bazı
+        // providerlarda translate edilemez (SQL Server'da silently boş döndürür,
+        // InMemory test provider çalıştırır). StopLossMonitorService /
+        // TakeProfitMonitorService ile aynı pattern: string list + Symbol.Value
+        // karşılaştırması. Bu satırın silently fail olması Loop 110'da MarkToMarket
+        // hiç çalışmamasına ve safety net'in tetiklenmemesine yol açtı.
+        var symbolStrings = openPositions.Select(p => p.Symbol.Value).Distinct().ToList();
+        var allTickers = await db.BookTickers
             .AsNoTracking()
-            .Where(b => symbols.Contains(b.Symbol))
             .ToListAsync(ct);
+        var tickers = allTickers.Where(b => symbolStrings.Contains(b.Symbol.Value)).ToList();
 
         var beOpts = _breakEvenOptions.CurrentValue;
         var trailOpts = _trailingStopOptions.CurrentValue;
@@ -117,11 +123,26 @@ public sealed class MarkToMarketWorker : BackgroundService
 
         foreach (var position in openPositions)
         {
-            var ticker = tickers.FirstOrDefault(t => t.Symbol == position.Symbol);
-            if (ticker is null) continue;
+            var ticker = tickers.FirstOrDefault(t => t.Symbol.Value == position.Symbol.Value);
+
+            // Loop 111 — Hard max-hold safety net ticker'a bağımsız tetiklenmeli.
+            // Loop 109 deploy edildi AMA Loop 110'da pos'lar 8h+ açık kaldı: ticker yoksa
+            // (BookTicker stale / WS disconnect / Symbol VO query fail) MarkToMarket hiç
+            // çağrılmazdı, dolayısıyla TryQueueSafetyExit hard max-hold dalı da atlanırdı.
+            // Şimdi: ticker null olsa bile hard max-hold dalı çalışır (markPrice=0 sentinel
+            // ile log; SL/TP redundancy ticker'a bağımlı olduğu için onlar atlanır).
+            if (ticker is null)
+            {
+                TryQueueHardMaxHoldOnly(position, safetyOpts, clock.UtcNow, safetyExits);
+                continue;
+            }
 
             var mid = (ticker.BidPrice + ticker.AskPrice) / 2m;
-            if (mid <= 0m) continue;
+            if (mid <= 0m)
+            {
+                TryQueueHardMaxHoldOnly(position, safetyOpts, clock.UtcNow, safetyExits);
+                continue;
+            }
 
             position.MarkToMarket(mid, clock.UtcNow);
             dirty++;
@@ -426,6 +447,32 @@ public sealed class MarkToMarketWorker : BackgroundService
                 "TRAILING-EXIT close failed pos={PosId} mode={Mode}: {Errors}",
                 pos.Id, pos.Mode, string.Join(";", result.Errors));
         }
+    }
+
+    /// <summary>
+    /// Loop 111 — ticker yoksa (BookTicker stale, WS disconnect, Symbol filter fail)
+    /// SL/TP redundancy değerlendirilemez ama hard max-hold yine de devreye girmeli.
+    /// Pos OpenedAt + HardMaxHoldMinutes &lt;= now ise zorla kapat. Loop 110 regresyonu:
+    /// 8h açık kalan pos'lar bu daldan tetiklenmeliydi.
+    /// </summary>
+    private void TryQueueHardMaxHoldOnly(
+        Position position,
+        PositionSafetyOptions opts,
+        DateTimeOffset asOf,
+        List<(Position pos, decimal markPrice, string reason, string cidPrefix)> exits)
+    {
+        if (!opts.Enabled) return;
+        if (opts.HardMaxHoldMinutes <= 0) return;
+
+        var age = asOf - position.OpenedAt;
+        var hardCap = TimeSpan.FromMinutes(opts.HardMaxHoldMinutes);
+        if (age < hardCap) return;
+
+        var cidPrefix = $"safe-mh-{position.Id}-{asOf.ToUnixTimeSeconds()}";
+        var reason = $"safety_hard_max_hold@{(int)age.TotalMinutes}min_cap={opts.HardMaxHoldMinutes}min_noticker";
+        // markPrice=0 sentinel: dispatch log'unda görünür ama
+        // CloseSignalPositionCommand reverse leg market price kullanır.
+        exits.Add((position, 0m, reason, cidPrefix));
     }
 
     /// <summary>
