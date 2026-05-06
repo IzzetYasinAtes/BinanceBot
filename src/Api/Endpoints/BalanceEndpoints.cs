@@ -21,9 +21,10 @@ public static class BalanceEndpoints
 
         paper.MapPost("/reset", async (
                 ResetPaperBalanceRequest? req,
+                bool? keepHistory,
                 IMediator m,
                 CancellationToken ct) =>
-            (await m.Send(new ResetPaperBalanceCommand(req?.StartingBalance), ct)).ToHttpResult())
+            (await m.Send(new ResetPaperBalanceCommand(req?.StartingBalance, keepHistory ?? false), ct)).ToHttpResult())
             .AddEndpointFilter<AdminAuthFilter>()
             .WithName("ResetPaperBalance");
 

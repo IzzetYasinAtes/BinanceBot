@@ -14,7 +14,9 @@ using Microsoft.Extensions.Logging;
 
 namespace BinanceBot.Application.Balances.Commands.ResetPaperBalance;
 
-public sealed record ResetPaperBalanceCommand(decimal? StartingBalance) : IRequest<Result<ResetPaperBalanceDto>>;
+public sealed record ResetPaperBalanceCommand(
+    decimal? StartingBalance,
+    bool KeepHistory = false) : IRequest<Result<ResetPaperBalanceDto>>;
 
 public sealed record ResetPaperBalanceDto(
     Guid IterationId,
@@ -149,28 +151,41 @@ public sealed class ResetPaperBalanceCommandHandler
         // Orders (OrderFills cascade via OrderConfiguration's DeleteBehavior.Cascade) + the
         // trade-related SystemEvents enumerated above. Mode-scoped — LiveTestnet/LiveMainnet
         // rows survive (Paper reset must not touch live trading history).
-        var paperPositions = await _db.Positions
-            .Where(p => p.Mode == TradingMode.Paper)
-            .ToListAsync(ct);
-        _db.Positions.RemoveRange(paperPositions);
+        //
+        // Loop 111 fix (Bug #5): KeepHistory=true ise force-close edilen pos'lar + tarihçe
+        // KORUNUR (cumulative realized PnL takip edilebilmesi için). Loop 110 tepe noktası
+        // +$0.89 net realize olamadı çünkü reset all-delete yapıyordu. Hem önemli OPS
+        // ihtiyacı (debug için manuel reset) hem cumulative kar takibi için keepHistory.
+        // VirtualBalance ResetForIteration zaten RealizedPnl'i sıfırlamadan iterationId
+        // değiştirir, history kalmasa bile balance ledger doğrudur.
+        var deletedPositionCount = 0;
+        var deletedOrderCount = 0;
+        var deletedSystemEventCount = 0;
+        if (!request.KeepHistory)
+        {
+            var paperPositions = await _db.Positions
+                .Where(p => p.Mode == TradingMode.Paper)
+                .ToListAsync(ct);
+            _db.Positions.RemoveRange(paperPositions);
 
-        var paperOrders = await _db.Orders
-            .Where(o => o.Mode == TradingMode.Paper)
-            .ToListAsync(ct);
-        _db.Orders.RemoveRange(paperOrders);
+            var paperOrders = await _db.Orders
+                .Where(o => o.Mode == TradingMode.Paper)
+                .ToListAsync(ct);
+            _db.Orders.RemoveRange(paperOrders);
 
-        // SystemEvents do not carry a TradingMode column — Paper-only deployments are the
-        // only writer of these event types today, so a type-scoped + occurred-before-reset
-        // filter is correct. When LiveTestnet starts emitting trade events we will need to
-        // embed mode in the payload and filter on it here.
-        var tradeEventsToPurge = await _db.SystemEvents
-            .Where(e => TradeSystemEventTypes.Contains(e.EventType) && e.OccurredAt < now)
-            .ToListAsync(ct);
-        _db.SystemEvents.RemoveRange(tradeEventsToPurge);
+            // SystemEvents do not carry a TradingMode column — Paper-only deployments are the
+            // only writer of these event types today, so a type-scoped + occurred-before-reset
+            // filter is correct. When LiveTestnet starts emitting trade events we will need to
+            // embed mode in the payload and filter on it here.
+            var tradeEventsToPurge = await _db.SystemEvents
+                .Where(e => TradeSystemEventTypes.Contains(e.EventType) && e.OccurredAt < now)
+                .ToListAsync(ct);
+            _db.SystemEvents.RemoveRange(tradeEventsToPurge);
 
-        var deletedPositionCount = paperPositions.Count;
-        var deletedOrderCount = paperOrders.Count;
-        var deletedSystemEventCount = tradeEventsToPurge.Count;
+            deletedPositionCount = paperPositions.Count;
+            deletedOrderCount = paperOrders.Count;
+            deletedSystemEventCount = tradeEventsToPurge.Count;
+        }
 
         // 5. System event for audit/UI — written AFTER the purge filter window (occurredAt = now
         // matches the reset boundary; the purge filter is strictly `<` so this row survives).

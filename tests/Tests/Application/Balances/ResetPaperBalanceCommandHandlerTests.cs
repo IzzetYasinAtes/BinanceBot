@@ -368,4 +368,74 @@ public sealed class ResetPaperBalanceCommandHandlerTests
             .SumAsync(p => p.RealizedPnl);
         postSum.Should().Be(0m, "all closed Paper rows are deleted; UI Net K/Z reads 0");
     }
+
+    /// <summary>
+    /// Loop 111 fix #5: KeepHistory=true ile reset open pos'ları force-close eder
+    /// AMA history (closed pos + orders + system events) korur. Cumulative net
+    /// realized PnL takip edilebilir. Loop 110 +$0.89 net realize edilemedi
+    /// çünkü reset all-delete yapıyordu.
+    /// </summary>
+    [Fact]
+    public async Task Handle_KeepHistoryTrue_PreservesClosedPositionsAndOrders()
+    {
+        await using var db = NewDb();
+        SeedPaperBalance(db, 500m, T0);
+        SeedClosedPosition(db, "BTCUSDT", 50_000m, 51_000m, TradingMode.Paper, T0);
+        SeedClosedPosition(db, "ETHUSDT", 3_000m, 2_980m, TradingMode.Paper, T0);
+        SeedOpenPosition(db, "XRPUSDT", 0.5m, TradingMode.Paper, T0, markPrice: 0.51m);
+        SeedPaperOrder(db, "cid-A", "BTCUSDT", T0);
+
+        var sut = NewSut(db, T0.AddHours(1));
+        var result = await sut.Handle(
+            new ResetPaperBalanceCommand(StartingBalance: 100m, KeepHistory: true),
+            CancellationToken.None);
+
+        result.IsSuccess.Should().BeTrue();
+        result.Value.ForceClosedPositionCount.Should().Be(1, "open pos force-close edilir");
+        result.Value.DeletedPositionCount.Should().Be(0, "KeepHistory=true ⇒ silme yok");
+        result.Value.DeletedOrderCount.Should().Be(0);
+        result.Value.DeletedSystemEventCount.Should().Be(0);
+
+        // Closed pos'lar + force-closed pos hepsi DB'de hala
+        var allPaperPositions = await db.Positions
+            .Where(p => p.Mode == TradingMode.Paper)
+            .ToListAsync();
+        allPaperPositions.Should().HaveCount(3, "2 closed + 1 force-closed = 3 row korundu");
+        allPaperPositions.All(p => p.Status == PositionStatus.Closed).Should().BeTrue(
+            "open pos force-close edildi");
+
+        var orders = await db.Orders.Where(o => o.Mode == TradingMode.Paper).ToListAsync();
+        orders.Should().HaveCount(1, "Orders KeepHistory=true ile silinmez");
+    }
+
+    /// <summary>
+    /// Loop 111 fix #5: KeepHistory=true reset sonrası closed pos'ların
+    /// RealizedPnl SUM'ı korunur (cumulative kar takibi). Force-closed pos'un
+    /// RealizedPnl'si de buraya katılır.
+    /// </summary>
+    [Fact]
+    public async Task Handle_KeepHistoryTrue_RealizedPnlSumIsPreserved()
+    {
+        await using var db = NewDb();
+        SeedPaperBalance(db, 500m, T0);
+        SeedClosedPosition(db, "BTCUSDT", 50_000m, 50_500m, TradingMode.Paper, T0); // +5
+        SeedClosedPosition(db, "ETHUSDT", 3_000m, 2_990m, TradingMode.Paper, T0);   // -0.1
+
+        var preSum = await db.Positions
+            .Where(p => p.Mode == TradingMode.Paper && p.Status == PositionStatus.Closed)
+            .SumAsync(p => p.RealizedPnl);
+        preSum.Should().NotBe(0m);
+
+        var sut = NewSut(db, T0.AddHours(1));
+        var result = await sut.Handle(
+            new ResetPaperBalanceCommand(StartingBalance: 100m, KeepHistory: true),
+            CancellationToken.None);
+        result.IsSuccess.Should().BeTrue();
+
+        var postSum = await db.Positions
+            .Where(p => p.Mode == TradingMode.Paper && p.Status == PositionStatus.Closed)
+            .SumAsync(p => p.RealizedPnl);
+        postSum.Should().Be(preSum,
+            "Loop 111: KeepHistory=true cumulative realized PnL korunur");
+    }
 }
