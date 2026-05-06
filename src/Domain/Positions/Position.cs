@@ -328,6 +328,23 @@ public sealed class Position : AggregateRoot<long>
             {
                 ExtremeMarkPrice = markPrice;
                 UpdatedAt = asOf;
+                // Loop 111 fix (Bug #4): peak ilerlediğinde trailing SL'i de
+                // yukarı taşı (yalnızca BE armed sonrası — armed öncesi BE
+                // move'a kalmış). Yeni SL = peak × (1 - trailPct); sadece mevcut
+                // StopPrice'ın üstündeyse güncellenir (asla aşağı çekilmez).
+                // Loop 110 ADA regresyonu: peak $0.26540, AMA StopPrice $0.25934 sabit
+                // kaldı — peak güncellenince SL takip etmiyordu.
+                if (beArmed)
+                {
+                    var newTrailingStop = ExtremeMarkPrice * (1m - trailPct);
+                    if (StopPrice is null || newTrailingStop > StopPrice.Value)
+                    {
+                        var previousStop = StopPrice ?? 0m;
+                        StopPrice = newTrailingStop;
+                        RaiseDomainEvent(new PositionStopMovedEvent(
+                            Id, Symbol.Value, previousStop, newTrailingStop, "trailing_stop_advance"));
+                    }
+                }
                 return TrailingResult.PeakUpdated;
             }
 
@@ -353,6 +370,20 @@ public sealed class Position : AggregateRoot<long>
         {
             ExtremeMarkPrice = markPrice;
             UpdatedAt = asOf;
+            // Loop 111 fix (Bug #4): Short trough ilerlediğinde trailing SL'i
+            // aşağı taşı (BE armed sonrası). Yeni SL = trough × (1 + trailPct);
+            // sadece mevcut StopPrice altındaysa güncellenir (asla yukarı çekilmez).
+            if (beArmed)
+            {
+                var newTrailingStop = ExtremeMarkPrice * (1m + trailPct);
+                if (StopPrice is null || newTrailingStop < StopPrice.Value)
+                {
+                    var previousStop = StopPrice ?? 0m;
+                    StopPrice = newTrailingStop;
+                    RaiseDomainEvent(new PositionStopMovedEvent(
+                        Id, Symbol.Value, previousStop, newTrailingStop, "trailing_stop_advance"));
+                }
+            }
             return TrailingResult.PeakUpdated;
         }
 

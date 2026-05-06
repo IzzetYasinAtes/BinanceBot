@@ -189,4 +189,126 @@ public class PositionTrailingStopTests
 
         act.Should().Throw<DomainException>().WithMessage("*not open*");
     }
+
+    /// <summary>
+    /// Loop 111 fix #4 regresyon: Long pos'ta peak ilerlediğinde StopPrice da
+    /// trailing formülüyle yansıtılır (peak × (1 − trailPct)). BE armed sonrası
+    /// her yeni high yeni trailing stop'u devreye sokar — ASLA aşağı çekilmez.
+    /// Loop 110 ADA örneği: peak $0.26540, AMA StopPrice $0.25934 sabit
+    /// (BE move'dan kalan eski değer) → mark $0.26000 düştüğünde safety net
+    /// SL hit olarak görmüyordu, çünkü stop trailing'i yansıtmıyordu.
+    /// </summary>
+    [Fact]
+    public void UpdatePeakAndCheckTrailing_LongNewHigh_BeArmed_AdvancesStopPrice()
+    {
+        // entry=100, BE move stop'u 100.10'a taşıdı (entry × 1.001).
+        var pos = OpenLongWithBeApplied(entry: 100m, beStop: 100.10m);
+        pos.StopPrice.Should().Be(100.10m);
+
+        // peak=102.5 (entry+%2.5). trailPct=0.003 → newStop = 102.5 × 0.997 = 102.1925.
+        var result = pos.UpdatePeakAndCheckTrailing(102.5m, 0.003m, T0.AddMinutes(15));
+
+        result.Should().Be(TrailingResult.PeakUpdated);
+        pos.ExtremeMarkPrice.Should().Be(102.5m);
+        pos.StopPrice.Should().Be(102.5m * 0.997m,
+            "Loop 111: Long peak ilerleyince trailing stop formülü uygulanır");
+
+        var stopMoved = pos.DomainEvents.OfType<PositionStopMovedEvent>()
+            .LastOrDefault(e => e.Reason == "trailing_stop_advance");
+        stopMoved.Should().NotBeNull();
+        stopMoved!.NewStopPrice.Should().Be(102.5m * 0.997m);
+        stopMoved.PreviousStopPrice.Should().Be(100.10m);
+    }
+
+    /// <summary>
+    /// Loop 111 fix #4: Long peak ilerlemese bile (in-band tick) StopPrice
+    /// değişmez. Sadece *yeni high* trailing'i ileri taşır.
+    /// </summary>
+    [Fact]
+    public void UpdatePeakAndCheckTrailing_LongInBandTick_DoesNotChangeStopPrice()
+    {
+        var pos = OpenLongWithBeApplied(entry: 100m, beStop: 100.10m);
+        pos.UpdatePeakAndCheckTrailing(102.5m, 0.003m, T0.AddMinutes(15));  // peak=102.5
+        var stopAfterFirstAdvance = pos.StopPrice;
+
+        // mark 102.0 — peak'in altında ama trail eşiğinin üstünde (in-band).
+        pos.UpdatePeakAndCheckTrailing(102.0m, 0.003m, T0.AddMinutes(20));
+
+        pos.StopPrice.Should().Be(stopAfterFirstAdvance,
+            "in-band tick StopPrice'ı değiştirmez (peak yatık kalır)");
+    }
+
+    /// <summary>
+    /// Loop 111 fix #4: BE armed değilse trailing stop yansıtılmaz (BE move
+    /// trailing'i "arm" eder). Peak yine güncellenir AMA StopPrice null/değişmez.
+    /// </summary>
+    [Fact]
+    public void UpdatePeakAndCheckTrailing_LongBeNotArmed_DoesNotAdvanceStopPrice()
+    {
+        var pos = OpenLong(entry: 100m, initialStop: 99m);  // BE move yapılmadı
+        pos.BreakEvenAppliedAt.Should().BeNull();
+
+        pos.UpdatePeakAndCheckTrailing(102.5m, 0.003m, T0.AddMinutes(15));
+
+        pos.ExtremeMarkPrice.Should().Be(102.5m, "peak yine güncellenir");
+        pos.StopPrice.Should().Be(99m, "BE armed değilse stop değişmez");
+    }
+
+    /// <summary>
+    /// Loop 111 fix #4: Short trough ilerlediğinde StopPrice aşağı taşınır
+    /// (trough × (1 + trailPct)). BE armed sonrası.
+    /// </summary>
+    [Fact]
+    public void UpdatePeakAndCheckTrailing_ShortNewTrough_BeArmed_AdvancesStopPriceDown()
+    {
+        // Short entry=100, BE move stop'u 99.90'a indirdi (entry × 0.999).
+        var pos = Position.Open(
+            Symbol.From("BTCUSDT"),
+            TradeDirection.Short,
+            quantity: 0.01m,
+            entryPrice: 100m,
+            stopPrice: 101m,
+            strategyId: 1,
+            mode: TradingMode.Paper,
+            now: T0);
+        pos.MoveStopToBreakEven(99.90m, T0.AddSeconds(60));
+        pos.StopPrice.Should().Be(99.90m);
+
+        // İlk tick: trough=98.0 (sentinel 0 ⇒ mark trough'a yatırılır).
+        // newStop = 98.0 × 1.003 = 98.294.
+        var result = pos.UpdatePeakAndCheckTrailing(98.0m, 0.003m, T0.AddMinutes(15));
+
+        result.Should().Be(TrailingResult.PeakUpdated);
+        pos.ExtremeMarkPrice.Should().Be(98.0m);
+        pos.StopPrice.Should().Be(98.0m * 1.003m,
+            "Loop 111: Short trough ilerleyince trailing stop aşağı taşınır");
+    }
+
+    /// <summary>
+    /// Loop 111 fix #4: Short trough geri YUKARI çıkarsa (trough'tan uzaklaşma)
+    /// StopPrice asla yukarı çekilmez (regression guard — BE move'dan kalan
+    /// daha düşük stop korunur).
+    /// </summary>
+    [Fact]
+    public void UpdatePeakAndCheckTrailing_ShortTroughReverts_StopPriceNeverWidens()
+    {
+        var pos = Position.Open(
+            Symbol.From("BTCUSDT"),
+            TradeDirection.Short,
+            quantity: 0.01m,
+            entryPrice: 100m,
+            stopPrice: 101m,
+            strategyId: 1,
+            mode: TradingMode.Paper,
+            now: T0);
+        pos.MoveStopToBreakEven(99.90m, T0.AddSeconds(60));
+        pos.UpdatePeakAndCheckTrailing(98.0m, 0.003m, T0.AddMinutes(15));  // trough=98, stop=98.294
+        var tightStop = pos.StopPrice;
+
+        // mark 98.5 — trough'tan uzaklaştı. trough refresh OLMAZ, stop da değişmez.
+        pos.UpdatePeakAndCheckTrailing(98.5m, 0.003m, T0.AddMinutes(20));
+
+        pos.ExtremeMarkPrice.Should().Be(98.0m, "trough yatık kalır");
+        pos.StopPrice.Should().Be(tightStop, "stop asla yukarı çekilmez");
+    }
 }
