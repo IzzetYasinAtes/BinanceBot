@@ -212,6 +212,11 @@ public sealed class SwingTradeEvaluator : IStrategyEvaluator
         }
 
         // ContextJson — audit için emit kararının matematiksel kanıtı.
+        // maxHoldMinutes (CamelCase: maxHoldMinutes — OrderFilledPositionHandler bu
+        // key'i okuyup Position.MaxHoldDuration set eder; MaxHoldHours × 60 dakika.
+        // timeExitMinProfitPct: MarkToMarketWorker yeni dal "profitable time-exit"
+        // hold süresi dolduğunda + UPnl pozitif eşik üzerindeyse close eder.
+        var maxHoldMinutes = options.MaxHoldHours * 60;
         var ctx = new SwingTradeContext(
             Type: "swing-trade",
             Direction: direction.Value.ToString(),
@@ -227,6 +232,8 @@ public sealed class SwingTradeEvaluator : IStrategyEvaluator
             TakeProfit: takeProfit,
             SlAtrMultiplier: options.SlAtrMultiplier,
             TpAtrMultiplier: options.TpAtrMultiplier,
+            MaxHoldMinutes: maxHoldMinutes,
+            TimeExitMinProfitPct: options.TimeExitMinProfitPct,
             BarOpenTime: lastBar.OpenTime,
             BarCloseTime: lastBar.CloseTime);
         var ctxJson = JsonSerializer.Serialize(ctx);
@@ -252,23 +259,34 @@ public sealed class SwingTradeEvaluator : IStrategyEvaluator
 
     /// <summary>
     /// Emit kararının audit payload'ı. <see cref="StrategyEvaluation.ContextJson"/>
-    /// içine serialize edilir; UI ContextJson okur, emit nedenini insanca gösterir.
+    /// içine serialize edilir; OrderFilledPositionHandler maxHoldMinutes alanını
+    /// okuyup <see cref="BinanceBot.Domain.Positions.Position.MaxHoldDuration"/>
+    /// set eder. UI ContextJson okur, emit nedenini insanca gösterir.
+    ///
+    /// Property naming JSON çıktısında PascalCase; OrderFilledPositionHandler
+    /// case-insensitive okuduğu için <c>maxHoldMinutes</c> alias'ına gerek yok
+    /// — JsonSerializer default System.Text.Json case-insensitive değildir, ama
+    /// OrderFilledPositionHandler explicit <c>"maxHoldMinutes"</c> property name
+    /// arıyor (camelCase). Bu nedenle sadece property name'i camelCase'e çekmeden
+    /// JsonPropertyName ile camelCase serialize edilmesi gerekir.
     /// </summary>
     private sealed record SwingTradeContext(
-        string Type,
-        string Direction,
-        decimal EmaShort,
-        decimal EmaLong,
-        decimal Rsi,
-        decimal Atr,
-        decimal Volume,
-        decimal VolumeSma,
-        decimal VolumeSurgeMultiplier,
-        decimal Entry,
-        decimal StopPrice,
-        decimal TakeProfit,
-        decimal SlAtrMultiplier,
-        decimal TpAtrMultiplier,
-        DateTimeOffset BarOpenTime,
-        DateTimeOffset BarCloseTime);
+        [property: System.Text.Json.Serialization.JsonPropertyName("type")] string Type,
+        [property: System.Text.Json.Serialization.JsonPropertyName("direction")] string Direction,
+        [property: System.Text.Json.Serialization.JsonPropertyName("emaShort")] decimal EmaShort,
+        [property: System.Text.Json.Serialization.JsonPropertyName("emaLong")] decimal EmaLong,
+        [property: System.Text.Json.Serialization.JsonPropertyName("rsi")] decimal Rsi,
+        [property: System.Text.Json.Serialization.JsonPropertyName("atr")] decimal Atr,
+        [property: System.Text.Json.Serialization.JsonPropertyName("volume")] decimal Volume,
+        [property: System.Text.Json.Serialization.JsonPropertyName("volumeSma")] decimal VolumeSma,
+        [property: System.Text.Json.Serialization.JsonPropertyName("volumeSurgeMultiplier")] decimal VolumeSurgeMultiplier,
+        [property: System.Text.Json.Serialization.JsonPropertyName("entry")] decimal Entry,
+        [property: System.Text.Json.Serialization.JsonPropertyName("stopPrice")] decimal StopPrice,
+        [property: System.Text.Json.Serialization.JsonPropertyName("takeProfit")] decimal TakeProfit,
+        [property: System.Text.Json.Serialization.JsonPropertyName("slAtrMultiplier")] decimal SlAtrMultiplier,
+        [property: System.Text.Json.Serialization.JsonPropertyName("tpAtrMultiplier")] decimal TpAtrMultiplier,
+        [property: System.Text.Json.Serialization.JsonPropertyName("maxHoldMinutes")] int MaxHoldMinutes,
+        [property: System.Text.Json.Serialization.JsonPropertyName("timeExitMinProfitPct")] decimal TimeExitMinProfitPct,
+        [property: System.Text.Json.Serialization.JsonPropertyName("barOpenTime")] DateTimeOffset BarOpenTime,
+        [property: System.Text.Json.Serialization.JsonPropertyName("barCloseTime")] DateTimeOffset BarCloseTime);
 }
