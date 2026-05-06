@@ -16,6 +16,12 @@ public enum StrategyStatus
 ///
 /// Yeni pattern eklemek StrategyType eklemez; <c>IPatternDetector</c>
 /// implementasyonu + DI satırı yeterli (OCP).
+///
+/// Loop 112 — ADR-0027 strateji ailesi pivot. <see cref="PatternComposite"/>
+/// askıya alındı (Status=Paused, kod silinmedi); yeni aile
+/// <see cref="SwingTrade"/> = 4 plug-in <c>IStrategyEvaluator</c> olarak
+/// eklendi. Çoğul evaluator registry desteği zaten vardı (constructor
+/// IEnumerable injection); yeni Type için DI satırı + Strategy seed yeterli.
 /// </summary>
 public enum StrategyType
 {
@@ -27,8 +33,20 @@ public enum StrategyType
     /// <c>WeightedScorePatternComposer</c> ağırlıklı toplam skoru hesaplar,
     /// <c>RequiredScore</c> üstü ⇒ emit. Geometri ATR-bazlı (R:R 1:2,
     /// SL clip [%0.6, %1.2], MaxHold 60dk).
+    ///
+    /// Loop 112 — ADR-0027 ile <c>Strategy.Status=Paused</c>'a alındı;
+    /// kod ve test altyapısı korunur (re-aktivasyon: Status flip yeterli).
     /// </summary>
     PatternComposite = 3,
+
+    /// <summary>
+    /// Loop 112 — SwingTrade (ADR-0027 Aile A). 4h bar kapanışında EMA20/EMA50
+    /// trend + Volume(bar) > VolumeSma(20) × 1.5 + RSI(14) ∈ [40, 65] (Long) /
+    /// [35, 60] (Short) emit kuralları. ATR(14) × 1.5 SL, ATR × 3 TP (R:R 1:2),
+    /// %1+ kar → BE stop, 8h hold + %0.5 kar → time-exit.
+    /// PatternComposite Paused olduğunda DB seed'de bu Type Active.
+    /// </summary>
+    SwingTrade = 4,
 }
 
 public enum StrategySignalDirection
