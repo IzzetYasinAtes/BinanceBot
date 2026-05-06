@@ -222,6 +222,12 @@ public static class DependencyInjection
         services.AddSingleton<IPatternSignalComposer, WeightedScorePatternComposer>();
         services.AddSingleton<IStrategyEvaluator, PatternCompositeEvaluator>();
 
+        // Loop 112 — ADR-0027 Aile A SwingTrade plug-in evaluator. PatternComposite
+        // ile aynı IStrategyEvaluator port'una paralel kayıt; StrategyEvaluatorRegistry
+        // constructor'da IEnumerable inject ile her ikisi de toplanır. Strategy.Type
+        // ile resolve hangi evaluator'ın tetikleneceğini belirler.
+        services.AddSingleton<IStrategyEvaluator, SwingTradeEvaluator>();
+
         services.AddSingleton<StrategyEvaluatorRegistry>();
 
         // Loop 67 KMS — in-memory BookTicker latest cache + WS consumer worker.
