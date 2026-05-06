@@ -526,6 +526,69 @@ public class OrderFilledPositionHandlerTests
     }
 
     /// <summary>
+    /// Loop 111 fix #2 regresyon: Önceki 5 dakika freshness window pullback limit
+    /// emirlerinde fail oluyordu — limit fill 5dk sonra olursa son signal window
+    /// dışında kalır, MaxHoldDuration null set edilir, time-stop devreden çıkar.
+    /// Pos 60dk MaxHold yerine 8h+ açık kalır (Loop 108-110 hipotezi).
+    ///
+    /// Yeni davranış: 24 saat lookback. Signal 30 dakika önce emit edilse bile
+    /// MaxHoldDuration doğru set edilir.
+    /// </summary>
+    [Fact]
+    public async Task Fill_ReadsMaxHoldMinutes_EvenWhenSignalIsOlderThan5Minutes()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var (scopeFactory, db) = BuildHarness(now);
+
+        SeedFilledOrder(db, cid: "loop111-stale-signal", strategyId: 50,
+            qty: 0.001m, fillPrice: 30000m, now: now);
+        // Signal 30 dakika önce emit edildi (eski 5 dakika window'unun çok dışında).
+        SeedSignal(db, strategyId: 50,
+            contextJson: "{\"maxHoldMinutes\":60}",
+            emittedAt: now.AddMinutes(-30));
+
+        var sut = new OrderFilledPositionHandler(
+            scopeFactory, new FixedClock(now),
+            NullLogger<OrderFilledPositionHandler>.Instance);
+
+        await sut.Handle(new OrderFilledEvent(
+            "loop111-stale-signal", "BTCUSDT", 0.001m, 30m, TradingMode.Paper),
+            CancellationToken.None);
+
+        db.Positions.Single().MaxHoldDuration
+            .Should().Be(TimeSpan.FromMinutes(60),
+                "Loop 111: 24 saat lookback ile signal 30 dk eski olsa bile MaxHoldDuration set edilir");
+    }
+
+    /// <summary>
+    /// Loop 111 fix #2: 24 saat lookback'in üst sınırı. Signal 25 saat önce
+    /// (defensive bound dışı) — MaxHoldDuration null kalır, time-stop devre dışı.
+    /// </summary>
+    [Fact]
+    public async Task Fill_LeavesMaxHoldNull_WhenSignalOlderThan24Hours()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var (scopeFactory, db) = BuildHarness(now);
+
+        SeedFilledOrder(db, cid: "loop111-too-old", strategyId: 51,
+            qty: 0.001m, fillPrice: 30000m, now: now);
+        SeedSignal(db, strategyId: 51,
+            contextJson: "{\"maxHoldMinutes\":60}",
+            emittedAt: now.AddHours(-25));
+
+        var sut = new OrderFilledPositionHandler(
+            scopeFactory, new FixedClock(now),
+            NullLogger<OrderFilledPositionHandler>.Instance);
+
+        await sut.Handle(new OrderFilledEvent(
+            "loop111-too-old", "BTCUSDT", 0.001m, 30m, TradingMode.Paper),
+            CancellationToken.None);
+
+        db.Positions.Single().MaxHoldDuration.Should().BeNull(
+            "24 saat lookback dışında signal sızmasın");
+    }
+
+    /// <summary>
     /// Loop 94 Fix #3 — Short close negatif PnL ile. Short entry $30000, exit
     /// $30200 ⇒ gross = (30000 - 30200) × 0.01 = -$2 (zarar). Wallet -= 2,
     /// margin geri döner.

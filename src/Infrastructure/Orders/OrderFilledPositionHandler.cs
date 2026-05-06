@@ -87,21 +87,30 @@ public sealed class OrderFilledPositionHandler : INotificationHandler<OrderFille
         // ADR-0014 §14.5 + ADR-0017 §17.7 + decision-pattern-reform.md C9 (option B):
         // the evaluator's max-hold budget travels in StrategySignal.ContextJson (the
         // Order schema doesn't carry it). Look up the most recent signal for the same
-        // (symbol, strategy) within a 5-minute freshness window and decode one of:
+        // (symbol, strategy) and decode one of:
         //   - <c>maxHoldMinutes</c> (ADR-0016 VWAP-EMA V2 — preferred)
         //   - <c>maxHoldBars</c>    (ADR-0014 pattern scalping — 1 bar = 1 minute)
         // Both alternatives are accepted so the handler is forward- and backward-
         // compatible across the pattern -> VWAP-EMA transition (Loop 21 regression).
         // When neither key is present Position.MaxHoldDuration stays null and the
         // time stop branch of the monitor is inert.
+        //
+        // Loop 111 fix (Bug #2): Önceki 5dk freshness window pullback limit emirleri
+        // (ADR-0026 §A) için fail oluyordu — limit fill 5dk sonra olursa son signal
+        // window dışında kalır, MaxHoldDuration null set edilir, time-stop devreden
+        // çıkar. Pos 60dk MaxHold yerine 8h+ açık kalır (Loop 108-110 hipotezi).
+        // Çözüm: window kaldırıldı; en son aynı (symbol, strategy) signal kullanılır,
+        // order CreatedAt'a kadar geri arama. Lookback 24 saatle sınırlanır (defensive
+        // upper bound — eski iterasyon signal'ı sızmasın).
         TimeSpan? maxHoldDuration = null;
         if (order.StrategyId is long sid)
         {
-            var freshnessCutoff = now.AddMinutes(-5);
+            // 24 saatlik defensive lookback — paper iteration sınırı.
+            var lookbackCutoff = now.AddHours(-24);
             var lastSignal = await db.StrategySignals.AsNoTracking()
                 .Where(s => s.Symbol == order.Symbol
                     && s.StrategyId == sid
-                    && s.EmittedAt >= freshnessCutoff)
+                    && s.EmittedAt >= lookbackCutoff)
                 .OrderByDescending(s => s.EmittedAt)
                 .FirstOrDefaultAsync(cancellationToken);
 
