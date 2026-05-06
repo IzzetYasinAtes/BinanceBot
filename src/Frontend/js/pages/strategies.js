@@ -48,7 +48,11 @@ const App = {
                             <div class="t-body">
                                 <div class="kv">
                                     <div class="k">Tip</div>
-                                    <div class="v">{{ s.type }}</div>
+                                    <div class="v">
+                                        <span class="badge" :class="typeBadge(s.type)">
+                                            {{ typeLabel(s.type) }}
+                                        </span>
+                                    </div>
                                 </div>
                                 <div class="kv">
                                     <div class="k">Oluşturuldu</div>
@@ -148,7 +152,26 @@ const App = {
             return "closed";
         }
 
-        return { listPoll, signalsPoll, strategies, signals, statusLabel, statusBadge, fmt };
+        // Loop 112 — ADR-0027 strateji ailesi pivot. PatternComposite Paused,
+        // yeni Aile A SwingTrade Active. Type kolonu badge ile vurgulu render.
+        function typeLabel(t) {
+            const map = {
+                PatternComposite: "PATTERN",
+                SwingTrade: "SWING 4H",
+            };
+            return map[t] || t;
+        }
+        function typeBadge(t) {
+            if (t === "SwingTrade") return "up";       // mavi-yeşil tonu (yeni aktif aile)
+            if (t === "PatternComposite") return "warn"; // sarı (paused)
+            return "muted";
+        }
+
+        return {
+            listPoll, signalsPoll, strategies, signals,
+            statusLabel, statusBadge, typeLabel, typeBadge,
+            fmt,
+        };
     },
 };
 
