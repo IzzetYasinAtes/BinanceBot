@@ -146,6 +146,12 @@ public sealed class FuturesWsSupervisor : BackgroundService, IWsReadinessProbe
         public async Task RunAsync(CancellationToken cancellationToken, Action<WsSupervisorState> setState)
         {
             var url = BuildStreamUrl();
+            // Loop 112 — explicit interval/symbol roster log so we can verify a config
+            // reload (e.g. adding "4h") actually took effect on the next reconnect.
+            _logger.LogInformation(
+                "WS subscribing symbols=[{Symbols}] klineIntervals=[{Intervals}]",
+                string.Join(",", _options.Symbols),
+                string.Join(",", _options.KlineIntervals));
             _logger.LogInformation("Connecting WS {Url}", url);
 
             await _socket.ConnectAsync(new Uri(url), cancellationToken);

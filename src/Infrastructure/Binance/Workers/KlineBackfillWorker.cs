@@ -138,8 +138,9 @@ public sealed class KlineBackfillWorker : IHostedService
         var limit = options.BackfillLimit;
 
         _logger.LogInformation(
-            "Kline backfill starting: {SymbolCount} symbol(s) x {IntervalCount} interval(s), limit={Limit}",
-            symbols.Length, intervals.Length, limit);
+            "Kline backfill starting: {SymbolCount} symbol(s) x {IntervalCount} interval(s) " +
+            "[{Intervals}], limit={Limit}",
+            symbols.Length, intervals.Length, string.Join(",", intervals), limit);
 
         foreach (var symbol in symbols)
         {
