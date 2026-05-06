@@ -172,6 +172,14 @@ public sealed class MarkToMarketWorker : BackgroundService
             // Loop 109 — defansif safety net (SL hit redundancy, TP hit redundancy,
             // hard max-hold). Primary path'lar yetmediği durumda ikinci hat.
             TryQueueSafetyExit(position, mid, safetyOpts, clock.UtcNow, safetyExits);
+
+            // Loop 112 — ADR-0027 Aile A SwingTrade profitable time-exit.
+            // MaxHoldDuration set + age >= MaxHoldDuration + UPnl >= entry × %0.5
+            // ⇒ realize the profit erken (StopLossMonitorService time-stop'tan
+            // önce). Hala hold cap aşılmazsa pozisyon TP/SL/trailing'e bağlı.
+            // Hard MaxHold safety net commit 8'de 12h olarak ayarlandı; bu dal
+            // 8h boundary'sinde kar varsa close — TP'yi beklemez.
+            TryQueueSwingProfitableTimeExit(position, mid, clock.UtcNow, safetyExits);
         }
 
         if (dirty > 0)
@@ -539,6 +547,57 @@ public sealed class MarkToMarketWorker : BackgroundService
                 exits.Add((position, markPrice, reason, cidPrefix));
             }
         }
+    }
+
+    /// <summary>
+    /// Loop 112 — ADR-0027 Aile A SwingTrade profitable time-exit.
+    /// Pos.MaxHoldDuration set ve age MaxHoldDuration'a ulaştığında, UPnl
+    /// pozitif eşik üstündeyse erken kapat. binance-expert §7 spec:
+    /// "2× 4h bar geçti + %0.5 karda ise kapat".
+    ///
+    /// <para>
+    /// Mevcut StopLossMonitorService time-stop dalı pos'u age &gt; MaxHoldDuration
+    /// olduğunda kar dikkate almadan kapatır. Bu dal MaxHoldDuration boundary'sinde
+    /// "kar varsa kapat" mantığını ekler — TP henüz isabetsiz olsa bile kazancı
+    /// realize et. Boundary altındaysa zaman dolmamış, no-op.
+    /// </para>
+    ///
+    /// <para>
+    /// Sabit eşik %0.5 (Loop 112 SwingTrade tek aktif aile). Per-strategy override
+    /// gerekirse SwingTrade signal ContextJson'unu Position'a propagate eden alan
+    /// eklenir (Loop 113+ yeniden değerlendir).
+    /// </para>
+    /// </summary>
+    private const decimal SwingProfitableTimeExitPct = 0.005m;
+
+    private void TryQueueSwingProfitableTimeExit(
+        Position position,
+        decimal markPrice,
+        DateTimeOffset asOf,
+        List<(Position pos, decimal markPrice, string reason, string cidPrefix)> exits)
+    {
+        if (position.MaxHoldDuration is not TimeSpan dur) return;
+
+        var age = asOf - position.OpenedAt;
+        if (age < dur) return;
+
+        // UPnl percentage (entry'ye göre). Long: (mark-entry)/entry; Short tersi.
+        // Position.UnrealizedPnl mutlak USDT; sermaye-yüzde için entry × qty
+        // notional'a böl. Daha temiz: direct mark/entry karşılaştırması.
+        var entry = position.AverageEntryPrice;
+        if (entry <= 0m) return;
+
+        decimal upnlPct = position.Direction == TradeDirection.Long
+            ? (markPrice - entry) / entry
+            : (entry - markPrice) / entry;
+
+        if (upnlPct < SwingProfitableTimeExitPct) return;
+
+        var cidPrefix = $"safe-pte-{position.Id}-{asOf.ToUnixTimeSeconds()}";
+        var reason =
+            $"swing_profitable_time_exit@{markPrice:F4}_age={(int)age.TotalMinutes}min_" +
+            $"upnlPct={upnlPct:P3}_threshold={SwingProfitableTimeExitPct:P3}";
+        exits.Add((position, markPrice, reason, cidPrefix));
     }
 
     /// <summary>
